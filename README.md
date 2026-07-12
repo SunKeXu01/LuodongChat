@@ -74,6 +74,9 @@ The WPF preview verifies the gateway, previews managed configuration changes, cr
 
 Every push to `main` runs gateway and .NET tests and creates a Windows x64 self-contained preview package:
 
+- For normal downloads, open [Releases](https://github.com/SunKeXu01/ChatGPTConnector/releases) and download the ZIP attached to the latest preview release.
+- For development builds, use the Actions artifact steps below.
+
 1. Open the repository's **Actions** page and select the latest successful **Build and test** run.
 2. Download the `ChatGPTConnector-0.1.0-preview.1-win-x64` artifact.
 3. Extract the artifact, verify the included ZIP with its `.sha256` file, then extract the ZIP.
