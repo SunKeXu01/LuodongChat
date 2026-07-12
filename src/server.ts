@@ -7,6 +7,7 @@ import {
   extractBearerKey,
   hashGatewayKey,
   StaticGatewayKeyVerifier,
+  verifyGatewayKey,
   type GatewayKeyLimitProvider,
   type GatewayKeyVerifier,
 } from "./auth.js";
@@ -15,6 +16,8 @@ import { InMemoryLimiter, type RequestLimiter } from "./limiter.js";
 import { InMemoryRequestLedger, type RequestLedger } from "./ledger.js";
 import { UpstreamPool } from "./upstream-pool.js";
 import { createRuntimeDependencies } from "./runtime.js";
+import type { AdminRepository } from "./admin.js";
+import { ADMIN_HTML, ADMIN_JS } from "./admin-assets.js";
 
 const MAX_REQUEST_BYTES = 10 * 1024 * 1024;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
@@ -62,6 +65,7 @@ export interface GatewayServerOptions {
   limiter?: RequestLimiter;
   keyVerifier?: GatewayKeyVerifier;
   keyLimitProvider?: GatewayKeyLimitProvider;
+  adminRepository?: AdminRepository;
 }
 
 export function createGatewayServer(config: GatewayConfig, options: GatewayServerOptions = {}) {
@@ -86,6 +90,31 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
         "x-frame-options": "DENY",
       });
       return res.end(LANDING_PAGE);
+    }
+    const adminEnabled = (config.adminKeyHashes?.size ?? 0) > 0 && options.adminRepository;
+    if (req.method === "GET" && req.url === "/admin" && adminEnabled) {
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+        "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "referrer-policy": "no-referrer",
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY",
+      });
+      return res.end(ADMIN_HTML);
+    }
+    if (req.method === "GET" && req.url === "/admin/app.js" && adminEnabled) {
+      res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
+      return res.end(ADMIN_JS);
+    }
+    if (req.method === "GET" && req.url?.startsWith("/admin/api/") && adminEnabled) {
+      const adminKey = extractBearerKey(req.headers.authorization);
+      if (!adminKey || !verifyGatewayKey(adminKey, config.adminKeyHashes ?? new Set())) {
+        return json(res, 401, { error: { code: "invalid_admin_key", message: "Administrator key is invalid" } });
+      }
+      res.setHeader("cache-control", "no-store");
+      if (req.url === "/admin/api/summary") return json(res, 200, await options.adminRepository!.getSummary());
+      if (req.url === "/admin/api/keys") return json(res, 200, await options.adminRepository!.listKeys());
     }
     const isResponsesRoute = req.url === "/responses" || req.url === "/v1/responses";
     if (req.method !== "POST" || !isResponsesRoute) {

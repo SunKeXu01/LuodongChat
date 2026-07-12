@@ -5,6 +5,7 @@ export interface GatewayConfig {
   upstreamApiKeys: readonly string[];
   upstreamResponsesPath: string;
   gatewayKeyHashes: ReadonlySet<string>;
+  adminKeyHashes?: ReadonlySet<string>;
   requestsPerMinute: number;
   maxConcurrentRequests: number;
   upstreamTimeoutMs: number;
@@ -40,6 +41,12 @@ export function loadConfig(): GatewayConfig {
   if (gatewayKeyHashes.size === 0) {
     throw new Error("GATEWAY_KEY_HASHES must contain at least one SHA-256 hash");
   }
+  const adminKeyHashes = new Set(
+    (process.env.ADMIN_KEY_HASHES ?? "")
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter((value) => /^[a-f\d]{64}$/.test(value)),
+  );
 
   return {
     port: positiveInteger("PORT", 8787),
@@ -48,6 +55,7 @@ export function loadConfig(): GatewayConfig {
     upstreamApiKeys,
     upstreamResponsesPath,
     gatewayKeyHashes,
+    adminKeyHashes,
     requestsPerMinute: positiveInteger("REQUESTS_PER_MINUTE", 30),
     maxConcurrentRequests: positiveInteger("MAX_CONCURRENT_REQUESTS", 2),
     upstreamTimeoutMs: positiveInteger("UPSTREAM_TIMEOUT_MS", 300_000),

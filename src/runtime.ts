@@ -10,12 +10,14 @@ import {
   type GatewayKeyLimitProvider,
   type GatewayKeyVerifier,
 } from "./auth.js";
+import { PostgresAdminRepository, type AdminRepository } from "./admin.js";
 
 export interface RuntimeDependencies {
   ledger?: RequestLedger;
   limiter?: RequestLimiter;
   keyVerifier?: GatewayKeyVerifier;
   keyLimitProvider?: GatewayKeyLimitProvider;
+  adminRepository?: AdminRepository;
   close(): Promise<void>;
 }
 
@@ -25,6 +27,7 @@ export async function createRuntimeDependencies(config: GatewayConfig): Promise<
   let limiter: RequestLimiter | undefined;
   let keyVerifier: GatewayKeyVerifier | undefined;
   let keyLimitProvider: GatewayKeyLimitProvider | undefined;
+  let adminRepository: AdminRepository | undefined;
 
   if (process.env.DATABASE_URL) {
     const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 10 });
@@ -32,6 +35,7 @@ export async function createRuntimeDependencies(config: GatewayConfig): Promise<
     ledger = new PostgresRequestLedger(pool as SqlClient);
     keyVerifier = new PostgresGatewayKeyVerifier(pool, new StaticGatewayKeyVerifier(config.gatewayKeyHashes));
     keyLimitProvider = new PostgresGatewayKeyLimitProvider(pool, config.requestsPerMinute, config.maxConcurrentRequests);
+    adminRepository = new PostgresAdminRepository(pool);
     closers.push(async () => { await pool.end(); });
   }
 
@@ -48,6 +52,7 @@ export async function createRuntimeDependencies(config: GatewayConfig): Promise<
     limiter,
     keyVerifier,
     keyLimitProvider,
+    adminRepository,
     close: async () => {
       for (const close of closers.reverse()) await close();
     },

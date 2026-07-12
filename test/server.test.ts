@@ -84,6 +84,42 @@ test("serves a safe public landing page", async (t) => {
   assert.match(await response.text(), /ChatGPT 连接器/);
 });
 
+test("protects the read-only admin dashboard API with a separate key", async (t) => {
+  const adminKey = "admin_test_secret";
+  const config: GatewayConfig = {
+    port: 0,
+    upstreamBaseUrl: "http://127.0.0.1:1",
+    upstreamApiKey: "unused",
+    upstreamApiKeys: ["unused"],
+    upstreamResponsesPath: "/responses",
+    gatewayKeyHashes: new Set([hashGatewayKey("gw_test_secret")]),
+    adminKeyHashes: new Set([hashGatewayKey(adminKey)]),
+    requestsPerMinute: 10,
+    maxConcurrentRequests: 2,
+    upstreamTimeoutMs: 100,
+  };
+  const adminRepository = {
+    getSummary: async () => ({ requestsToday: 4, completedToday: 3, failedToday: 1, activeKeys: 2 }),
+    listKeys: async () => [],
+  };
+  const gateway = createGatewayServer(config, { adminRepository });
+  const gatewayPort = await listen(gateway);
+  t.after(() => gateway.close());
+
+  const page = await fetch(`http://127.0.0.1:${gatewayPort}/admin`);
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get("content-security-policy") ?? "", /script-src 'self'/);
+
+  const unauthorized = await fetch(`http://127.0.0.1:${gatewayPort}/admin/api/summary`);
+  assert.equal(unauthorized.status, 401);
+  const authorized = await fetch(`http://127.0.0.1:${gatewayPort}/admin/api/summary`, {
+    headers: { authorization: `Bearer ${adminKey}` },
+  });
+  assert.equal(authorized.status, 200);
+  assert.deepEqual(await authorized.json(), { requestsToday: 4, completedToday: 3, failedToday: 1, activeKeys: 2 });
+  assert.equal(authorized.headers.get("cache-control"), "no-store");
+});
+
 test("isolates a rejected credential and fails over before streaming", async (t) => {
   const seenCredentials: string[] = [];
   const upstream = createServer(async (req, res) => {
