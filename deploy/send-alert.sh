@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-subject="${1:-ChatGPT Connector alert}"
+subject="${1:-ChatGPT Connector 告警}"
 cooldown_key="${2:-generic}"
 cooldown_seconds="${ALERT_COOLDOWN_SECONDS:-3600}"
 state_dir="/var/lib/chatgpt-connector/alerts"

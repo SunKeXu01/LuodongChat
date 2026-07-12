@@ -23,10 +23,12 @@ FROM candidate WHERE request.id = candidate.id RETURNING request.id;")"
 
 rollback_failed() {
   status=$?
-  psql_command -v request_id="$request_id" -v message="Rollback failed with exit status $status" -c \
-    "UPDATE deployment_control_requests SET status = 'failed', processed_at = now(), error_message = :'message' WHERE id = :'request_id'::uuid;" >/dev/null || true
-  printf 'Rollback request %s failed on %s.\n' "$request_id" "$(hostname)" \
-    | "$APP_DIR/deploy/send-alert.sh" "ChatGPT Connector rollback failed" "rollback" || true
+  psql_command -v request_id="$request_id" -v message="回滚失败，退出状态 $status" >/dev/null <<'SQL' || true
+UPDATE deployment_control_requests SET status = 'failed', processed_at = now(), error_message = :'message'
+WHERE id = :'request_id'::uuid;
+SQL
+  printf 'ChatGPT Connector 回滚失败。\n请求：%s\n服务器：%s\n时间：%s\n' "$request_id" "$(hostname)" "$(date --iso-8601=seconds)" \
+    | "$APP_DIR/deploy/send-alert.sh" "ChatGPT Connector 回滚失败" "rollback" || true
   exit "$status"
 }
 trap rollback_failed ERR
@@ -47,9 +49,10 @@ done
 [[ "$healthy" == true ]]
 curl --fail --silent --show-error --max-time 15 https://520skx.com/healthz >/dev/null
 
-psql_command -v request_id="$request_id" -v deployed_image="$rollback_image" -v previous_image="$current_image" -c \
-  "UPDATE deployment_control_requests SET status = 'completed', processed_at = now() WHERE id = :'request_id'::uuid;
-   INSERT INTO deployment_history (git_sha, status, previous_image, deployed_image, completed_at, details)
-   VALUES ('rollback', 'rolled_back', :'previous_image', :'deployed_image', now(), jsonb_build_object('requestId', :'request_id'));" >/dev/null
+psql_command -v request_id="$request_id" -v deployed_image="$rollback_image" -v previous_image="$current_image" >/dev/null <<'SQL'
+UPDATE deployment_control_requests SET status = 'completed', processed_at = now() WHERE id = :'request_id'::uuid;
+INSERT INTO deployment_history (git_sha, status, previous_image, deployed_image, completed_at, details)
+VALUES ('rollback', 'rolled_back', :'previous_image', :'deployed_image', now(), jsonb_build_object('requestId', :'request_id'));
+SQL
 
 printf 'Rollback request %s completed successfully.\n' "$request_id"

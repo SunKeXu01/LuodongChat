@@ -3,4 +3,4 @@ Description=Send ChatGPT Connector failure alert for %i
 
 [Service]
 Type=oneshot
-ExecStart=/bin/bash -c 'journalctl -u %i -n 80 --no-pager | /app/chatgpt_connector/deploy/send-alert.sh "ChatGPT Connector service failure: %i" "%i"'
+ExecStart=/bin/bash -c '{ printf "ChatGPT Connector 服务失败。\n服务：%i\n\n最近日志：\n"; journalctl -u %i -n 80 --no-pager; } | /app/chatgpt_connector/deploy/send-alert.sh "ChatGPT Connector 服务失败：%i" "%i"'

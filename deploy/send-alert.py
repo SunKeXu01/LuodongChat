@@ -19,8 +19,8 @@ def load_env(path: str) -> dict[str, str]:
 
 
 config = load_env(os.environ.get("ALERT_ENV_FILE", "/etc/chatgpt-connector/alert.env"))
-subject = sys.argv[1] if len(sys.argv) > 1 else "ChatGPT Connector alert"
-body = sys.stdin.read().strip() or "No additional details were provided."
+subject = sys.argv[1] if len(sys.argv) > 1 else "ChatGPT Connector 告警"
+body = sys.stdin.read().strip() or "没有提供更多故障详情。"
 
 message = email.message.EmailMessage()
 message["From"] = config["SMTP_FROM"]
