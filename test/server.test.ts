@@ -106,6 +106,7 @@ test("protects the read-only admin dashboard API with a separate key", async (t)
     createKey: async (_input: unknown, _hash: string, prefix: string, actor: string) => { createdKeys.push({ prefix, actor }); },
     updateQuota: async () => true,
     revokeKey: async () => true,
+    recordLogin: async () => undefined,
   };
   const gateway = createGatewayServer(config, { adminRepository });
   const gatewayPort = await listen(gateway);

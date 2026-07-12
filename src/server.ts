@@ -18,6 +18,7 @@ import { UpstreamPool } from "./upstream-pool.js";
 import { createRuntimeDependencies } from "./runtime.js";
 import type { AdminRepository } from "./admin.js";
 import { ADMIN_HTML, ADMIN_JS } from "./admin-assets.js";
+import { AdminLoginGuard } from "./admin-security.js";
 
 const MAX_REQUEST_BYTES = 10 * 1024 * 1024;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
@@ -84,6 +85,7 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
   const upstreamPool = new UpstreamPool(config.upstreamApiKeys);
   const ledger = options.ledger ?? new InMemoryRequestLedger();
   const keyVerifier = options.keyVerifier ?? new StaticGatewayKeyVerifier(config.gatewayKeyHashes);
+  const adminLoginGuard = new AdminLoginGuard();
 
   return createServer(async (req, res) => {
     const requestId = req.headers["x-request-id"]?.toString() || randomUUID();
@@ -120,8 +122,28 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
     }
     if (req.url?.startsWith("/admin/api/") && adminEnabled) {
       const adminKey = extractBearerKey(req.headers.authorization);
+      const clientAddress = req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim()
+        || req.socket.remoteAddress || "unknown";
+      const ipFingerprint = hashGatewayKey(clientAddress).slice(0, 16);
+      const retryAfter = adminLoginGuard.retryAfterSeconds(ipFingerprint);
+      if (retryAfter > 0) {
+        res.setHeader("retry-after", String(retryAfter));
+        return json(res, 429, { error: { code: "admin_temporarily_blocked", message: "Too many failed login attempts" } });
+      }
       if (!adminKey || !verifyGatewayKey(adminKey, config.adminKeyHashes ?? new Set())) {
+        const blockedFor = adminLoginGuard.recordFailure(ipFingerprint);
+        await options.adminRepository!.recordLogin(
+          false, adminKey ? hashGatewayKey(adminKey).slice(0, 16) : "missing", ipFingerprint,
+        ).catch(() => undefined);
+        if (blockedFor > 0) res.setHeader("retry-after", String(blockedFor));
         return json(res, 401, { error: { code: "invalid_admin_key", message: "Administrator key is invalid" } });
+      }
+      if (req.method === "POST" && req.url === "/admin/api/session") {
+        adminLoginGuard.recordSuccess(ipFingerprint);
+        const actorFingerprint = hashGatewayKey(adminKey).slice(0, 16);
+        await options.adminRepository!.recordLogin(true, actorFingerprint, ipFingerprint);
+        res.setHeader("cache-control", "no-store");
+        return json(res, 200, { status: "authenticated", expiresInSeconds: 900 });
       }
       res.setHeader("cache-control", "no-store");
       if (req.method === "GET" && req.url === "/admin/api/summary") return json(res, 200, await options.adminRepository!.getSummary());

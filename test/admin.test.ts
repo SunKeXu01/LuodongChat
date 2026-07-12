@@ -44,6 +44,8 @@ test("writes key changes and audit metadata in one statement", async () => {
   assert.equal(await repository.updateQuota("gw_12345678", { dailyLimit: 200, requestsPerMinute: 20, maxConcurrentRequests: 1 }, "actor123"), true);
   assert.equal(await repository.revokeKey("gw_12345678", "actor123"), true);
   assert.match(calls[2]?.sql ?? "", /key_revoked/);
+  await repository.recordLogin(false, "actor123", "ip123");
+  assert.equal(calls[3]?.values?.includes("login_failed"), true);
 });
 
 test("maps hourly, error, and audit metadata", async () => {

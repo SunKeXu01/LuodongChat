@@ -28,6 +28,7 @@ export interface AdminRepository {
   createKey(input: AdminKeyInput, keyHash: string, keyPrefix: string, actorFingerprint: string): Promise<void>;
   updateQuota(keyPrefix: string, input: AdminQuotaInput, actorFingerprint: string): Promise<boolean>;
   revokeKey(keyPrefix: string, actorFingerprint: string): Promise<boolean>;
+  recordLogin(success: boolean, actorFingerprint: string, ipFingerprint: string): Promise<void>;
 }
 
 export interface AdminQuotaInput {
@@ -180,5 +181,13 @@ export class PostgresAdminRepository implements AdminRepository {
       [keyPrefix, actorFingerprint],
     );
     return (result.rowCount ?? result.rows.length) > 0;
+  }
+
+  async recordLogin(success: boolean, actorFingerprint: string, ipFingerprint: string): Promise<void> {
+    await this.db.query(
+      `INSERT INTO admin_audit_log (actor_fingerprint, action, details)
+       VALUES ($1, $2, jsonb_build_object('ipFingerprint', $3::text))`,
+      [actorFingerprint, success ? "login_succeeded" : "login_failed", ipFingerprint],
+    );
   }
 }
