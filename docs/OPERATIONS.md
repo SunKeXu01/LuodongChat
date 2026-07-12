@@ -13,6 +13,17 @@ docker compose --env-file /app/chatgpt_connector/.env \
 
 Always pass `--env-file`; otherwise Compose substitutes blank values while parsing the deployment file.
 
+## Automated deployment
+
+The `Deploy production` GitHub Actions workflow runs only after a successful `Build and test` workflow on `main`. It checks out the exact tested commit, uses a pinned SSH host key, synchronizes release files while preserving `.env`, and invokes `deploy/remote-deploy.sh`.
+
+The remote deployment takes an exclusive lock, starts a PostgreSQL backup, preserves the previous gateway image, builds the new image, applies migrations under the migration advisory lock, recreates only the gateway, and verifies internal and public health. A failed gateway health check restores the previous application image; forward-only database migrations must remain backward compatible.
+
+Required repository Actions secrets:
+
+- `DEPLOY_SSH_KEY`: dedicated private key used only for production deployment;
+- `DEPLOY_KNOWN_HOSTS`: pinned `known_hosts` entry for the production server.
+
 ## PostgreSQL backups
 
 The backup timer runs daily and writes mode-`600` compressed SQL dumps under `/app/module/backups/postgres`. Backups older than 14 days are removed automatically.
