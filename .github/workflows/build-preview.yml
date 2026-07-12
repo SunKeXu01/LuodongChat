@@ -1,0 +1,63 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gateway:
+    name: Gateway tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm typecheck
+      - run: pnpm build
+
+  core:
+    name: Core tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet test client/ChatGPTConnector.Core.Tests/ChatGPTConnector.Core.Tests.csproj --configuration Release
+
+  windows-preview:
+    name: Windows preview
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Test and publish
+        shell: pwsh
+        run: |
+          dotnet test client/ChatGPTConnector.Core.Tests/ChatGPTConnector.Core.Tests.csproj --configuration Release
+          dotnet publish client/ChatGPTConnector.App/ChatGPTConnector.App.csproj --configuration Release --runtime win-x64 --output artifacts/publish
+          Compress-Archive -Path artifacts/publish/* -DestinationPath artifacts/ChatGPTConnector-0.1.0-preview.1-win-x64.zip
+          (Get-FileHash artifacts/ChatGPTConnector-0.1.0-preview.1-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant() |
+            Set-Content artifacts/ChatGPTConnector-0.1.0-preview.1-win-x64.sha256
+      - uses: actions/upload-artifact@v6
+        with:
+          name: ChatGPTConnector-0.1.0-preview.1-win-x64
+          path: |
+            artifacts/ChatGPTConnector-0.1.0-preview.1-win-x64.zip
+            artifacts/ChatGPTConnector-0.1.0-preview.1-win-x64.sha256
+          if-no-files-found: error
+          retention-days: 14

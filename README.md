@@ -1,6 +1,6 @@
 # ChatGPT Connector
 
-ChatGPT Connector is currently in technical validation. The repository contains the product requirements and a minimal Codex-oriented API gateway prototype.
+ChatGPT Connector is currently in preview validation. The repository contains a Codex-oriented API gateway, its deployment stack, and a Windows desktop configuration client.
 
 ## Implemented prototype
 
@@ -18,7 +18,7 @@ ChatGPT Connector is currently in technical validation. The repository contains 
 - request IDs and metadata-only logs
 - `GET /healthz` health check
 
-This is not production-ready. The PostgreSQL runtime adapter, Redis limits, encrypted upstream credential service, accounting reconciliation, multi-provider routing, and the Windows client are still pending.
+The deployed preview includes PostgreSQL request metadata, Redis-backed distributed limits, upstream credential failover, and a Windows client. It is not yet a signed production release; accounting reconciliation, multi-provider routing, automatic updates, and broader Windows compatibility testing remain pending.
 
 ## Local development
 
@@ -68,4 +68,15 @@ dotnet test client/ChatGPTConnector.Core.Tests/ChatGPTConnector.Core.Tests.cspro
 dotnet build client/ChatGPTConnector.App/ChatGPTConnector.App.csproj
 ```
 
-The current WPF shell is intentionally non-operational until backup, restore, and connection verification are all wired into the UI.
+The WPF preview verifies the gateway, previews managed configuration changes, creates integrity-checked backups, applies Codex configuration atomically, and restores managed fields with conflict detection.
+
+## Download a Windows preview
+
+Every push to `main` runs gateway and .NET tests and creates a Windows x64 self-contained preview package:
+
+1. Open the repository's **Actions** page and select the latest successful **Build and test** run.
+2. Download the `ChatGPTConnector-0.1.0-preview.1-win-x64` artifact.
+3. Extract the artifact, verify the included ZIP with its `.sha256` file, then extract the ZIP.
+4. Run `ChatGPTConnector.exe` on Windows 10/11 x64.
+
+The preview is unsigned. Windows may identify it as an unrecognized application; only test artifacts downloaded from this repository's own Actions run.
