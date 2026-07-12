@@ -38,6 +38,47 @@ jobs:
           global-json-file: global.json
       - run: dotnet test client/ChatGPTConnector.Core.Tests/ChatGPTConnector.Core.Tests.csproj --configuration Release
 
+  integration:
+    name: PostgreSQL and Redis integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: public.ecr.aws/docker/library/postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+        env:
+          POSTGRES_DB: connector_test
+          POSTGRES_USER: connector
+          POSTGRES_PASSWORD: integration-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U connector -d connector_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 15
+      redis:
+        image: public.ecr.aws/docker/library/redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      INTEGRATION_DATABASE_URL: postgresql://connector:integration-only@127.0.0.1:5432/connector_test
+      INTEGRATION_REDIS_URL: redis://127.0.0.1:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:integration
+
   windows-preview:
     name: Windows preview
     runs-on: windows-latest

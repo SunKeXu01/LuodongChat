@@ -17,8 +17,13 @@ ChatGPT Connector is currently in preview validation. The repository contains a 
 - configuration backup, integrity verification, atomic replacement, and three-way restore primitives
 - request IDs and metadata-only logs
 - `GET /healthz` health check
+- PostgreSQL-backed gateway keys with expiry and per-key quotas
+- Redis-atomic daily, per-minute, and concurrency limits
+- authenticated administration dashboard with audit history and temporary login blocking
+- deployment history, queued host-isolated rollback, daily backups, health monitoring, and Chinese email alerts
+- tested-commit automatic production deployment through a restricted SSH account
 
-The deployed preview includes PostgreSQL request metadata, Redis-backed distributed limits, upstream credential failover, and a Windows client. It is not yet a signed production release; accounting reconciliation, multi-provider routing, automatic updates, and broader Windows compatibility testing remain pending.
+The deployed preview includes PostgreSQL request metadata, Redis-backed distributed limits, upstream credential failover, a secured administration dashboard, automatic deployment and rollback, and a Windows client. It is not yet a signed public release; accounting reconciliation, multi-provider routing, automatic client updates, and broader Windows compatibility testing remain pending.
 
 ## Local development
 
@@ -28,6 +33,7 @@ Requires Node.js 22 or newer and pnpm.
 pnpm install
 cp .env.example .env
 pnpm test
+pnpm test:integration
 pnpm typecheck
 pnpm build
 ```
@@ -60,6 +66,8 @@ When `DATABASE_URL` is set, the gateway verifies PostgreSQL connectivity at star
 Apply pending migrations under a PostgreSQL advisory lock with `pnpm migrate` after building. Each migration name is recorded in `schema_migrations` and will not be applied twice.
 
 Production health checks, daily PostgreSQL backups, retention, and recovery commands are documented in [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
+
+Production image references are pinned by digest. GitHub CI runs unit tests, real PostgreSQL/Redis migration and limiter integration tests, .NET core tests, and a Windows self-contained publish before production deployment is eligible to run.
 
 ## Windows client
 

@@ -41,7 +41,7 @@ services:
         max-file: "3"
 
   postgres:
-    image: public.ecr.aws/docker/library/postgres:17-alpine
+    image: public.ecr.aws/docker/library/postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
     restart: unless-stopped
     mem_limit: 256m
     mem_reservation: 128m
@@ -78,7 +78,7 @@ services:
         max-file: "3"
 
   redis:
-    image: public.ecr.aws/docker/library/redis:7.4-alpine
+    image: public.ecr.aws/docker/library/redis:7.4-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     restart: unless-stopped
     mem_limit: 96m
     mem_reservation: 32m

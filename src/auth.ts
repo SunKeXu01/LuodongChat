@@ -42,7 +42,7 @@ export interface AuthSqlClient {
 export interface GatewayKeyLimits {
   requestsPerMinute: number;
   maxConcurrentRequests: number;
-  dailyLimitExceeded: boolean;
+  dailyLimit: number | null;
 }
 
 export interface GatewayKeyLimitProvider {
@@ -84,10 +84,7 @@ export class PostgresGatewayKeyLimitProvider implements GatewayKeyLimitProvider 
       `SELECT
          COALESCE(key.requests_per_minute, $2::integer) AS requests_per_minute,
          COALESCE(key.max_concurrent_requests, $3::integer) AS max_concurrent_requests,
-         key.daily_request_limit IS NOT NULL AND
-           (SELECT count(*) FROM user_requests request
-            WHERE request.gateway_key_id = key.id
-              AND request.started_at >= date_trunc('day', now())) >= key.daily_request_limit AS daily_limit_exceeded
+         key.daily_request_limit
        FROM gateway_keys AS key
        WHERE key.key_hash = decode($1, 'hex')
        LIMIT 1`,
@@ -98,7 +95,7 @@ export class PostgresGatewayKeyLimitProvider implements GatewayKeyLimitProvider 
     return {
       requestsPerMinute: Number(row.requests_per_minute),
       maxConcurrentRequests: Number(row.max_concurrent_requests),
-      dailyLimitExceeded: row.daily_limit_exceeded === true,
+      dailyLimit: row.daily_request_limit === null ? null : Number(row.daily_request_limit),
     };
   }
 }

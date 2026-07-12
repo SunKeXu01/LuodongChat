@@ -15,7 +15,7 @@ Always pass `--env-file`; otherwise Compose substitutes blank values while parsi
 
 ## Automated deployment
 
-The `Deploy production` GitHub Actions workflow runs only after a successful `Build and test` workflow on `main`. It checks out the exact tested commit, uses a pinned SSH host key, synchronizes release files while preserving `.env`, and invokes `deploy/remote-deploy.sh`.
+The `Deploy production` GitHub Actions workflow runs only after a successful `Build and test` workflow on `main`. It checks out the exact tested commit, uses a pinned SSH host key and the restricted `connector-deploy` account, synchronizes release files while preserving `.env`, and invokes the single allow-listed privileged deployment script through `sudo`.
 
 The remote deployment takes an exclusive lock, starts a PostgreSQL backup, preserves the previous gateway image, builds the new image, applies migrations under the migration advisory lock, recreates only the gateway, and verifies internal and public health. A failed gateway health check restores the previous application image; forward-only database migrations must remain backward compatible.
 

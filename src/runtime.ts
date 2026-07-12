@@ -11,6 +11,7 @@ import {
   type GatewayKeyVerifier,
 } from "./auth.js";
 import { PostgresAdminRepository, type AdminRepository } from "./admin.js";
+import { RedisAdminLoginGuard, type AdminLoginProtector } from "./admin-security.js";
 
 export interface RuntimeDependencies {
   ledger?: RequestLedger;
@@ -18,6 +19,7 @@ export interface RuntimeDependencies {
   keyVerifier?: GatewayKeyVerifier;
   keyLimitProvider?: GatewayKeyLimitProvider;
   adminRepository?: AdminRepository;
+  adminLoginProtector?: AdminLoginProtector;
   close(): Promise<void>;
 }
 
@@ -28,6 +30,7 @@ export async function createRuntimeDependencies(config: GatewayConfig): Promise<
   let keyVerifier: GatewayKeyVerifier | undefined;
   let keyLimitProvider: GatewayKeyLimitProvider | undefined;
   let adminRepository: AdminRepository | undefined;
+  let adminLoginProtector: AdminLoginProtector | undefined;
 
   if (process.env.DATABASE_URL) {
     const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 10 });
@@ -44,6 +47,7 @@ export async function createRuntimeDependencies(config: GatewayConfig): Promise<
     redis.on("error", (error) => console.error(JSON.stringify({ event: "redis_error", error: error.name })));
     await redis.connect();
     limiter = new RedisRequestLimiter(redis as unknown as RedisScriptClient, config.requestsPerMinute, config.maxConcurrentRequests);
+    adminLoginProtector = new RedisAdminLoginGuard(redis as unknown as RedisScriptClient);
     closers.push(async () => { await redis.quit(); });
   }
 
@@ -53,6 +57,7 @@ export async function createRuntimeDependencies(config: GatewayConfig): Promise<
     keyVerifier,
     keyLimitProvider,
     adminRepository,
+    adminLoginProtector,
     close: async () => {
       for (const close of closers.reverse()) await close();
     },

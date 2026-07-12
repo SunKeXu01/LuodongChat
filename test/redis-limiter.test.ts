@@ -23,7 +23,7 @@ test("acquires and idempotently releases a distributed permit", async () => {
     await permit.release();
   }
   assert.equal(redis.calls.length, 2);
-  assert.deepEqual(redis.calls[0]?.keys, ["gateway:{user-hash}:requests", "gateway:{user-hash}:concurrent"]);
+  assert.deepEqual(redis.calls[0]?.keys, ["gateway:{user-hash}:requests", "gateway:{user-hash}:concurrent", "gateway:{user-hash}:daily"]);
   assert.deepEqual(redis.calls[0]?.arguments.slice(0, 3), ["30", "2", "60000"]);
 });
 
@@ -37,7 +37,14 @@ test("maps Redis rate and concurrency rejection codes", async () => {
 test("passes per-key limits to the Redis script", async () => {
   const redis = new FakeRedis([1]);
   const limiter = new RedisRequestLimiter(redis, 30, 2);
-  const permit = await limiter.acquire("custom", { requestsPerMinute: 7, maxConcurrent: 1 });
+  const permit = await limiter.acquire("custom", { requestsPerMinute: 7, maxConcurrent: 1, dailyLimit: 50, now: 0 });
   assert.equal(permit.ok, true);
   assert.deepEqual(redis.calls[0]?.arguments.slice(0, 2), ["7", "1"]);
+  assert.deepEqual(redis.calls[0]?.arguments.slice(4), ["50", "86400000"]);
+});
+
+test("maps the atomic daily quota rejection code", async () => {
+  const redis = new FakeRedis([-3]);
+  const limiter = new RedisRequestLimiter(redis, 30, 2);
+  assert.deepEqual(await limiter.acquire("user", { dailyLimit: 1 }), { ok: false, reason: "daily" });
 });

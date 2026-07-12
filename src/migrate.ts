@@ -23,7 +23,7 @@ export async function runMigrations(databaseUrl: string, directory = "db/migrati
       await client.query("BEGIN");
       try {
         await client.query(sql);
-        await client.query("INSERT INTO schema_migrations (name) VALUES ($1)", [name]);
+        await client.query("INSERT INTO schema_migrations (name) VALUES ($1) ON CONFLICT (name) DO NOTHING", [name]);
         await client.query("COMMIT");
         applied.push(name);
       } catch (error) {

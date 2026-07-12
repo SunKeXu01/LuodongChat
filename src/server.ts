@@ -18,7 +18,7 @@ import { UpstreamPool } from "./upstream-pool.js";
 import { createRuntimeDependencies } from "./runtime.js";
 import type { AdminRepository } from "./admin.js";
 import { ADMIN_HTML, ADMIN_JS } from "./admin-assets.js";
-import { AdminLoginGuard } from "./admin-security.js";
+import { AdminLoginGuard, type AdminLoginProtector } from "./admin-security.js";
 
 const MAX_REQUEST_BYTES = 10 * 1024 * 1024;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
@@ -78,6 +78,7 @@ export interface GatewayServerOptions {
   keyVerifier?: GatewayKeyVerifier;
   keyLimitProvider?: GatewayKeyLimitProvider;
   adminRepository?: AdminRepository;
+  adminLoginProtector?: AdminLoginProtector;
 }
 
 export function createGatewayServer(config: GatewayConfig, options: GatewayServerOptions = {}) {
@@ -85,7 +86,7 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
   const upstreamPool = new UpstreamPool(config.upstreamApiKeys);
   const ledger = options.ledger ?? new InMemoryRequestLedger();
   const keyVerifier = options.keyVerifier ?? new StaticGatewayKeyVerifier(config.gatewayKeyHashes);
-  const adminLoginGuard = new AdminLoginGuard();
+  const adminLoginGuard = options.adminLoginProtector ?? new AdminLoginGuard();
 
   return createServer(async (req, res) => {
     const requestId = req.headers["x-request-id"]?.toString() || randomUUID();
@@ -122,16 +123,16 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
     }
     if (req.url?.startsWith("/admin/api/") && adminEnabled) {
       const adminKey = extractBearerKey(req.headers.authorization);
-      const clientAddress = req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim()
+      const clientAddress = req.headers["x-real-ip"]?.toString().trim()
         || req.socket.remoteAddress || "unknown";
       const ipFingerprint = hashGatewayKey(clientAddress).slice(0, 16);
-      const retryAfter = adminLoginGuard.retryAfterSeconds(ipFingerprint);
+      const retryAfter = await adminLoginGuard.retryAfterSeconds(ipFingerprint);
       if (retryAfter > 0) {
         res.setHeader("retry-after", String(retryAfter));
         return json(res, 429, { error: { code: "admin_temporarily_blocked", message: "Too many failed login attempts" } });
       }
       if (!adminKey || !verifyGatewayKey(adminKey, config.adminKeyHashes ?? new Set())) {
-        const blockedFor = adminLoginGuard.recordFailure(ipFingerprint);
+        const blockedFor = await adminLoginGuard.recordFailure(ipFingerprint);
         await options.adminRepository!.recordLogin(
           false, adminKey ? hashGatewayKey(adminKey).slice(0, 16) : "missing", ipFingerprint,
         ).catch(() => undefined);
@@ -139,7 +140,7 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
         return json(res, 401, { error: { code: "invalid_admin_key", message: "Administrator key is invalid" } });
       }
       if (req.method === "POST" && req.url === "/admin/api/session") {
-        adminLoginGuard.recordSuccess(ipFingerprint);
+        await adminLoginGuard.recordSuccess(ipFingerprint);
         const actorFingerprint = hashGatewayKey(adminKey).slice(0, 16);
         await options.adminRepository!.recordLogin(true, actorFingerprint, ipFingerprint);
         res.setHeader("cache-control", "no-store");
@@ -228,16 +229,14 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
 
     const keyHash = hashGatewayKey(gatewayKey);
     const limits = await options.keyLimitProvider?.getLimits(keyHash);
-    if (limits?.dailyLimitExceeded) {
-      return json(res, 429, { error: { code: "daily_quota_exceeded", message: "Daily gateway quota exceeded" } });
-    }
-
     const permit = await limiter.acquire(safeSubject(gatewayKey), limits ? {
       requestsPerMinute: limits.requestsPerMinute,
       maxConcurrent: limits.maxConcurrentRequests,
+      dailyLimit: limits.dailyLimit ?? undefined,
     } : undefined);
     if (!permit.ok) {
-      const code = permit.reason === "rate" ? "rate_limit_exceeded" : "concurrency_limit_exceeded";
+      const code = permit.reason === "rate" ? "rate_limit_exceeded"
+        : permit.reason === "daily" ? "daily_quota_exceeded" : "concurrency_limit_exceeded";
       return json(res, 429, { error: { code, message: "Gateway request limit exceeded" } });
     }
 

@@ -45,7 +45,7 @@ test("loads per-key limits and daily quota state", async () => {
     async query() {
       return {
         rowCount: 1,
-        rows: [{ requests_per_minute: 12, max_concurrent_requests: 3, daily_limit_exceeded: true }],
+        rows: [{ requests_per_minute: 12, max_concurrent_requests: 3, daily_request_limit: 100 }],
       };
     },
   };
@@ -53,6 +53,6 @@ test("loads per-key limits and daily quota state", async () => {
   assert.deepEqual(await provider.getLimits(hashGatewayKey("gw_test")), {
     requestsPerMinute: 12,
     maxConcurrentRequests: 3,
-    dailyLimitExceeded: true,
+    dailyLimit: 100,
   });
 });
