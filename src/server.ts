@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
-import { extractBearerKey, hashGatewayKey, verifyGatewayKey } from "./auth.js";
+import { extractBearerKey, hashGatewayKey, StaticGatewayKeyVerifier, type GatewayKeyVerifier } from "./auth.js";
 import { loadConfig, type GatewayConfig } from "./config.js";
 import { InMemoryLimiter, type RequestLimiter } from "./limiter.js";
 import { InMemoryRequestLedger, type RequestLedger } from "./ledger.js";
@@ -54,12 +54,14 @@ function safeSubject(key: string): string {
 export interface GatewayServerOptions {
   ledger?: RequestLedger;
   limiter?: RequestLimiter;
+  keyVerifier?: GatewayKeyVerifier;
 }
 
 export function createGatewayServer(config: GatewayConfig, options: GatewayServerOptions = {}) {
   const limiter = options.limiter ?? new InMemoryLimiter(config.requestsPerMinute, config.maxConcurrentRequests);
   const upstreamPool = new UpstreamPool(config.upstreamApiKeys);
   const ledger = options.ledger ?? new InMemoryRequestLedger();
+  const keyVerifier = options.keyVerifier ?? new StaticGatewayKeyVerifier(config.gatewayKeyHashes);
 
   return createServer(async (req, res) => {
     const requestId = req.headers["x-request-id"]?.toString() || randomUUID();
@@ -84,7 +86,7 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
     }
 
     const gatewayKey = extractBearerKey(req.headers.authorization);
-    if (!gatewayKey || !verifyGatewayKey(gatewayKey, config.gatewayKeyHashes)) {
+    if (!gatewayKey || !await keyVerifier.verify(gatewayKey)) {
       return json(res, 401, { error: { code: "invalid_gateway_key", message: "Gateway key is invalid or revoked" } });
     }
 

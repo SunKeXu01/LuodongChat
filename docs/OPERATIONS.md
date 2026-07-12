@@ -37,3 +37,15 @@ Stop gateway traffic before restoring. A restore replaces database objects becau
 ## Firewall
 
 The host firewall permits only OpenSSH, HTTP, and HTTPS. PostgreSQL, Redis, and the gateway bind inside Docker or to loopback and must not be exposed publicly.
+
+## Gateway keys
+
+Database-backed keys take effect immediately and can be revoked without restarting the gateway. The plaintext is shown only once during creation; only its SHA-256 hash and short prefix are stored.
+
+```bash
+/app/chatgpt_connector/deploy/manage-gateway-key.sh create
+/app/chatgpt_connector/deploy/manage-gateway-key.sh list
+/app/chatgpt_connector/deploy/manage-gateway-key.sh revoke gw_12345678
+```
+
+Keys configured through `GATEWAY_KEY_HASHES` remain available as an emergency compatibility fallback. Rotate that fallback through the root-owned `.env` file when database-backed administration is established.

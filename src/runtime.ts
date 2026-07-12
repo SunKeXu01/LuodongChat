@@ -3,10 +3,12 @@ import { createClient } from "redis";
 import type { GatewayConfig } from "./config.js";
 import { PostgresRequestLedger, type RequestLedger, type SqlClient } from "./ledger.js";
 import { RedisRequestLimiter, type RedisScriptClient, type RequestLimiter } from "./limiter.js";
+import { PostgresGatewayKeyVerifier, StaticGatewayKeyVerifier, type GatewayKeyVerifier } from "./auth.js";
 
 export interface RuntimeDependencies {
   ledger?: RequestLedger;
   limiter?: RequestLimiter;
+  keyVerifier?: GatewayKeyVerifier;
   close(): Promise<void>;
 }
 
@@ -14,11 +16,13 @@ export async function createRuntimeDependencies(config: GatewayConfig): Promise<
   const closers: Array<() => Promise<void>> = [];
   let ledger: RequestLedger | undefined;
   let limiter: RequestLimiter | undefined;
+  let keyVerifier: GatewayKeyVerifier | undefined;
 
   if (process.env.DATABASE_URL) {
     const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 10 });
     await pool.query("SELECT 1");
     ledger = new PostgresRequestLedger(pool as SqlClient);
+    keyVerifier = new PostgresGatewayKeyVerifier(pool, new StaticGatewayKeyVerifier(config.gatewayKeyHashes));
     closers.push(async () => { await pool.end(); });
   }
 
@@ -33,6 +37,7 @@ export async function createRuntimeDependencies(config: GatewayConfig): Promise<
   return {
     ledger,
     limiter,
+    keyVerifier,
     close: async () => {
       for (const close of closers.reverse()) await close();
     },
