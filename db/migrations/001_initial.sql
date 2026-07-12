@@ -94,3 +94,12 @@ CREATE INDEX upstream_credentials_health_idx ON upstream_credentials (upstream_i
 
 COMMENT ON TABLE user_requests IS 'Metadata only. Prompt and model output must not be stored here.';
 COMMENT ON COLUMN upstream_credentials.encrypted_secret IS 'Application-encrypted secret; plaintext is forbidden.';
+
+-- PostgreSQL runs this file directly when initializing a fresh container.
+-- Record the baseline so the application migrator starts with the next migration.
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    name text PRIMARY KEY,
+    applied_at timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO schema_migrations (name) VALUES ('001_initial.sql')
+ON CONFLICT (name) DO NOTHING;
