@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractBearerKey, hashGatewayKey, PostgresGatewayKeyVerifier, verifyGatewayKey } from "../src/auth.js";
+import {
+  extractBearerKey,
+  hashGatewayKey,
+  PostgresGatewayKeyLimitProvider,
+  PostgresGatewayKeyVerifier,
+  verifyGatewayKey,
+} from "../src/auth.js";
 
 test("extracts a bearer gateway key", () => {
   assert.equal(extractBearerKey("Bearer gw_test_secret"), "gw_test_secret");
@@ -32,4 +38,21 @@ test("verifies active database keys and falls back to static keys", async () => 
   database.rowCount = 0;
   assert.equal(await verifier.verify("gw_static"), true);
   assert.equal(await verifier.verify("gw_revoked"), false);
+});
+
+test("loads per-key limits and daily quota state", async () => {
+  const database = {
+    async query() {
+      return {
+        rowCount: 1,
+        rows: [{ requests_per_minute: 12, max_concurrent_requests: 3, daily_limit_exceeded: true }],
+      };
+    },
+  };
+  const provider = new PostgresGatewayKeyLimitProvider(database, 30, 2);
+  assert.deepEqual(await provider.getLimits(hashGatewayKey("gw_test")), {
+    requestsPerMinute: 12,
+    maxConcurrentRequests: 3,
+    dailyLimitExceeded: true,
+  });
 });

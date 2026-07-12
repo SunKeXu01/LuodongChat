@@ -3,7 +3,13 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
-import { extractBearerKey, hashGatewayKey, StaticGatewayKeyVerifier, type GatewayKeyVerifier } from "./auth.js";
+import {
+  extractBearerKey,
+  hashGatewayKey,
+  StaticGatewayKeyVerifier,
+  type GatewayKeyLimitProvider,
+  type GatewayKeyVerifier,
+} from "./auth.js";
 import { loadConfig, type GatewayConfig } from "./config.js";
 import { InMemoryLimiter, type RequestLimiter } from "./limiter.js";
 import { InMemoryRequestLedger, type RequestLedger } from "./ledger.js";
@@ -55,6 +61,7 @@ export interface GatewayServerOptions {
   ledger?: RequestLedger;
   limiter?: RequestLimiter;
   keyVerifier?: GatewayKeyVerifier;
+  keyLimitProvider?: GatewayKeyLimitProvider;
 }
 
 export function createGatewayServer(config: GatewayConfig, options: GatewayServerOptions = {}) {
@@ -90,7 +97,16 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
       return json(res, 401, { error: { code: "invalid_gateway_key", message: "Gateway key is invalid or revoked" } });
     }
 
-    const permit = await limiter.acquire(safeSubject(gatewayKey));
+    const keyHash = hashGatewayKey(gatewayKey);
+    const limits = await options.keyLimitProvider?.getLimits(keyHash);
+    if (limits?.dailyLimitExceeded) {
+      return json(res, 429, { error: { code: "daily_quota_exceeded", message: "Daily gateway quota exceeded" } });
+    }
+
+    const permit = await limiter.acquire(safeSubject(gatewayKey), limits ? {
+      requestsPerMinute: limits.requestsPerMinute,
+      maxConcurrent: limits.maxConcurrentRequests,
+    } : undefined);
     if (!permit.ok) {
       const code = permit.reason === "rate" ? "rate_limit_exceeded" : "concurrency_limit_exceeded";
       return json(res, 429, { error: { code, message: "Gateway request limit exceeded" } });
@@ -100,7 +116,7 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
     let ledgerStarted = false;
     let attempts = 0;
     try {
-      await ledger.startRequest({ requestId, gatewayKeyHash: hashGatewayKey(gatewayKey), startedAt: new Date(startedAt) });
+      await ledger.startRequest({ requestId, gatewayKeyHash: keyHash, startedAt: new Date(startedAt) });
       ledgerStarted = true;
       const body = await readBody(req);
       let upstream: Response | undefined;

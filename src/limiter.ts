@@ -6,8 +6,14 @@ interface WindowState {
 
 export type LimitPermit = { ok: true; release: () => void | Promise<void> } | { ok: false; reason: "rate" | "concurrency" };
 
+export interface RequestLimitOptions {
+  requestsPerMinute?: number;
+  maxConcurrent?: number;
+  now?: number;
+}
+
 export interface RequestLimiter {
-  acquire(subject: string, now?: number): LimitPermit | Promise<LimitPermit>;
+  acquire(subject: string, options?: RequestLimitOptions): LimitPermit | Promise<LimitPermit>;
 }
 
 export class InMemoryLimiter implements RequestLimiter {
@@ -18,14 +24,17 @@ export class InMemoryLimiter implements RequestLimiter {
     private readonly maxConcurrent: number,
   ) {}
 
-  acquire(subject: string, now = Date.now()): LimitPermit {
+  acquire(subject: string, options: RequestLimitOptions = {}): LimitPermit {
+    const now = options.now ?? Date.now();
+    const requestsPerMinute = options.requestsPerMinute ?? this.requestsPerMinute;
+    const maxConcurrent = options.maxConcurrent ?? this.maxConcurrent;
     let state = this.states.get(subject);
     if (!state || now - state.startedAt >= 60_000) {
       state = { startedAt: now, requests: 0, concurrent: state?.concurrent ?? 0 };
       this.states.set(subject, state);
     }
-    if (state.concurrent >= this.maxConcurrent) return { ok: false, reason: "concurrency" };
-    if (state.requests >= this.requestsPerMinute) return { ok: false, reason: "rate" };
+    if (state.concurrent >= maxConcurrent) return { ok: false, reason: "concurrency" };
+    if (state.requests >= requestsPerMinute) return { ok: false, reason: "rate" };
 
     state.requests += 1;
     state.concurrent += 1;
@@ -74,13 +83,18 @@ export class RedisRequestLimiter implements RequestLimiter {
     private readonly concurrencyTtlMs = 600_000,
   ) {}
 
-  async acquire(subject: string): Promise<LimitPermit> {
+  async acquire(subject: string, options: RequestLimitOptions = {}): Promise<LimitPermit> {
     const tag = `{${subject}}`;
     const requestKey = `gateway:${tag}:requests`;
     const concurrencyKey = `gateway:${tag}:concurrent`;
     const result = await this.redis.eval(ACQUIRE_SCRIPT, {
       keys: [requestKey, concurrencyKey],
-      arguments: [String(this.requestsPerMinute), String(this.maxConcurrent), "60000", String(this.concurrencyTtlMs)],
+      arguments: [
+        String(options.requestsPerMinute ?? this.requestsPerMinute),
+        String(options.maxConcurrent ?? this.maxConcurrent),
+        "60000",
+        String(this.concurrencyTtlMs),
+      ],
     });
     if (result === -1) return { ok: false, reason: "rate" };
     if (result === -2) return { ok: false, reason: "concurrency" };

@@ -33,3 +33,11 @@ test("maps Redis rate and concurrency rejection codes", async () => {
   assert.deepEqual(await limiter.acquire("user"), { ok: false, reason: "rate" });
   assert.deepEqual(await limiter.acquire("user"), { ok: false, reason: "concurrency" });
 });
+
+test("passes per-key limits to the Redis script", async () => {
+  const redis = new FakeRedis([1]);
+  const limiter = new RedisRequestLimiter(redis, 30, 2);
+  const permit = await limiter.acquire("custom", { requestsPerMinute: 7, maxConcurrent: 1 });
+  assert.equal(permit.ok, true);
+  assert.deepEqual(redis.calls[0]?.arguments.slice(0, 2), ["7", "1"]);
+});

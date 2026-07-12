@@ -33,7 +33,20 @@ export class StaticGatewayKeyVerifier implements GatewayKeyVerifier {
 }
 
 export interface AuthSqlClient {
-  query(sql: string, values: readonly unknown[]): Promise<{ rowCount?: number | null }>;
+  query(sql: string, values: readonly unknown[]): Promise<{
+    rowCount?: number | null;
+    rows?: Array<Record<string, unknown>>;
+  }>;
+}
+
+export interface GatewayKeyLimits {
+  requestsPerMinute: number;
+  maxConcurrentRequests: number;
+  dailyLimitExceeded: boolean;
+}
+
+export interface GatewayKeyLimitProvider {
+  getLimits(keyHash: string): Promise<GatewayKeyLimits | null>;
 }
 
 export class PostgresGatewayKeyVerifier implements GatewayKeyVerifier {
@@ -56,5 +69,36 @@ export class PostgresGatewayKeyVerifier implements GatewayKeyVerifier {
     );
     if ((result.rowCount ?? 0) > 0) return true;
     return this.fallback?.verify(key) ?? false;
+  }
+}
+
+export class PostgresGatewayKeyLimitProvider implements GatewayKeyLimitProvider {
+  constructor(
+    private readonly db: AuthSqlClient,
+    private readonly defaultRequestsPerMinute: number,
+    private readonly defaultMaxConcurrentRequests: number,
+  ) {}
+
+  async getLimits(keyHash: string): Promise<GatewayKeyLimits | null> {
+    const result = await this.db.query(
+      `SELECT
+         COALESCE(key.requests_per_minute, $2::integer) AS requests_per_minute,
+         COALESCE(key.max_concurrent_requests, $3::integer) AS max_concurrent_requests,
+         key.daily_request_limit IS NOT NULL AND
+           (SELECT count(*) FROM user_requests request
+            WHERE request.gateway_key_id = key.id
+              AND request.started_at >= date_trunc('day', now())) >= key.daily_request_limit AS daily_limit_exceeded
+       FROM gateway_keys AS key
+       WHERE key.key_hash = decode($1, 'hex')
+       LIMIT 1`,
+      [keyHash, this.defaultRequestsPerMinute, this.defaultMaxConcurrentRequests],
+    );
+    const row = result.rows?.[0];
+    if (!row) return null;
+    return {
+      requestsPerMinute: Number(row.requests_per_minute),
+      maxConcurrentRequests: Number(row.max_concurrent_requests),
+      dailyLimitExceeded: row.daily_limit_exceeded === true,
+    };
   }
 }

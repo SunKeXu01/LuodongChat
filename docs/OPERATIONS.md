@@ -43,8 +43,9 @@ The host firewall permits only OpenSSH, HTTP, and HTTPS. PostgreSQL, Redis, and 
 Database-backed keys take effect immediately and can be revoked without restarting the gateway. The plaintext is shown only once during creation; only its SHA-256 hash and short prefix are stored.
 
 ```bash
-/app/chatgpt_connector/deploy/manage-gateway-key.sh create
+/app/chatgpt_connector/deploy/manage-gateway-key.sh create 100
 /app/chatgpt_connector/deploy/manage-gateway-key.sh list
+/app/chatgpt_connector/deploy/manage-gateway-key.sh quota gw_12345678 500 30 2
 /app/chatgpt_connector/deploy/manage-gateway-key.sh revoke gw_12345678
 ```
 
