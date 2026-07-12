@@ -1,0 +1,8 @@
+[Unit]
+Description=Check ChatGPT Connector service health
+Requires=docker.service
+After=docker.service nginx.service
+
+[Service]
+Type=oneshot
+ExecStart=/app/chatgpt_connector/deploy/check-health.sh

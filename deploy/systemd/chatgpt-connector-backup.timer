@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily ChatGPT Connector PostgreSQL backup
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+RandomizedDelaySec=20m
+Persistent=true
+Unit=chatgpt-connector-backup.service
+
+[Install]
+WantedBy=timers.target

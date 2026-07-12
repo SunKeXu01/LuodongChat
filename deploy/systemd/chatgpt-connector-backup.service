@@ -1,0 +1,14 @@
+[Unit]
+Description=Back up ChatGPT Connector PostgreSQL database
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/app/chatgpt_connector/deploy/backup-postgres.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+[Install]
+WantedBy=multi-user.target

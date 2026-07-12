@@ -59,6 +59,8 @@ When `DATABASE_URL` is set, the gateway verifies PostgreSQL connectivity at star
 
 Apply pending migrations under a PostgreSQL advisory lock with `pnpm migrate` after building. Each migration name is recorded in `schema_migrations` and will not be applied twice.
 
+Production health checks, daily PostgreSQL backups, retention, and recovery commands are documented in [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
+
 ## Windows client
 
 The Windows client is under `client/` and targets .NET 10 LTS with WPF. `ChatGPTConnector.Core` contains platform-independent configuration planning and safe file installation primitives; its tests can run on macOS or Windows.
