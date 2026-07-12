@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { PostgresAdminRepository } from "../src/admin.js";
+import { ADMIN_JS } from "../src/admin-assets.js";
+
+test("ships syntactically valid browser JavaScript", () => {
+  assert.doesNotThrow(() => new Function(ADMIN_JS));
+});
 
 test("maps metadata-only admin statistics", async () => {
   const responses = [
