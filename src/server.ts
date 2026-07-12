@@ -19,6 +19,7 @@ import { createRuntimeDependencies } from "./runtime.js";
 import type { AdminRepository } from "./admin.js";
 import { ADMIN_HTML, ADMIN_JS } from "./admin-assets.js";
 import { AdminLoginGuard, type AdminLoginProtector } from "./admin-security.js";
+import { EnrollmentService } from "./self-service.js";
 
 const MAX_REQUEST_BYTES = 10 * 1024 * 1024;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
@@ -79,6 +80,7 @@ export interface GatewayServerOptions {
   keyLimitProvider?: GatewayKeyLimitProvider;
   adminRepository?: AdminRepository;
   adminLoginProtector?: AdminLoginProtector;
+  enrollmentService?: EnrollmentService;
 }
 
 export function createGatewayServer(config: GatewayConfig, options: GatewayServerOptions = {}) {
@@ -104,6 +106,46 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
         "x-frame-options": "DENY",
       });
       return res.end(LANDING_PAGE);
+    }
+    if (req.method === "GET" && req.url === "/enrollment/status") {
+      res.setHeader("cache-control", "no-store");
+      return json(res, 200, { enabled: Boolean(options.enrollmentService) });
+    }
+    if (req.method === "POST" && req.url === "/enrollment/code" && options.enrollmentService) {
+      try {
+        const input = await readJsonObject(req);
+        const email = typeof input.email === "string" ? EnrollmentService.normalizeEmail(input.email) : null;
+        if (!email) return json(res, 400, { error: { code: "invalid_email", message: "Email address is invalid" } });
+        const clientAddress = req.headers["x-real-ip"]?.toString().trim() || req.socket.remoteAddress || "unknown";
+        const result = await options.enrollmentService.requestCode(email, hashGatewayKey(clientAddress).slice(0, 16));
+        if (result === "rate_limited") {
+          res.setHeader("retry-after", "60");
+          return json(res, 429, { error: { code: "enrollment_rate_limited", message: "Please wait before requesting another code" } });
+        }
+        res.setHeader("cache-control", "no-store");
+        return json(res, 202, { status: "code_sent", expiresInSeconds: 600 });
+      } catch (error) {
+        if (error instanceof SyntaxError || (error instanceof Error && error.message === "invalid_json")) return json(res, 400, { error: { code: "invalid_json" } });
+        console.error(JSON.stringify({ event: "enrollment_email_failed", requestId, error: error instanceof Error ? error.name : "unknown" }));
+        return json(res, 503, { error: { code: "email_unavailable", message: "Verification email is temporarily unavailable" } });
+      }
+    }
+    if (req.method === "POST" && req.url === "/enrollment/verify" && options.enrollmentService) {
+      try {
+        const input = await readJsonObject(req);
+        const email = typeof input.email === "string" ? EnrollmentService.normalizeEmail(input.email) : null;
+        const code = typeof input.code === "string" && /^\d{6}$/.test(input.code) ? input.code : null;
+        const rotate = input.rotate === true;
+        if (!email || !code) return json(res, 400, { error: { code: "invalid_verification_input" } });
+        const result = await options.enrollmentService.verifyAndIssue(email, code, rotate);
+        res.setHeader("cache-control", "no-store");
+        if (result.status === "created") return json(res, 201, { key: result.key, prefix: result.prefix });
+        if (result.status === "active_key_exists") return json(res, 409, { error: { code: result.status, message: "An active key already exists; explicitly request rotation" } });
+        return json(res, 401, { error: { code: `verification_${result.status}`, message: "Verification code is invalid or unavailable" } });
+      } catch (error) {
+        if (error instanceof SyntaxError || (error instanceof Error && error.message === "invalid_json")) return json(res, 400, { error: { code: "invalid_json" } });
+        throw error;
+      }
     }
     const adminEnabled = (config.adminKeyHashes?.size ?? 0) > 0 && options.adminRepository;
     if (req.method === "GET" && req.url === "/admin" && adminEnabled) {

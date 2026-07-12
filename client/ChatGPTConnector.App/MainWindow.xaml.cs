@@ -13,6 +13,7 @@ public partial class MainWindow : Window
     private static readonly Uri GatewayUri = new("https://520skx.com");
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(90) };
     private readonly CodexPaths _paths = CodexPaths.ForCurrentUser();
+    private readonly GatewayEnrollmentClient _enrollment = new(Http);
 
     public MainWindow()
     {
@@ -22,6 +23,43 @@ public partial class MainWindow : Window
 
     private void GatewayKeyInput_OnPasswordChanged(object sender, RoutedEventArgs e) =>
         EnableButton.IsEnabled = !string.IsNullOrWhiteSpace(GatewayKeyInput.Password);
+
+    private async void RequestCodeButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var email = EmailInput.Text.Trim();
+        if (string.IsNullOrWhiteSpace(email)) { MessageBox.Show("请输入邮箱地址。", "自助领取"); return; }
+        SetBusy(true, "正在发送验证码…");
+        try
+        {
+            var result = await _enrollment.RequestCodeAsync(GatewayUri, email);
+            MessageBox.Show(result.Message, result.Success ? "验证码已发送" : "发送失败", MessageBoxButton.OK,
+                result.Success ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        }
+        catch (Exception error) { MessageBox.Show(error.Message, "发送失败", MessageBoxButton.OK, MessageBoxImage.Error); }
+        finally { SetBusy(false); }
+    }
+
+    private async void ClaimKeyButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var email = EmailInput.Text.Trim();
+        var code = VerificationCodeInput.Text.Trim();
+        if (string.IsNullOrWhiteSpace(email) || code.Length != 6) { MessageBox.Show("请输入邮箱和 6 位验证码。", "自助领取"); return; }
+        SetBusy(true, "正在验证并签发密钥…");
+        try
+        {
+            var result = await _enrollment.VerifyAsync(GatewayUri, email, code);
+            if (result.ActiveKeyExists && MessageBox.Show(result.Message, "确认轮换", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+            {
+                result = await _enrollment.VerifyAsync(GatewayUri, email, code, rotate: true);
+            }
+            if (!result.Success) { MessageBox.Show(result.Message, "领取失败", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
+            GatewayKeyInput.Password = result.GatewayKey!;
+            VerificationCodeInput.Clear();
+            MessageBox.Show(result.Message, "领取成功", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception error) { MessageBox.Show(error.Message, "领取失败", MessageBoxButton.OK, MessageBoxImage.Error); }
+        finally { SetBusy(false); }
+    }
 
     private async void EnableButton_OnClick(object sender, RoutedEventArgs e)
     {
@@ -136,6 +174,10 @@ public partial class MainWindow : Window
         EnableButton.IsEnabled = !busy && !string.IsNullOrWhiteSpace(GatewayKeyInput.Password);
         RestoreButton.IsEnabled = !busy;
         GatewayKeyInput.IsEnabled = !busy;
+        EmailInput.IsEnabled = !busy;
+        VerificationCodeInput.IsEnabled = !busy;
+        RequestCodeButton.IsEnabled = !busy;
+        ClaimKeyButton.IsEnabled = !busy;
         if (status is not null) StatusText.Text = status;
     }
 }

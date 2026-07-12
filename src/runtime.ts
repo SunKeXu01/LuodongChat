@@ -12,6 +12,7 @@ import {
 } from "./auth.js";
 import { PostgresAdminRepository, type AdminRepository } from "./admin.js";
 import { RedisAdminLoginGuard, type AdminLoginProtector } from "./admin-security.js";
+import { EnrollmentService, PostgresEnrollmentRepository, SmtpEnrollmentMailer } from "./self-service.js";
 
 export interface RuntimeDependencies {
   ledger?: RequestLedger;
@@ -20,6 +21,7 @@ export interface RuntimeDependencies {
   keyLimitProvider?: GatewayKeyLimitProvider;
   adminRepository?: AdminRepository;
   adminLoginProtector?: AdminLoginProtector;
+  enrollmentService?: EnrollmentService;
   close(): Promise<void>;
 }
 
@@ -31,6 +33,7 @@ export async function createRuntimeDependencies(config: GatewayConfig): Promise<
   let keyLimitProvider: GatewayKeyLimitProvider | undefined;
   let adminRepository: AdminRepository | undefined;
   let adminLoginProtector: AdminLoginProtector | undefined;
+  let enrollmentService: EnrollmentService | undefined;
 
   if (process.env.DATABASE_URL) {
     const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 10 });
@@ -39,6 +42,13 @@ export async function createRuntimeDependencies(config: GatewayConfig): Promise<
     keyVerifier = new PostgresGatewayKeyVerifier(pool, new StaticGatewayKeyVerifier(config.gatewayKeyHashes));
     keyLimitProvider = new PostgresGatewayKeyLimitProvider(pool, config.requestsPerMinute, config.maxConcurrentRequests);
     adminRepository = new PostgresAdminRepository(pool);
+    if (config.selfService) {
+      enrollmentService = new EnrollmentService(
+        new PostgresEnrollmentRepository(pool),
+        new SmtpEnrollmentMailer(config.selfService.smtpHost, config.selfService.smtpPort, config.selfService.smtpSecure, config.selfService.smtpUser, config.selfService.smtpPassword, config.selfService.smtpFrom),
+        config.selfService,
+      );
+    }
     closers.push(async () => { await pool.end(); });
   }
 
@@ -58,6 +68,7 @@ export async function createRuntimeDependencies(config: GatewayConfig): Promise<
     keyLimitProvider,
     adminRepository,
     adminLoginProtector,
+    enrollmentService,
     close: async () => {
       for (const close of closers.reverse()) await close();
     },

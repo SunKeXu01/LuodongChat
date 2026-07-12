@@ -57,6 +57,12 @@ The host firewall permits only OpenSSH, HTTP, and HTTPS. PostgreSQL, Redis, and 
 
 Database-backed keys take effect immediately and can be revoked without restarting the gateway. The plaintext is shown only once during creation; only its SHA-256 hash and short prefix are stored.
 
+### User self-service enrollment
+
+Set `SELF_SERVICE_ENABLED=true` and configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USERNAME`, `SMTP_AUTH_CODE`, and `SMTP_FROM` only in the server `.env`. The client requests a six-digit email code and exchanges it for a new `gw_` key. Codes expire after ten minutes, are stored only as SHA-256 hashes, permit five attempts, and are rate-limited by both identity and IP fingerprint. Email addresses are normalized and persisted only as hashes. If the identity already owns an active key, rotation requires explicit confirmation and immediately revokes the previous key.
+
+The public endpoints are `GET /enrollment/status`, `POST /enrollment/code`, and `POST /enrollment/verify`. Keep self-service disabled until SMTP delivery and abuse monitoring have been tested.
+
 ```bash
 /app/chatgpt_connector/deploy/manage-gateway-key.sh create 100
 /app/chatgpt_connector/deploy/manage-gateway-key.sh list

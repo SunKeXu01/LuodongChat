@@ -10,6 +10,18 @@ export interface GatewayConfig {
   maxConcurrentRequests: number;
   upstreamTimeoutMs: number;
   version?: string;
+  selfService?: {
+    smtpHost: string;
+    smtpPort: number;
+    smtpSecure: boolean;
+    smtpUser: string;
+    smtpPassword: string;
+    smtpFrom: string;
+    dailyLimit: number;
+    requestsPerMinute: number;
+    maxConcurrentRequests: number;
+    expiresInDays: number;
+  };
 }
 
 function positiveInteger(name: string, fallback: number): number {
@@ -49,6 +61,15 @@ export function loadConfig(): GatewayConfig {
       .filter((value) => /^[a-f\d]{64}$/.test(value)),
   );
 
+  const selfServiceEnabled = process.env.SELF_SERVICE_ENABLED?.toLowerCase() === "true";
+  const smtpHost = process.env.SMTP_HOST?.trim();
+  const smtpUser = process.env.SMTP_USERNAME?.trim();
+  const smtpPassword = process.env.SMTP_AUTH_CODE;
+  const smtpFrom = process.env.SMTP_FROM?.trim();
+  if (selfServiceEnabled && (!process.env.DATABASE_URL || !smtpHost || !smtpUser || !smtpPassword || !smtpFrom)) {
+    throw new Error("Self-service requires DATABASE_URL and SMTP_HOST/SMTP_USERNAME/SMTP_AUTH_CODE/SMTP_FROM");
+  }
+
   return {
     port: positiveInteger("PORT", 8787),
     upstreamBaseUrl,
@@ -61,5 +82,17 @@ export function loadConfig(): GatewayConfig {
     maxConcurrentRequests: positiveInteger("MAX_CONCURRENT_REQUESTS", 2),
     upstreamTimeoutMs: positiveInteger("UPSTREAM_TIMEOUT_MS", 300_000),
     version: process.env.APP_VERSION?.trim() || "development",
+    selfService: selfServiceEnabled ? {
+      smtpHost: smtpHost!,
+      smtpPort: positiveInteger("SMTP_PORT", 465),
+      smtpSecure: process.env.SMTP_SECURE?.toLowerCase() !== "false",
+      smtpUser: smtpUser!,
+      smtpPassword: smtpPassword!,
+      smtpFrom: smtpFrom!,
+      dailyLimit: positiveInteger("SELF_SERVICE_DAILY_LIMIT", 100),
+      requestsPerMinute: positiveInteger("SELF_SERVICE_REQUESTS_PER_MINUTE", 30),
+      maxConcurrentRequests: positiveInteger("SELF_SERVICE_MAX_CONCURRENT", 2),
+      expiresInDays: positiveInteger("SELF_SERVICE_KEY_EXPIRES_DAYS", 30),
+    } : undefined,
   };
 }

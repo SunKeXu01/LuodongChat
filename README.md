@@ -18,6 +18,7 @@ ChatGPT Connector is currently in preview validation. The repository contains a 
 - request IDs and metadata-only logs
 - `GET /healthz` health check
 - PostgreSQL-backed gateway keys with expiry and per-key quotas
+- Email-verified self-service key enrollment and explicit key rotation
 - Redis-atomic daily, per-minute, and concurrency limits
 - authenticated administration dashboard with audit history and temporary login blocking
 - deployment history, queued host-isolated rollback, daily backups, health monitoring, and Chinese email alerts
