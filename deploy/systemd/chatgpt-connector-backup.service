@@ -2,6 +2,7 @@
 Description=Back up ChatGPT Connector PostgreSQL database
 Requires=docker.service
 After=docker.service
+OnFailure=chatgpt-connector-alert@%n.service
 
 [Service]
 Type=oneshot

@@ -9,8 +9,23 @@ LOCK_FILE="/var/lock/chatgpt-connector-deploy.lock"
 exec 9>"$LOCK_FILE"
 flock -n 9 || { printf 'Another deployment is already running.\n' >&2; exit 1; }
 
+deployment_failed() {
+  status=$?
+  printf 'Automated deployment failed on %s at %s. Exit status: %s\n' "$(hostname)" "$(date --iso-8601=seconds)" "$status" \
+    | "$APP_DIR/deploy/send-alert.sh" "ChatGPT Connector deployment failed" "deployment" || true
+  exit "$status"
+}
+trap deployment_failed ERR
+
 cd "$APP_DIR"
 test -s "$ENV_FILE"
+
+install -m 644 "$APP_DIR/deploy/systemd/chatgpt-connector-alert-check.service" /etc/systemd/system/
+install -m 644 "$APP_DIR/deploy/systemd/chatgpt-connector-alert-check.timer" /etc/systemd/system/
+install -m 644 "$APP_DIR/deploy/systemd/chatgpt-connector-alert@.service" /etc/systemd/system/
+install -m 644 "$APP_DIR/deploy/systemd/chatgpt-connector-backup.service" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now chatgpt-connector-alert-check.timer
 
 systemctl start chatgpt-connector-backup.service
 

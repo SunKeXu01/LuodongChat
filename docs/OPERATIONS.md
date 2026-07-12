@@ -24,6 +24,10 @@ Required repository Actions secrets:
 - `DEPLOY_SSH_KEY`: dedicated private key used only for production deployment;
 - `DEPLOY_KNOWN_HOSTS`: pinned `known_hosts` entry for the production server.
 
+## Email alerts
+
+SMTP credentials live only in `/etc/chatgpt-connector/alert.env` with mode `600`. The five-minute alert timer checks public health, root disk usage, TLS certificate lifetime, backup freshness, and the 15-minute gateway error rate. Backup and deployment failures invoke the same sender. A per-alert cooldown prevents repeated email storms.
+
 ## PostgreSQL backups
 
 The backup timer runs daily and writes mode-`600` compressed SQL dumps under `/app/module/backups/postgres`. Backups older than 14 days are removed automatically.

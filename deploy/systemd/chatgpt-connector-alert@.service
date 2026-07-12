@@ -1,0 +1,6 @@
+[Unit]
+Description=Send ChatGPT Connector failure alert for %i
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'journalctl -u %i -n 80 --no-pager | /app/chatgpt_connector/deploy/send-alert.sh "ChatGPT Connector service failure: %i" "%i"'

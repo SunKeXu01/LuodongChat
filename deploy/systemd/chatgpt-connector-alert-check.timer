@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodic ChatGPT Connector production alert checks
+
+[Timer]
+OnBootSec=3m
+OnUnitActiveSec=5m
+AccuracySec=30s
+Persistent=true
+Unit=chatgpt-connector-alert-check.service
+
+[Install]
+WantedBy=timers.target
