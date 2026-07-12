@@ -1,0 +1,8 @@
+[Unit]
+Description=Process a queued ChatGPT Connector rollback
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/app/chatgpt_connector/deploy/process-rollback.sh

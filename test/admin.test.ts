@@ -72,3 +72,17 @@ test("maps metadata-only upstream attempt statistics", async () => {
     credentialId: "a".repeat(64), attempts: 8, failures: 2, retryableAttempts: 3, averageDurationMs: 450,
   }]);
 });
+
+test("maps deployment history and queues one rollback at a time", async () => {
+  const now = new Date("2026-07-12T09:00:00Z");
+  const responses = [
+    { rows: [{ id: "deployment-id", git_sha: "abc123", status: "completed", started_at: now, completed_at: now }] },
+    { rows: [{ id: "request-id" }], rowCount: 1 },
+  ];
+  const repository = new PostgresAdminRepository({ query: async () => responses.shift() ?? { rows: [] } });
+  assert.deepEqual(await repository.listDeployments(), [{
+    id: "deployment-id", gitSha: "abc123", status: "completed",
+    startedAt: now.toISOString(), completedAt: now.toISOString(),
+  }]);
+  assert.equal(await repository.requestRollback("actor123"), true);
+});

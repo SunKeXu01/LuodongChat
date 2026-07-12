@@ -162,8 +162,17 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
           averageDurationMs: persisted.get(item.id)?.averageDurationMs ?? null,
         })));
       }
+      if (req.method === "GET" && req.url === "/admin/api/deployments") {
+        return json(res, 200, await options.adminRepository!.listDeployments());
+      }
       const actorFingerprint = hashGatewayKey(adminKey).slice(0, 16);
       try {
+        if (req.method === "POST" && req.url === "/admin/api/deployments/rollback") {
+          const accepted = await options.adminRepository!.requestRollback(actorFingerprint);
+          return accepted
+            ? json(res, 202, { status: "rollback_queued" })
+            : json(res, 409, { error: { code: "rollback_unavailable", message: "A rollback is already pending or no deployment is available" } });
+        }
         if (req.method === "POST" && req.url === "/admin/api/keys") {
           const input = await readJsonObject(req);
           const dailyLimit = positiveAdminInteger(input.dailyLimit);

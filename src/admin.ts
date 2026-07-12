@@ -29,11 +29,21 @@ export interface AdminUpstreamStat {
   averageDurationMs: number | null;
 }
 
+export interface AdminDeployment {
+  id: string;
+  gitSha: string;
+  status: string;
+  startedAt: string;
+  completedAt: string | null;
+}
+
 export interface AdminRepository {
   getSummary(): Promise<AdminSummary>;
   listKeys(): Promise<AdminKeyRow[]>;
   getObservability(): Promise<AdminObservability>;
   getUpstreamStats(): Promise<AdminUpstreamStat[]>;
+  listDeployments(): Promise<AdminDeployment[]>;
+  requestRollback(actorFingerprint: string): Promise<boolean>;
   createKey(input: AdminKeyInput, keyHash: string, keyPrefix: string, actorFingerprint: string): Promise<void>;
   updateQuota(keyPrefix: string, input: AdminQuotaInput, actorFingerprint: string): Promise<boolean>;
   revokeKey(keyPrefix: string, actorFingerprint: string): Promise<boolean>;
@@ -150,6 +160,36 @@ export class PostgresAdminRepository implements AdminRepository {
       retryableAttempts: Number(row.retryable_attempts ?? 0),
       averageDurationMs: row.average_duration_ms === null ? null : Number(row.average_duration_ms),
     }));
+  }
+
+  async listDeployments(): Promise<AdminDeployment[]> {
+    const result = await this.db.query(`SELECT id, git_sha, status::text, started_at, completed_at
+      FROM deployment_history ORDER BY started_at DESC LIMIT 20`);
+    return result.rows.map((row) => ({
+      id: String(row.id),
+      gitSha: String(row.git_sha),
+      status: String(row.status),
+      startedAt: row.started_at instanceof Date ? row.started_at.toISOString() : String(row.started_at),
+      completedAt: row.completed_at instanceof Date ? row.completed_at.toISOString() : row.completed_at ? String(row.completed_at) : null,
+    }));
+  }
+
+  async requestRollback(actorFingerprint: string): Promise<boolean> {
+    const result = await this.db.query(
+      `WITH allowed AS (
+         SELECT $1::text AS actor
+         WHERE NOT EXISTS (SELECT 1 FROM deployment_control_requests WHERE status IN ('pending', 'processing'))
+           AND EXISTS (SELECT 1 FROM deployment_history WHERE status = 'completed')
+       ), requested AS (
+         INSERT INTO deployment_control_requests (action, requested_by)
+         SELECT 'rollback', actor FROM allowed RETURNING id
+       ), audited AS (
+         INSERT INTO admin_audit_log (actor_fingerprint, action, details)
+         SELECT $1, 'rollback_requested', jsonb_build_object('requestId', id::text) FROM requested
+       ) SELECT id FROM requested`,
+      [actorFingerprint],
+    );
+    return (result.rowCount ?? result.rows.length) > 0;
   }
 
   async createKey(input: AdminKeyInput, keyHash: string, keyPrefix: string, actorFingerprint: string): Promise<void> {

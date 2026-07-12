@@ -1,0 +1,12 @@
+[Unit]
+Description=Poll for queued ChatGPT Connector rollbacks
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=1m
+AccuracySec=15s
+Persistent=true
+Unit=chatgpt-connector-rollback.service
+
+[Install]
+WantedBy=timers.target
