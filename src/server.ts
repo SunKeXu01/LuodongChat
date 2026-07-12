@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -56,6 +56,17 @@ async function readBody(req: IncomingMessage): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
+async function readJsonObject(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const body = await readBody(req);
+  const value: unknown = JSON.parse(body.toString("utf8"));
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_json");
+  return value as Record<string, unknown>;
+}
+
+function positiveAdminInteger(value: unknown, maximum = 1_000_000): number | null {
+  return Number.isSafeInteger(value) && Number(value) > 0 && Number(value) <= maximum ? Number(value) : null;
+}
+
 function safeSubject(key: string): string {
   return hashGatewayKey(key).slice(0, 16);
 }
@@ -107,14 +118,58 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
       res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
       return res.end(ADMIN_JS);
     }
-    if (req.method === "GET" && req.url?.startsWith("/admin/api/") && adminEnabled) {
+    if (req.url?.startsWith("/admin/api/") && adminEnabled) {
       const adminKey = extractBearerKey(req.headers.authorization);
       if (!adminKey || !verifyGatewayKey(adminKey, config.adminKeyHashes ?? new Set())) {
         return json(res, 401, { error: { code: "invalid_admin_key", message: "Administrator key is invalid" } });
       }
       res.setHeader("cache-control", "no-store");
-      if (req.url === "/admin/api/summary") return json(res, 200, await options.adminRepository!.getSummary());
-      if (req.url === "/admin/api/keys") return json(res, 200, await options.adminRepository!.listKeys());
+      if (req.method === "GET" && req.url === "/admin/api/summary") return json(res, 200, await options.adminRepository!.getSummary());
+      if (req.method === "GET" && req.url === "/admin/api/keys") return json(res, 200, await options.adminRepository!.listKeys());
+      const actorFingerprint = hashGatewayKey(adminKey).slice(0, 16);
+      try {
+        if (req.method === "POST" && req.url === "/admin/api/keys") {
+          const input = await readJsonObject(req);
+          const dailyLimit = positiveAdminInteger(input.dailyLimit);
+          const requestsPerMinute = positiveAdminInteger(input.requestsPerMinute, 10_000);
+          const maxConcurrentRequests = positiveAdminInteger(input.maxConcurrentRequests, 1_000);
+          const expiresInDays = input.expiresInDays === null ? null : positiveAdminInteger(input.expiresInDays, 3_650);
+          if (!dailyLimit || !requestsPerMinute || !maxConcurrentRequests || (input.expiresInDays !== null && !expiresInDays)) {
+            return json(res, 400, { error: { code: "invalid_admin_input", message: "Key limits are invalid" } });
+          }
+          const plaintextKey = `gw_${randomBytes(24).toString("hex")}`;
+          const prefix = plaintextKey.slice(0, 11);
+          await options.adminRepository!.createKey(
+            { dailyLimit, requestsPerMinute, maxConcurrentRequests, expiresInDays },
+            hashGatewayKey(plaintextKey), prefix, actorFingerprint,
+          );
+          return json(res, 201, { key: plaintextKey, prefix });
+        }
+        const quotaMatch = /^\/admin\/api\/keys\/(gw_[a-f\d]{8})\/quota$/.exec(req.url);
+        if (req.method === "PUT" && quotaMatch) {
+          const input = await readJsonObject(req);
+          const dailyLimit = positiveAdminInteger(input.dailyLimit);
+          const requestsPerMinute = positiveAdminInteger(input.requestsPerMinute, 10_000);
+          const maxConcurrentRequests = positiveAdminInteger(input.maxConcurrentRequests, 1_000);
+          if (!dailyLimit || !requestsPerMinute || !maxConcurrentRequests) {
+            return json(res, 400, { error: { code: "invalid_admin_input", message: "Key limits are invalid" } });
+          }
+          const updated = await options.adminRepository!.updateQuota(
+            quotaMatch[1]!, { dailyLimit, requestsPerMinute, maxConcurrentRequests }, actorFingerprint,
+          );
+          return updated ? json(res, 200, { status: "updated" }) : json(res, 404, { error: { code: "key_not_found" } });
+        }
+        const revokeMatch = /^\/admin\/api\/keys\/(gw_[a-f\d]{8})\/revoke$/.exec(req.url);
+        if (req.method === "POST" && revokeMatch) {
+          const revoked = await options.adminRepository!.revokeKey(revokeMatch[1]!, actorFingerprint);
+          return revoked ? json(res, 200, { status: "revoked" }) : json(res, 404, { error: { code: "key_not_found" } });
+        }
+      } catch (error) {
+        if (error instanceof SyntaxError || (error instanceof Error && error.message === "invalid_json")) {
+          return json(res, 400, { error: { code: "invalid_json", message: "Request body must be a JSON object" } });
+        }
+        throw error;
+      }
     }
     const isResponsesRoute = req.url === "/responses" || req.url === "/v1/responses";
     if (req.method !== "POST" || !isResponsesRoute) {

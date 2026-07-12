@@ -51,8 +51,10 @@ Database-backed keys take effect immediately and can be revoked without restarti
 
 Keys configured through `GATEWAY_KEY_HASHES` remain available as an emergency compatibility fallback. Rotate that fallback through the root-owned `.env` file when database-backed administration is established.
 
-## Read-only admin dashboard
+## Admin dashboard
 
 Set `ADMIN_KEY_HASHES` to one or more SHA-256 hashes of dedicated administrator keys, then recreate the gateway container. Open `https://520skx.com/admin` and enter the corresponding plaintext administrator key. Do not reuse a user gateway key.
 
-The dashboard exposes metadata only: aggregate request states, key prefixes, status, limits, today's request count, and expiry. Responses include `Cache-Control: no-store`; prompt and response bodies are never queried or displayed.
+The dashboard exposes metadata only: aggregate request states, key prefixes, status, limits, today's request count, and expiry. Administrators can create a key, update its quota, or revoke it. A new plaintext key is returned once and is never persisted. Mutations write a metadata-only audit record containing the administrator fingerprint, action, target prefix, and limits.
+
+Responses include `Cache-Control: no-store`; prompt and response bodies are never queried or displayed.

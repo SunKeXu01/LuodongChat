@@ -20,3 +20,23 @@ test("maps metadata-only admin statistics", async () => {
     expiresAt: null,
   }]);
 });
+
+test("writes key changes and audit metadata in one statement", async () => {
+  const calls: Array<{ sql: string; values?: readonly unknown[] }> = [];
+  const db = {
+    async query(sql: string, values?: readonly unknown[]) {
+      calls.push({ sql, values });
+      return { rows: [{ key_prefix: "gw_12345678" }], rowCount: 1 };
+    },
+  };
+  const repository = new PostgresAdminRepository(db);
+  await repository.createKey(
+    { dailyLimit: 100, requestsPerMinute: 30, maxConcurrentRequests: 2, expiresInDays: 30 },
+    "a".repeat(64), "gw_12345678", "actor123",
+  );
+  assert.match(calls[0]?.sql ?? "", /admin_audit_log/);
+  assert.equal(calls[0]?.values?.includes("gw_test_plaintext"), false);
+  assert.equal(await repository.updateQuota("gw_12345678", { dailyLimit: 200, requestsPerMinute: 20, maxConcurrentRequests: 1 }, "actor123"), true);
+  assert.equal(await repository.revokeKey("gw_12345678", "actor123"), true);
+  assert.match(calls[2]?.sql ?? "", /key_revoked/);
+});

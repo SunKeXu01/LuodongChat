@@ -98,9 +98,13 @@ test("protects the read-only admin dashboard API with a separate key", async (t)
     maxConcurrentRequests: 2,
     upstreamTimeoutMs: 100,
   };
+  const createdKeys: Array<{ prefix: string; actor: string }> = [];
   const adminRepository = {
     getSummary: async () => ({ requestsToday: 4, completedToday: 3, failedToday: 1, activeKeys: 2 }),
     listKeys: async () => [],
+    createKey: async (_input: unknown, _hash: string, prefix: string, actor: string) => { createdKeys.push({ prefix, actor }); },
+    updateQuota: async () => true,
+    revokeKey: async () => true,
   };
   const gateway = createGatewayServer(config, { adminRepository });
   const gatewayPort = await listen(gateway);
@@ -118,6 +122,17 @@ test("protects the read-only admin dashboard API with a separate key", async (t)
   assert.equal(authorized.status, 200);
   assert.deepEqual(await authorized.json(), { requestsToday: 4, completedToday: 3, failedToday: 1, activeKeys: 2 });
   assert.equal(authorized.headers.get("cache-control"), "no-store");
+
+  const created = await fetch(`http://127.0.0.1:${gatewayPort}/admin/api/keys`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${adminKey}`, "content-type": "application/json" },
+    body: JSON.stringify({ dailyLimit: 100, requestsPerMinute: 30, maxConcurrentRequests: 2, expiresInDays: 30 }),
+  });
+  assert.equal(created.status, 201);
+  const createdBody = await created.json() as { key: string; prefix: string };
+  assert.match(createdBody.key, /^gw_[a-f\d]{48}$/);
+  assert.equal(createdBody.prefix, createdBody.key.slice(0, 11));
+  assert.deepEqual(createdKeys, [{ prefix: createdBody.prefix, actor: hashGatewayKey(adminKey).slice(0, 16) }]);
 });
 
 test("isolates a rejected credential and fails over before streaming", async (t) => {
