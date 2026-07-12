@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+*.log
+.DS_Store
+coverage/
+**/bin/
+**/obj/
+.vs/
+artifacts/
+test/fixtures/**/tmp/

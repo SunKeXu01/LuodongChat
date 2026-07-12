@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS upstream_attempts;
+DROP TABLE IF EXISTS user_requests;
+DROP TABLE IF EXISTS upstream_credentials;
+DROP TABLE IF EXISTS upstreams;
+DROP TABLE IF EXISTS gateway_keys;
+DROP TABLE IF EXISTS users;
+DROP TYPE IF EXISTS request_status;
+DROP TYPE IF EXISTS credential_health;
+DROP TYPE IF EXISTS gateway_key_status;

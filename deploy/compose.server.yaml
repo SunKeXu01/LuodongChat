@@ -1,0 +1,103 @@
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    mem_limit: 256m
+    mem_reservation: 96m
+    pids_limit: 128
+    environment:
+      PORT: "8787"
+      UPSTREAM_BASE_URL: ${UPSTREAM_BASE_URL}
+      UPSTREAM_RESPONSES_PATH: ${UPSTREAM_RESPONSES_PATH:-/responses}
+      UPSTREAM_API_KEY: ${UPSTREAM_API_KEY}
+      UPSTREAM_API_KEYS: ${UPSTREAM_API_KEYS:-}
+      GATEWAY_KEY_HASHES: ${GATEWAY_KEY_HASHES}
+      REQUESTS_PER_MINUTE: ${REQUESTS_PER_MINUTE:-30}
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-2}
+      UPSTREAM_TIMEOUT_MS: ${UPSTREAM_TIMEOUT_MS:-300000}
+      DATABASE_URL: postgresql://connector:${POSTGRES_PASSWORD}@postgres:5432/connector
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "127.0.0.1:8787:8787"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8787/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  postgres:
+    image: public.ecr.aws/docker/library/postgres:17-alpine
+    restart: unless-stopped
+    mem_limit: 256m
+    mem_reservation: 128m
+    pids_limit: 128
+    shm_size: 64m
+    environment:
+      POSTGRES_DB: connector
+      POSTGRES_USER: connector
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - effective_cache_size=128MB
+      - -c
+      - work_mem=2MB
+      - -c
+      - maintenance_work_mem=32MB
+      - -c
+      - max_connections=30
+    volumes:
+      - /app/module/postgres:/var/lib/postgresql/data
+      - ../db/migrations/001_initial.sql:/docker-entrypoint-initdb.d/001_initial.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U connector -d connector"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: public.ecr.aws/docker/library/redis:7.4-alpine
+    restart: unless-stopped
+    mem_limit: 96m
+    mem_reservation: 32m
+    pids_limit: 64
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - 64mb
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - /app/module/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
