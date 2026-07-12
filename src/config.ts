@@ -9,6 +9,7 @@ export interface GatewayConfig {
   requestsPerMinute: number;
   maxConcurrentRequests: number;
   upstreamTimeoutMs: number;
+  version?: string;
 }
 
 function positiveInteger(name: string, fallback: number): number {
@@ -59,5 +60,6 @@ export function loadConfig(): GatewayConfig {
     requestsPerMinute: positiveInteger("REQUESTS_PER_MINUTE", 30),
     maxConcurrentRequests: positiveInteger("MAX_CONCURRENT_REQUESTS", 2),
     upstreamTimeoutMs: positiveInteger("UPSTREAM_TIMEOUT_MS", 300_000),
+    version: process.env.APP_VERSION?.trim() || "development",
   };
 }

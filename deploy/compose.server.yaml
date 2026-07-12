@@ -9,6 +9,7 @@ services:
     pids_limit: 128
     environment:
       PORT: "8787"
+      APP_VERSION: ${APP_VERSION:-unknown}
       UPSTREAM_BASE_URL: ${UPSTREAM_BASE_URL}
       UPSTREAM_RESPONSES_PATH: ${UPSTREAM_RESPONSES_PATH:-/responses}
       UPSTREAM_API_KEY: ${UPSTREAM_API_KEY}

@@ -92,7 +92,7 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
     res.setHeader("x-request-id", requestId);
 
     if (req.method === "GET" && req.url === "/healthz") {
-      return json(res, 200, { status: "ok" });
+      return json(res, 200, { status: "ok", version: config.version ?? "unknown" });
     }
     if (req.method === "GET" && req.url === "/") {
       res.writeHead(200, {
@@ -146,9 +146,22 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
         return json(res, 200, { status: "authenticated", expiresInSeconds: 900 });
       }
       res.setHeader("cache-control", "no-store");
-      if (req.method === "GET" && req.url === "/admin/api/summary") return json(res, 200, await options.adminRepository!.getSummary());
+      if (req.method === "GET" && req.url === "/admin/api/summary") return json(res, 200, { ...(await options.adminRepository!.getSummary()), version: config.version ?? "unknown" });
       if (req.method === "GET" && req.url === "/admin/api/keys") return json(res, 200, await options.adminRepository!.listKeys());
       if (req.method === "GET" && req.url === "/admin/api/observability") return json(res, 200, await options.adminRepository!.getObservability());
+      if (req.method === "GET" && req.url === "/admin/api/upstreams") {
+        const persisted = new Map((await options.adminRepository!.getUpstreamStats()).map((item) => [item.credentialId, item]));
+        return json(res, 200, upstreamPool.snapshot().map((item) => ({
+          credentialId: item.id.slice(0, 12),
+          health: item.health,
+          consecutiveFailures: item.consecutiveFailures,
+          inFlight: item.inFlight,
+          attempts: persisted.get(item.id)?.attempts ?? 0,
+          failures: persisted.get(item.id)?.failures ?? 0,
+          retryableAttempts: persisted.get(item.id)?.retryableAttempts ?? 0,
+          averageDurationMs: persisted.get(item.id)?.averageDurationMs ?? null,
+        })));
+      }
       const actorFingerprint = hashGatewayKey(adminKey).slice(0, 16);
       try {
         if (req.method === "POST" && req.url === "/admin/api/keys") {

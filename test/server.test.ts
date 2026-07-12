@@ -103,6 +103,7 @@ test("protects the read-only admin dashboard API with a separate key", async (t)
     getSummary: async () => ({ requestsToday: 4, completedToday: 3, failedToday: 1, activeKeys: 2 }),
     listKeys: async () => [],
     getObservability: async () => ({ hourly: [], errors: [], audit: [] }),
+    getUpstreamStats: async () => [],
     createKey: async (_input: unknown, _hash: string, prefix: string, actor: string) => { createdKeys.push({ prefix, actor }); },
     updateQuota: async () => true,
     revokeKey: async () => true,
@@ -122,7 +123,7 @@ test("protects the read-only admin dashboard API with a separate key", async (t)
     headers: { authorization: `Bearer ${adminKey}` },
   });
   assert.equal(authorized.status, 200);
-  assert.deepEqual(await authorized.json(), { requestsToday: 4, completedToday: 3, failedToday: 1, activeKeys: 2 });
+  assert.deepEqual(await authorized.json(), { requestsToday: 4, completedToday: 3, failedToday: 1, activeKeys: 2, version: "unknown" });
   assert.equal(authorized.headers.get("cache-control"), "no-store");
 
   const created = await fetch(`http://127.0.0.1:${gatewayPort}/admin/api/keys`, {

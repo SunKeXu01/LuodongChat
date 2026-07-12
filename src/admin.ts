@@ -21,10 +21,19 @@ export interface AdminObservability {
   audit: Array<{ actor: string; action: string; targetPrefix: string | null; createdAt: string }>;
 }
 
+export interface AdminUpstreamStat {
+  credentialId: string;
+  attempts: number;
+  failures: number;
+  retryableAttempts: number;
+  averageDurationMs: number | null;
+}
+
 export interface AdminRepository {
   getSummary(): Promise<AdminSummary>;
   listKeys(): Promise<AdminKeyRow[]>;
   getObservability(): Promise<AdminObservability>;
+  getUpstreamStats(): Promise<AdminUpstreamStat[]>;
   createKey(input: AdminKeyInput, keyHash: string, keyPrefix: string, actorFingerprint: string): Promise<void>;
   updateQuota(keyPrefix: string, input: AdminQuotaInput, actorFingerprint: string): Promise<boolean>;
   revokeKey(keyPrefix: string, actorFingerprint: string): Promise<boolean>;
@@ -123,6 +132,24 @@ export class PostgresAdminRepository implements AdminRepository {
         createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
       })),
     };
+  }
+
+  async getUpstreamStats(): Promise<AdminUpstreamStat[]> {
+    const result = await this.db.query(`SELECT credential_fingerprint,
+      count(*) AS attempts,
+      count(*) FILTER (WHERE status_code >= 400 OR error_class IS NOT NULL) AS failures,
+      count(*) FILTER (WHERE retryable) AS retryable_attempts,
+      round(avg(extract(epoch FROM (ended_at - started_at)) * 1000)) AS average_duration_ms
+    FROM upstream_attempts
+    WHERE started_at >= now() - interval '24 hours'
+    GROUP BY credential_fingerprint ORDER BY attempts DESC`);
+    return result.rows.map((row) => ({
+      credentialId: String(row.credential_fingerprint),
+      attempts: Number(row.attempts ?? 0),
+      failures: Number(row.failures ?? 0),
+      retryableAttempts: Number(row.retryable_attempts ?? 0),
+      averageDurationMs: row.average_duration_ms === null ? null : Number(row.average_duration_ms),
+    }));
   }
 
   async createKey(input: AdminKeyInput, keyHash: string, keyPrefix: string, actorFingerprint: string): Promise<void> {

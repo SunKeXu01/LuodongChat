@@ -62,3 +62,13 @@ test("maps hourly, error, and audit metadata", async () => {
     audit: [{ actor: "actor123", action: "key_created", targetPrefix: "gw_12345678", createdAt: now.toISOString() }],
   });
 });
+
+test("maps metadata-only upstream attempt statistics", async () => {
+  const repository = new PostgresAdminRepository({ query: async () => ({ rows: [{
+    credential_fingerprint: "a".repeat(64), attempts: "8", failures: "2",
+    retryable_attempts: "3", average_duration_ms: "450",
+  }] }) });
+  assert.deepEqual(await repository.getUpstreamStats(), [{
+    credentialId: "a".repeat(64), attempts: 8, failures: 2, retryableAttempts: 3, averageDurationMs: 450,
+  }]);
+});

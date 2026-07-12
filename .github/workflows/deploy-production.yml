@@ -47,7 +47,7 @@ jobs:
             ./ root@8.140.211.162:/app/chatgpt_connector/
 
       - name: Back up, migrate, and deploy
-        run: ssh root@8.140.211.162 /app/chatgpt_connector/deploy/remote-deploy.sh
+        run: ssh root@8.140.211.162 APP_VERSION=${{ github.event.workflow_run.head_sha }} /app/chatgpt_connector/deploy/remote-deploy.sh
 
       - name: Verify public health
         run: curl --fail --silent --show-error --max-time 15 https://520skx.com/healthz
