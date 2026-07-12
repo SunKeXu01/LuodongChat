@@ -15,9 +15,16 @@ export interface AdminKeyRow {
   expiresAt: string | null;
 }
 
+export interface AdminObservability {
+  hourly: Array<{ hour: string; total: number; completed: number; failed: number; averageDurationMs: number | null }>;
+  errors: Array<{ code: string; count: number }>;
+  audit: Array<{ actor: string; action: string; targetPrefix: string | null; createdAt: string }>;
+}
+
 export interface AdminRepository {
   getSummary(): Promise<AdminSummary>;
   listKeys(): Promise<AdminKeyRow[]>;
+  getObservability(): Promise<AdminObservability>;
   createKey(input: AdminKeyInput, keyHash: string, keyPrefix: string, actorFingerprint: string): Promise<void>;
   updateQuota(keyPrefix: string, input: AdminQuotaInput, actorFingerprint: string): Promise<boolean>;
   revokeKey(keyPrefix: string, actorFingerprint: string): Promise<boolean>;
@@ -78,6 +85,43 @@ export class PostgresAdminRepository implements AdminRepository {
       usedToday: Number(row.used_today ?? 0),
       expiresAt: row.expires_at instanceof Date ? row.expires_at.toISOString() : row.expires_at ? String(row.expires_at) : null,
     }));
+  }
+
+  async getObservability(): Promise<AdminObservability> {
+    const [hourlyResult, errorsResult, auditResult] = await Promise.all([
+      this.db.query(`WITH hours AS (
+        SELECT generate_series(date_trunc('hour', now()) - interval '23 hours', date_trunc('hour', now()), interval '1 hour') AS hour
+      ) SELECT hours.hour, count(request.id) AS total,
+        count(request.id) FILTER (WHERE request.status = 'completed') AS completed,
+        count(request.id) FILTER (WHERE request.status = 'failed') AS failed,
+        round(avg(extract(epoch FROM (request.ended_at - request.started_at)) * 1000)) AS average_duration_ms
+      FROM hours LEFT JOIN user_requests request
+        ON request.started_at >= hours.hour AND request.started_at < hours.hour + interval '1 hour'
+      GROUP BY hours.hour ORDER BY hours.hour`),
+      this.db.query(`SELECT COALESCE(status_code::text, error_class, 'unknown') AS code, count(*) AS count
+        FROM user_requests
+        WHERE started_at >= now() - interval '24 hours' AND status = 'failed'
+        GROUP BY COALESCE(status_code::text, error_class, 'unknown')
+        ORDER BY count(*) DESC, code LIMIT 10`),
+      this.db.query(`SELECT actor_fingerprint, action, target_key_prefix, created_at
+        FROM admin_audit_log ORDER BY created_at DESC LIMIT 50`),
+    ]);
+    return {
+      hourly: hourlyResult.rows.map((row) => ({
+        hour: row.hour instanceof Date ? row.hour.toISOString() : String(row.hour),
+        total: Number(row.total ?? 0),
+        completed: Number(row.completed ?? 0),
+        failed: Number(row.failed ?? 0),
+        averageDurationMs: row.average_duration_ms === null ? null : Number(row.average_duration_ms),
+      })),
+      errors: errorsResult.rows.map((row) => ({ code: String(row.code), count: Number(row.count ?? 0) })),
+      audit: auditResult.rows.map((row) => ({
+        actor: String(row.actor_fingerprint),
+        action: String(row.action),
+        targetPrefix: row.target_key_prefix ? String(row.target_key_prefix) : null,
+        createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+      })),
+    };
   }
 
   async createKey(input: AdminKeyInput, keyHash: string, keyPrefix: string, actorFingerprint: string): Promise<void> {

@@ -126,6 +126,7 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
       res.setHeader("cache-control", "no-store");
       if (req.method === "GET" && req.url === "/admin/api/summary") return json(res, 200, await options.adminRepository!.getSummary());
       if (req.method === "GET" && req.url === "/admin/api/keys") return json(res, 200, await options.adminRepository!.listKeys());
+      if (req.method === "GET" && req.url === "/admin/api/observability") return json(res, 200, await options.adminRepository!.getObservability());
       const actorFingerprint = hashGatewayKey(adminKey).slice(0, 16);
       try {
         if (req.method === "POST" && req.url === "/admin/api/keys") {

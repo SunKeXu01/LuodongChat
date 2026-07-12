@@ -102,6 +102,7 @@ test("protects the read-only admin dashboard API with a separate key", async (t)
   const adminRepository = {
     getSummary: async () => ({ requestsToday: 4, completedToday: 3, failedToday: 1, activeKeys: 2 }),
     listKeys: async () => [],
+    getObservability: async () => ({ hourly: [], errors: [], audit: [] }),
     createKey: async (_input: unknown, _hash: string, prefix: string, actor: string) => { createdKeys.push({ prefix, actor }); },
     updateQuota: async () => true,
     revokeKey: async () => true,

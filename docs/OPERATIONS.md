@@ -57,4 +57,6 @@ Set `ADMIN_KEY_HASHES` to one or more SHA-256 hashes of dedicated administrator 
 
 The dashboard exposes metadata only: aggregate request states, key prefixes, status, limits, today's request count, and expiry. Administrators can create a key, update its quota, or revoke it. A new plaintext key is returned once and is never persisted. Mutations write a metadata-only audit record containing the administrator fingerprint, action, target prefix, and limits.
 
+Operational views include hourly request counts for the last 24 hours, completed/failed totals, average request duration, error distribution, and the latest 50 administrative audit events.
+
 Responses include `Cache-Control: no-store`; prompt and response bodies are never queried or displayed.

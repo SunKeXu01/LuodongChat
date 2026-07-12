@@ -45,3 +45,18 @@ test("writes key changes and audit metadata in one statement", async () => {
   assert.equal(await repository.revokeKey("gw_12345678", "actor123"), true);
   assert.match(calls[2]?.sql ?? "", /key_revoked/);
 });
+
+test("maps hourly, error, and audit metadata", async () => {
+  const now = new Date("2026-07-12T08:00:00Z");
+  const responses = [
+    { rows: [{ hour: now, total: "3", completed: "2", failed: "1", average_duration_ms: "1250" }] },
+    { rows: [{ code: "502", count: "1" }] },
+    { rows: [{ actor_fingerprint: "actor123", action: "key_created", target_key_prefix: "gw_12345678", created_at: now }] },
+  ];
+  const repository = new PostgresAdminRepository({ query: async () => responses.shift() ?? { rows: [] } });
+  assert.deepEqual(await repository.getObservability(), {
+    hourly: [{ hour: now.toISOString(), total: 3, completed: 2, failed: 1, averageDurationMs: 1250 }],
+    errors: [{ code: "502", count: 1 }],
+    audit: [{ actor: "actor123", action: "key_created", targetPrefix: "gw_12345678", createdAt: now.toISOString() }],
+  });
+});
