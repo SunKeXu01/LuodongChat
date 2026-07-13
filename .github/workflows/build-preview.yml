@@ -90,17 +90,19 @@ jobs:
         run: |
           dotnet test client/ChatGPTConnector.Core.Tests/ChatGPTConnector.Core.Tests.csproj --configuration Release
           dotnet publish client/ChatGPTConnector.App/ChatGPTConnector.App.csproj --configuration Release --runtime win-x64 --output artifacts/publish
+          & artifacts/publish/ChatGPTConnector.exe --smoke-test
+          if ($LASTEXITCODE -ne 0) { throw "Published Windows executable failed its startup smoke test." }
           (Get-FileHash artifacts/publish/ChatGPTConnector.exe -Algorithm SHA256).Hash.ToLowerInvariant() |
             Set-Content artifacts/publish/ChatGPTConnector.exe.sha256
-          Compress-Archive -Path artifacts/publish/* -DestinationPath artifacts/ChatGPTConnector-0.1.0-preview.2-win-x64.zip
-          (Get-FileHash artifacts/ChatGPTConnector-0.1.0-preview.2-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant() |
-            Set-Content artifacts/ChatGPTConnector-0.1.0-preview.2-win-x64.sha256
+          Compress-Archive -Path artifacts/publish/* -DestinationPath artifacts/ChatGPTConnector-0.1.0-preview.3-win-x64.zip
+          (Get-FileHash artifacts/ChatGPTConnector-0.1.0-preview.3-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant() |
+            Set-Content artifacts/ChatGPTConnector-0.1.0-preview.3-win-x64.sha256
       - uses: actions/upload-artifact@v6
         with:
-          name: ChatGPTConnector-0.1.0-preview.2-win-x64
+          name: ChatGPTConnector-0.1.0-preview.3-win-x64
           path: |
-            artifacts/ChatGPTConnector-0.1.0-preview.2-win-x64.zip
-            artifacts/ChatGPTConnector-0.1.0-preview.2-win-x64.sha256
+            artifacts/ChatGPTConnector-0.1.0-preview.3-win-x64.zip
+            artifacts/ChatGPTConnector-0.1.0-preview.3-win-x64.sha256
             artifacts/publish/ChatGPTConnector.exe
             artifacts/publish/ChatGPTConnector.exe.sha256
           if-no-files-found: error
@@ -113,8 +115,8 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           $files = @(
-            "artifacts/ChatGPTConnector-0.1.0-preview.2-win-x64.zip",
-            "artifacts/ChatGPTConnector-0.1.0-preview.2-win-x64.sha256",
+            "artifacts/ChatGPTConnector-0.1.0-preview.3-win-x64.zip",
+            "artifacts/ChatGPTConnector-0.1.0-preview.3-win-x64.sha256",
             "artifacts/publish/ChatGPTConnector.exe",
             "artifacts/publish/ChatGPTConnector.exe.sha256"
           )

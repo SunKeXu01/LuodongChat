@@ -19,9 +19,14 @@ public partial class MainWindow : Window
     private readonly ClientUpdateService _updates = new(Http);
     private ClientUpdate? _availableUpdate;
 
-    public MainWindow()
+    public MainWindow() : this(skipStartupChecks: false)
+    {
+    }
+
+    internal MainWindow(bool skipStartupChecks)
     {
         InitializeComponent();
+        if (skipStartupChecks) return;
         Loaded += async (_, _) =>
         {
             RefreshStatus();

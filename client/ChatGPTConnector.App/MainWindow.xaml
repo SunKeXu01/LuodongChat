@@ -49,6 +49,9 @@
             <TextBlock Text="API-Key 模式无需 ChatGPT 账号；账号同步、云端历史等功能可能不可用。"
                        Foreground="#6B7280" FontSize="12" TextWrapping="Wrap" TextAlignment="Center" Margin="0,6,0,0" />
         </StackPanel>
-        <TextBlock Grid.Row="2" Text="网关：https://520skx.com" Foreground="#6B7280" />
+        <StackPanel Grid.Row="2">
+            <TextBlock Text="网关：https://520skx.com" Foreground="#6B7280" />
+            <TextBlock Text="客服：2554798585（QQ）" Foreground="#6B7280" Margin="0,4,0,0" />
+        </StackPanel>
     </Grid>
 </Window>
