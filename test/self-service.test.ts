@@ -15,6 +15,11 @@ class MemoryEnrollmentRepository implements EnrollmentRepository {
   async issueKey(_identityHash: string, _keyHash: string, keyPrefix: string, defaults: SelfServiceKeyDefaults, rotate: boolean): Promise<"created"> {
     assert.match(keyPrefix, /^gw_[a-f\d]{8}$/); this.defaults = defaults; this.rotated = rotate; this.active = true; return "created";
   }
+  async login(_identityHash: string, email: string): Promise<import("../src/self-service.js").AccountProfile> { return { id: "user", email, nickname: "user", avatarMediaType: null, avatarBase64: null, balanceMicrounits: 0 }; }
+  async authenticate(): Promise<null> { return null; }
+  async updateProfile(): Promise<null> { return null; }
+  async updateAvatar(): Promise<null> { return null; }
+  async logout(): Promise<void> {}
 }
 
 class MemoryMailer implements EnrollmentMailer {
@@ -59,4 +64,18 @@ test("removes an unusable challenge when email delivery fails", async () => {
   const service = new EnrollmentService(repository, { sendCode: async () => { throw new Error("smtp failed"); } }, defaults);
   await assert.rejects(service.requestCode("user@example.com", "ip"), /smtp failed/);
   assert.equal(repository.codeHash, "");
+});
+
+test("verifies email and creates an authenticated account session", async () => {
+  const repository = new MemoryEnrollmentRepository();
+  const mailer = new MemoryMailer();
+  const service = new EnrollmentService(repository, mailer, defaults);
+  await service.requestCode("user@example.com", "ip");
+  const result = await service.verifyAndLogin("user@example.com", mailer.code);
+  assert.equal(result.status, "authenticated");
+  if (result.status === "authenticated") {
+    assert.match(result.accessToken, /^usr_[a-f\d]{64}$/);
+    assert.match(result.gatewayKey, /^gw_[a-f\d]{48}$/);
+    assert.equal(result.profile.email, "user@example.com");
+  }
 });

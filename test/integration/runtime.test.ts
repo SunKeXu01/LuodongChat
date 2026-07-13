@@ -14,7 +14,7 @@ const integrationAvailable = Boolean(databaseUrl && redisUrl);
 test("applies migrations idempotently and verifies database-backed keys", { skip: !integrationAvailable }, async () => {
   assert.ok(databaseUrl);
   const first = await runMigrations(databaseUrl);
-  assert.deepEqual(first, ["001_initial.sql", "002_gateway_key_limits.sql", "003_admin_audit.sql", "004_deployment_history.sql", "005_self_service_enrollment.sql", "006_unlimited_key_policy.sql"]);
+  assert.deepEqual(first, ["001_initial.sql", "002_gateway_key_limits.sql", "003_admin_audit.sql", "004_deployment_history.sql", "005_self_service_enrollment.sql", "006_unlimited_key_policy.sql", "007_user_accounts.sql"]);
   assert.deepEqual(await runMigrations(databaseUrl), []);
 
   const pool = new pg.Pool({ connectionString: databaseUrl });
@@ -64,4 +64,22 @@ test("creates and cancels a self-service enrollment challenge", { skip: !databas
   } finally {
     await pool.end();
   }
+});
+
+test("creates and authenticates a passwordless user account", { skip: !databaseUrl }, async () => {
+  assert.ok(databaseUrl);
+  await runMigrations(databaseUrl);
+  const pool = new pg.Pool({ connectionString: databaseUrl });
+  try {
+    const repository = new PostgresEnrollmentRepository(pool);
+    const profile = await repository.login(
+      "c".repeat(64), "account@example.com", hashGatewayKey("usr_integration"),
+      hashGatewayKey("gw_account_integration"), "gw_account", { dailyLimit: null, requestsPerMinute: 30, maxConcurrentRequests: 2, expiresInDays: null },
+    );
+    assert.equal(profile.email, "account@example.com");
+    assert.equal((await repository.authenticate(hashGatewayKey("usr_integration")))?.email, "account@example.com");
+    assert.equal((await repository.updateProfile(hashGatewayKey("usr_integration"), "测试用户"))?.nickname, "测试用户");
+    await repository.logout(hashGatewayKey("usr_integration"));
+    assert.equal(await repository.authenticate(hashGatewayKey("usr_integration")), null);
+  } finally { await pool.end(); }
 });

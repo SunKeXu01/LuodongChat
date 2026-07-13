@@ -11,7 +11,8 @@ public sealed record ConnectorSettings(
 
     public void Validate()
     {
-        if (GatewayBaseUri.Scheme != Uri.UriSchemeHttps)
+        if (GatewayBaseUri.Scheme != Uri.UriSchemeHttps
+            && !(GatewayBaseUri.Scheme == Uri.UriSchemeHttp && GatewayBaseUri.IsLoopback))
             throw new ArgumentException("Gateway URL must use HTTPS.", nameof(GatewayBaseUri));
         if (string.IsNullOrWhiteSpace(GatewayKey))
             throw new ArgumentException("Gateway key is required.", nameof(GatewayKey));

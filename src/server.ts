@@ -138,6 +138,63 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
       res.setHeader("cache-control", "no-store");
       return json(res, 200, { enabled: Boolean(options.enrollmentService) });
     }
+    if (req.method === "POST" && req.url === "/account/code" && options.enrollmentService) {
+      try {
+        const input = await readJsonObject(req);
+        const email = typeof input.email === "string" ? EnrollmentService.normalizeEmail(input.email) : null;
+        if (!email) return json(res, 400, { error: { code: "invalid_email", message: "请输入有效的邮箱地址" } });
+        const clientAddress = req.headers["x-real-ip"]?.toString().trim() || req.socket.remoteAddress || "unknown";
+        const result = await options.enrollmentService.requestCode(email, hashGatewayKey(clientAddress).slice(0, 16));
+        if (result === "rate_limited") {
+          res.setHeader("retry-after", "60");
+          return json(res, 429, { error: { code: "account_rate_limited", message: "验证码发送过于频繁，请稍后再试" } });
+        }
+        res.setHeader("cache-control", "no-store");
+        return json(res, 202, { status: "code_sent", expiresInSeconds: 600 });
+      } catch (error) {
+        if (error instanceof SyntaxError || (error instanceof Error && error.message === "invalid_json")) return json(res, 400, { error: { code: "invalid_json" } });
+        return json(res, 503, { error: { code: "email_unavailable", message: "验证码邮件暂时无法发送" } });
+      }
+    }
+    if (req.method === "POST" && req.url === "/account/verify" && options.enrollmentService) {
+      const input = await readJsonObject(req);
+      const email = typeof input.email === "string" ? EnrollmentService.normalizeEmail(input.email) : null;
+      const code = typeof input.code === "string" && /^\d{6}$/.test(input.code) ? input.code : null;
+      if (!email || !code) return json(res, 400, { error: { code: "invalid_verification_input", message: "请输入邮箱和 6 位验证码" } });
+      const result = await options.enrollmentService.verifyAndLogin(email, code);
+      res.setHeader("cache-control", "no-store");
+      if (result.status === "authenticated") return json(res, 200, result);
+      return json(res, 401, { error: { code: `verification_${result.status}`, message: "验证码无效或已过期" } });
+    }
+    if (req.url?.startsWith("/account/") && options.enrollmentService) {
+      const accessToken = extractBearerKey(req.headers.authorization);
+      if (!accessToken?.startsWith("usr_")) return json(res, 401, { error: { code: "login_required", message: "请先登录" } });
+      if (req.method === "GET" && req.url === "/account/profile") {
+        const profile = await options.enrollmentService.authenticate(accessToken);
+        return profile ? json(res, 200, profile) : json(res, 401, { error: { code: "session_expired", message: "登录已过期，请重新登录" } });
+      }
+      if (req.method === "PATCH" && req.url === "/account/profile") {
+        const input = await readJsonObject(req);
+        const nickname = typeof input.nickname === "string" ? input.nickname.trim() : "";
+        if (nickname.length < 2 || nickname.length > 20) return json(res, 400, { error: { code: "invalid_nickname", message: "网名应为 2 至 20 个字符" } });
+        const profile = await options.enrollmentService.updateProfile(accessToken, nickname);
+        return profile ? json(res, 200, profile) : json(res, 401, { error: { code: "session_expired" } });
+      }
+      if (req.method === "PUT" && req.url === "/account/avatar") {
+        const input = await readJsonObject(req);
+        const mediaType = typeof input.mediaType === "string" ? input.mediaType : "";
+        const dataBase64 = typeof input.dataBase64 === "string" ? input.dataBase64.replace(/\s/g, "") : "";
+        if (!new Set(["image/jpeg", "image/png", "image/webp"]).has(mediaType) || !/^[A-Za-z0-9+/]+={0,2}$/.test(dataBase64) || dataBase64.length > 700_000) {
+          return json(res, 400, { error: { code: "invalid_avatar", message: "头像必须是小于 512 KB 的 JPG、PNG 或 WebP 图片" } });
+        }
+        const profile = await options.enrollmentService.updateAvatar(accessToken, mediaType, dataBase64);
+        return profile ? json(res, 200, profile) : json(res, 401, { error: { code: "session_expired" } });
+      }
+      if (req.method === "POST" && req.url === "/account/logout") {
+        await options.enrollmentService.logout(accessToken);
+        return json(res, 200, { status: "logged_out" });
+      }
+    }
     if (req.method === "POST" && req.url === "/enrollment/code" && options.enrollmentService) {
       try {
         const input = await readJsonObject(req);

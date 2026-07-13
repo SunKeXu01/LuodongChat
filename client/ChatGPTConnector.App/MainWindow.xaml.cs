@@ -1,12 +1,14 @@
+using System.ComponentModel;
+using System.IO;
+using System.Reflection;
+using System.Net.Http;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Media;
-using System.Text.Json;
-using System.Net.Http;
-using System.IO;
-using System.Linq;
-using System.Reflection;
-using System.ComponentModel;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using ChatGPTConnector.Core;
+using Microsoft.Win32;
 using Application = System.Windows.Application;
 using MessageBox = System.Windows.MessageBox;
 using Brushes = System.Windows.Media.Brushes;
@@ -17,17 +19,19 @@ public partial class MainWindow : Window
 {
     private static readonly Uri GatewayUri = new("https://520skx.com");
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(90) };
-    private readonly CodexPaths _paths = CodexPaths.ForCurrentUser();
-    private readonly GatewayEnrollmentClient _enrollment = new(Http);
-    private readonly ChatGptAppService _chatGpt = new();
+    private readonly AccountClient _accounts = new(Http);
+    private readonly SecureSessionStore _sessionStore = SecureSessionStore.ForCurrentUser();
+    private readonly ManagedCodexEnvironment _codexEnvironment = new();
     private readonly ClientUpdateService _updates = new(Http);
+    private AccountSession? _session;
+    private LocalGatewayProxy? _proxy;
     private ClientUpdate? _availableUpdate;
     private TrayIconService? _trayIcon;
+    private Process? _restoreWatchdog;
     private bool _allowExit;
+    private readonly DispatcherTimer _sessionTimer = new() { Interval = TimeSpan.FromMinutes(5) };
 
-    public MainWindow() : this(skipStartupChecks: false)
-    {
-    }
+    public MainWindow() : this(false) { }
 
     internal MainWindow(bool skipStartupChecks)
     {
@@ -35,259 +39,197 @@ public partial class MainWindow : Window
         FitToWorkingArea();
         InitializeTrayIcon();
         Closing += MainWindow_OnClosing;
-        Application.Current.SessionEnding += (_, _) => _allowExit = true;
+        Application.Current.SessionEnding += (_, _) => { _allowExit = true; StopConnection(); };
+        _sessionTimer.Tick += async (_, _) => await ValidateSessionAsync();
         if (skipStartupChecks) return;
-        Loaded += async (_, _) =>
-        {
-            RefreshStatus();
-            var enabled = await _enrollment.IsEnabledAsync(GatewayUri);
-            EnrollmentPanel.IsEnabled = enabled;
-            EnrollmentTitle.Text = enabled ? "没有密钥？通过邮箱自助领取" : "自助领取暂未开放，可填写已有网关密钥";
-            await CheckForUpdatesAsync(silent: true);
-        };
+        Loaded += async (_, _) => await InitializeAsync();
     }
 
-    private void GatewayKeyInput_OnPasswordChanged(object sender, RoutedEventArgs e) =>
-        EnableButton.IsEnabled = !string.IsNullOrWhiteSpace(GatewayKeyInput.Password);
-
-    private async void RequestCodeButton_OnClick(object sender, RoutedEventArgs e)
+    private async Task InitializeAsync()
     {
-        var email = EmailInput.Text.Trim();
-        if (string.IsNullOrWhiteSpace(email)) { MessageBox.Show("请输入邮箱地址。", "自助领取"); return; }
-        SetBusy(true, "正在发送验证码…");
-        try
+        _session = _sessionStore.Load();
+        if (_session is not null)
         {
-            var result = await _enrollment.RequestCodeAsync(GatewayUri, email);
-            MessageBox.Show(result.Message, result.Success ? "验证码已发送" : "发送失败", MessageBoxButton.OK,
-                result.Success ? MessageBoxImage.Information : MessageBoxImage.Warning);
-        }
-        catch (Exception error) { MessageBox.Show(error.Message, "发送失败", MessageBoxButton.OK, MessageBoxImage.Error); }
-        finally { SetBusy(false); }
-    }
-
-    private async void ClaimKeyButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        var email = EmailInput.Text.Trim();
-        var code = VerificationCodeInput.Text.Trim();
-        if (string.IsNullOrWhiteSpace(email) || code.Length != 6) { MessageBox.Show("请输入邮箱和 6 位验证码。", "自助领取"); return; }
-        SetBusy(true, "正在验证并签发密钥…");
-        try
-        {
-            var result = await _enrollment.VerifyAsync(GatewayUri, email, code);
-            if (result.ActiveKeyExists && MessageBox.Show(result.Message, "确认轮换", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+            var profile = await _accounts.GetProfileAsync(GatewayUri, _session.AccessToken).ConfigureAwait(true);
+            if (profile is not null)
             {
-                result = await _enrollment.VerifyAsync(GatewayUri, email, code, rotate: true);
-            }
-            if (!result.Success) { MessageBox.Show(result.Message, "领取失败", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
-            GatewayKeyInput.Password = result.GatewayKey!;
-            VerificationCodeInput.Clear();
-            MessageBox.Show(result.Message, "领取成功", MessageBoxButton.OK, MessageBoxImage.Information);
-        }
-        catch (Exception error) { MessageBox.Show(error.Message, "领取失败", MessageBoxButton.OK, MessageBoxImage.Error); }
-        finally { SetBusy(false); }
-    }
-
-    private async void EnableButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        if (_chatGpt.Detect().IsRunning)
-        {
-            MessageBox.Show("ChatGPT/Codex 正在运行。请先完全退出程序，再开启连接，避免配置未被重新加载。", "请先退出 ChatGPT", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-        SetBusy(true, "正在验证网关连接…");
-        try
-        {
-            var settings = new ConnectorSettings(GatewayUri, GatewayKeyInput.Password);
-            var connection = await new GatewayConnectionTester(Http).TestAsync(settings);
-            if (!connection.Success)
-            {
-                MessageBox.Show(connection.Message, "连接失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+                _session = _session with { Profile = profile };
+                _sessionStore.Save(_session);
+                ShowAccount(profile);
+                await StartConnectionAsync();
+                _sessionTimer.Start();
+                await CheckForUpdatesAsync(true);
                 return;
             }
+            _sessionStore.Clear();
+            _session = null;
+        }
+        StopConnection();
+        ShowLogin();
+    }
 
-            var config = File.Exists(_paths.ConfigPath) ? await File.ReadAllTextAsync(_paths.ConfigPath) : string.Empty;
-            var auth = File.Exists(_paths.AuthPath) ? await File.ReadAllTextAsync(_paths.AuthPath) : "{}";
-            var plan = new CodexConfigPlanner().CreatePlan(config, auth, settings);
-            var summary = string.Join(Environment.NewLine, plan.ChangeSummary.Select(item => $"• {item}"));
-            var confirmed = MessageBox.Show(
-                $"将修改：\n{_paths.ConfigPath}\n{_paths.AuthPath}\n\n{summary}\n\n原配置将自动备份，是否继续？",
-                "确认修改 Codex 配置",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question);
-            if (confirmed != MessageBoxResult.Yes) return;
+    private async void LoginCodeButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var email = LoginEmailInput.Text.Trim();
+        if (string.IsNullOrWhiteSpace(email)) { MessageBox.Show("请输入邮箱地址。"); return; }
+        SetBusy(true);
+        try { await _accounts.RequestCodeAsync(GatewayUri, email); LoginNotice.Text = "验证码已发送，请检查邮箱。"; }
+        catch (Exception error) { MessageBox.Show(error.Message, "发送失败", MessageBoxButton.OK, MessageBoxImage.Warning); }
+        finally { SetBusy(false); }
+    }
 
-            await new CodexConfigInstaller(GetType().Assembly.GetName().Version?.ToString() ?? "0.1.0")
-                .ApplyAsync(_paths, plan);
-            var postApply = await new GatewayConnectionTester(Http).TestAsync(settings);
-            if (!postApply.Success) throw new InvalidOperationException($"配置已写入，但最终网关验证失败：{postApply.Message}");
-            GatewayKeyInput.Password = string.Empty;
+    private async void LoginButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var email = LoginEmailInput.Text.Trim();
+        var code = LoginCodeInput.Text.Trim();
+        if (string.IsNullOrWhiteSpace(email) || code.Length != 6) { MessageBox.Show("请输入邮箱和 6 位验证码。"); return; }
+        SetBusy(true);
+        try
+        {
+            _session = await _accounts.VerifyAsync(GatewayUri, email, code);
+            _sessionStore.Save(_session);
+            LoginCodeInput.Clear();
+            ShowAccount(_session.Profile);
+            await StartConnectionAsync();
+            _sessionTimer.Start();
+        }
+        catch (Exception error) { MessageBox.Show(error.Message, "登录失败", MessageBoxButton.OK, MessageBoxImage.Warning); }
+        finally { SetBusy(false); }
+    }
+
+    private async Task StartConnectionAsync()
+    {
+        if (_session is null) return;
+        StopConnection();
+        try
+        {
+            _proxy = new LocalGatewayProxy(Http, GatewayUri, _session.GatewayKey);
+            _proxy.Start();
+            await _codexEnvironment.ActivateAsync(_proxy.BaseUri);
+            StartRestoreWatchdog();
             StatusDot.Fill = Brushes.MediumSeaGreen;
-            StatusText.Text = "已连接，网关验证成功";
-            MessageBox.Show("配置和网关链路验证均已完成。现在可以启动 ChatGPT。", "配置成功");
+            StatusText.Text = "已登录，本地连接正在运行";
         }
         catch (Exception error)
         {
-            MessageBox.Show(error.Message, "配置失败", MessageBoxButton.OK, MessageBoxImage.Error);
+            StopConnection();
+            StatusDot.Fill = Brushes.IndianRed;
+            StatusText.Text = "连接建立失败";
+            MessageBox.Show(error.Message, "连接失败", MessageBoxButton.OK, MessageBoxImage.Error);
         }
-        finally
+    }
+
+    private async void ReconnectButton_OnClick(object sender, RoutedEventArgs e) => await StartConnectionAsync();
+
+    private async void SaveProfileButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_session is null) return;
+        try { UpdateProfile(await _accounts.UpdateProfileAsync(GatewayUri, _session.AccessToken, NicknameInput.Text.Trim())); }
+        catch (Exception error) { MessageBox.Show(error.Message, "保存失败", MessageBoxButton.OK, MessageBoxImage.Warning); }
+    }
+
+    private async void UploadAvatarButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_session is null) return;
+        var picker = new OpenFileDialog { Filter = "图片|*.jpg;*.jpeg;*.png;*.webp", CheckFileExists = true };
+        if (picker.ShowDialog() != true) return;
+        var data = await File.ReadAllBytesAsync(picker.FileName);
+        if (data.Length > 512 * 1024) { MessageBox.Show("头像不能超过 512 KB。"); return; }
+        var extension = Path.GetExtension(picker.FileName).ToLowerInvariant();
+        var mediaType = extension is ".jpg" or ".jpeg" ? "image/jpeg" : extension == ".png" ? "image/png" : "image/webp";
+        try { UpdateProfile(await _accounts.UpdateAvatarAsync(GatewayUri, _session.AccessToken, mediaType, Convert.ToBase64String(data))); }
+        catch (Exception error) { MessageBox.Show(error.Message, "上传失败", MessageBoxButton.OK, MessageBoxImage.Warning); }
+    }
+
+    private async void LogoutButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_session is not null) await _accounts.LogoutAsync(GatewayUri, _session.AccessToken).ContinueWith(_ => { });
+        StopConnection();
+        _sessionStore.Clear();
+        _session = null;
+        _sessionTimer.Stop();
+        ShowLogin();
+    }
+
+    private async Task ValidateSessionAsync()
+    {
+        if (_session is null) return;
+        try
         {
-            SetBusy(false);
+            var profile = await _accounts.GetProfileAsync(GatewayUri, _session.AccessToken);
+            if (profile is not null) { UpdateProfile(profile); return; }
         }
+        catch { return; }
+        StopConnection();
+        _sessionStore.Clear();
+        _session = null;
+        _sessionTimer.Stop();
+        ShowLogin();
+        MessageBox.Show("登录已过期，请重新登录。", "需要登录", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void ShowLogin() { AccountPanel.Visibility = Visibility.Collapsed; LoginPanel.Visibility = Visibility.Visible; }
+    private void ShowAccount(AccountProfile profile) { LoginPanel.Visibility = Visibility.Collapsed; AccountPanel.Visibility = Visibility.Visible; UpdateProfile(profile); }
+    private void UpdateProfile(AccountProfile profile)
+    {
+        if (_session is not null) { _session = _session with { Profile = profile }; _sessionStore.Save(_session); }
+        ProfileEmailText.Text = profile.Email;
+        NicknameInput.Text = profile.Nickname;
+        BalanceText.Text = $"¥{profile.BalanceMicrounits / 1_000_000m:F2}";
+        AvatarImage.Source = DecodeAvatar(profile.AvatarBase64);
+    }
+
+    private static ImageSource? DecodeAvatar(string? base64)
+    {
+        if (string.IsNullOrWhiteSpace(base64)) return null;
+        var image = new BitmapImage();
+        using var stream = new MemoryStream(Convert.FromBase64String(base64));
+        image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad; image.StreamSource = stream; image.EndInit(); image.Freeze();
+        return image;
+    }
+
+    private void StopConnection()
+    {
+        if (_proxy is not null) { _proxy.DisposeAsync().AsTask().GetAwaiter().GetResult(); _proxy = null; }
+        _codexEnvironment.Restore();
+    }
+
+    private void StartRestoreWatchdog()
+    {
+        if (_restoreWatchdog is { HasExited: false } || string.IsNullOrWhiteSpace(Environment.ProcessPath)) return;
+        _restoreWatchdog = Process.Start(new ProcessStartInfo(Environment.ProcessPath, $"--restore-watchdog {Environment.ProcessId}")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden
+        });
     }
 
     private async void UpdateButton_OnClick(object sender, RoutedEventArgs e)
     {
-        if (_availableUpdate is null) { await CheckForUpdatesAsync(silent: false); return; }
-        if (MessageBox.Show($"发现新版本 {_availableUpdate.Version}。下载、校验并立即更新？", "客户端更新", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-        SetBusy(true, "正在下载并校验更新…");
-        try
-        {
-            await _updates.DownloadAndScheduleAsync(_availableUpdate, Environment.ProcessPath ?? throw new InvalidOperationException("无法确定当前程序路径。"));
-            ExitApplication();
-        }
-        catch (Exception error) { MessageBox.Show(error.Message, "更新失败", MessageBoxButton.OK, MessageBoxImage.Error); SetBusy(false); }
+        if (_availableUpdate is null) { await CheckForUpdatesAsync(false); return; }
+        if (MessageBox.Show($"发现新版本 {_availableUpdate.Version}，立即更新？", "客户端更新", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
+        await _updates.DownloadAndScheduleAsync(_availableUpdate, Environment.ProcessPath!);
+        ExitApplication();
     }
 
     private async Task CheckForUpdatesAsync(bool silent)
     {
         try
         {
-            var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-                ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
+            var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
             _availableUpdate = await _updates.CheckAsync(version);
             UpdateButton.Content = _availableUpdate is null ? "检查客户端更新" : "立即更新";
-            UpdateText.Text = _availableUpdate is null ? (silent ? string.Empty : "当前已是最新版本") : $"发现新版本：{_availableUpdate.Version}";
+            UpdateText.Text = _availableUpdate is null ? (silent ? "" : "当前已是最新版本") : $"发现新版本：{_availableUpdate.Version}";
         }
-        catch (Exception error)
-        {
-            if (!silent) MessageBox.Show($"暂时无法检查更新：{error.Message}", "检查更新", MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
+        catch (Exception error) { if (!silent) MessageBox.Show(error.Message, "检查更新失败"); }
     }
 
-    private async void RestoreButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        SetBusy(true, "正在检查最近备份…");
-        try
-        {
-            var backupRoot = Path.Combine(_paths.CodexDirectory, ".chatgpt-connector", "backups");
-            var manifestPath = Directory.Exists(backupRoot)
-                ? Directory.EnumerateFiles(backupRoot, "manifest.json", SearchOption.AllDirectories)
-                    .OrderByDescending(File.GetLastWriteTimeUtc)
-                    .FirstOrDefault()
-                : null;
-            if (manifestPath is null)
-            {
-                MessageBox.Show("没有找到可恢复的连接器备份。", "恢复原配置");
-                return;
-            }
-
-            var manifest = JsonSerializer.Deserialize<BackupManifest>(await File.ReadAllTextAsync(manifestPath))
-                ?? throw new InvalidDataException("备份清单无法读取。");
-            var currentConfig = File.Exists(_paths.ConfigPath) ? await File.ReadAllTextAsync(_paths.ConfigPath) : string.Empty;
-            var currentAuth = File.Exists(_paths.AuthPath) ? await File.ReadAllTextAsync(_paths.AuthPath) : "{}";
-            var restore = new CodexConfigRestorer().CreatePlan(manifest, currentConfig, currentAuth);
-            if (restore.Conflicts.Count > 0)
-            {
-                MessageBox.Show(
-                    $"以下受管字段已被外部修改，已停止自动恢复：\n{string.Join(Environment.NewLine, restore.Conflicts)}",
-                    "配置冲突",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
-                return;
-            }
-
-            if (MessageBox.Show(
-                    $"将恢复最近备份（{manifest.CreatedAt.LocalDateTime:g}），是否继续？",
-                    "恢复原配置",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-            var restorePlan = new ConfigurationPlan(
-                restore.UpdatedConfigToml,
-                restore.UpdatedAuthJson,
-                manifest.ManagedPaths,
-                ["恢复连接器管理的 Codex 配置字段"]);
-            await new CodexConfigInstaller(GetType().Assembly.GetName().Version?.ToString() ?? "0.1.0")
-                .ApplyAsync(_paths, restorePlan);
-            StatusDot.Fill = Brushes.Gray;
-            StatusText.Text = "已恢复原配置";
-            MessageBox.Show("原配置已恢复。", "恢复完成");
-        }
-        catch (Exception error)
-        {
-            MessageBox.Show(error.Message, "恢复失败", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-        finally
-        {
-            SetBusy(false);
-        }
-    }
-
-    private void RefreshStatus()
-    {
-        var configured = File.Exists(_paths.ConfigPath)
-            && File.ReadAllText(_paths.ConfigPath).Contains("ChatGPTConnector", StringComparison.Ordinal);
-        StatusDot.Fill = configured ? Brushes.MediumSeaGreen : Brushes.Gray;
-        StatusText.Text = configured ? "已检测到连接器配置" : "尚未配置";
-        RestoreButton.IsEnabled = Directory.Exists(Path.Combine(_paths.CodexDirectory, ".chatgpt-connector", "backups"));
-    }
-
-    private void FitToWorkingArea()
-    {
-        const double screenMargin = 24;
-        var workArea = SystemParameters.WorkArea;
-        MaxWidth = Math.Max(MinWidth, workArea.Width - screenMargin);
-        MaxHeight = Math.Max(MinHeight, workArea.Height - screenMargin);
-        Width = Math.Min(Width, MaxWidth);
-        Height = Math.Min(Height, MaxHeight);
-    }
-
-    private void InitializeTrayIcon()
-    {
-        _trayIcon = new TrayIconService("ChatGPT 连接器", ShowMainWindow, ExitApplication);
-    }
-
-    private void MainWindow_OnClosing(object? sender, CancelEventArgs e)
-    {
-        if (_allowExit) return;
-        e.Cancel = true;
-        Hide();
-        ShowInTaskbar = false;
-    }
-
-    private void ShowMainWindow()
-    {
-        ShowInTaskbar = true;
-        Show();
-        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
-        Activate();
-    }
-
-    private void ExitApplication()
-    {
-        PrepareForExit();
-        Application.Current.Shutdown();
-    }
-
-    internal void PrepareForExit()
-    {
-        _allowExit = true;
-        if (_trayIcon is not null)
-        {
-            _trayIcon.Dispose();
-            _trayIcon = null;
-        }
-    }
-
-    private void SetBusy(bool busy, string? status = null)
-    {
-        EnableButton.IsEnabled = !busy && !string.IsNullOrWhiteSpace(GatewayKeyInput.Password);
-        RestoreButton.IsEnabled = !busy;
-        GatewayKeyInput.IsEnabled = !busy;
-        EmailInput.IsEnabled = !busy;
-        VerificationCodeInput.IsEnabled = !busy;
-        RequestCodeButton.IsEnabled = !busy;
-        ClaimKeyButton.IsEnabled = !busy;
-        UpdateButton.IsEnabled = !busy;
-        if (status is not null) StatusText.Text = status;
-    }
+    private void SetBusy(bool busy) { LoginCodeButton.IsEnabled = !busy; LoginButton.IsEnabled = !busy; }
+    private void FitToWorkingArea() { var area = SystemParameters.WorkArea; MaxWidth = Math.Max(MinWidth, area.Width - 24); MaxHeight = Math.Max(MinHeight, area.Height - 24); Width = Math.Min(Width, MaxWidth); Height = Math.Min(Height, MaxHeight); }
+    private void InitializeTrayIcon() => _trayIcon = new TrayIconService("ChatGPT 连接器", ShowMainWindow, ExitApplication);
+    private void MainWindow_OnClosing(object? sender, CancelEventArgs e) { if (_allowExit) return; e.Cancel = true; Hide(); ShowInTaskbar = false; }
+    private void ShowMainWindow() { ShowInTaskbar = true; Show(); if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal; Activate(); }
+    private void ExitApplication() { PrepareForExit(); Application.Current.Shutdown(); }
+    internal void PrepareForExit() { _allowExit = true; _sessionTimer.Stop(); StopConnection(); _trayIcon?.Dispose(); _trayIcon = null; }
 }

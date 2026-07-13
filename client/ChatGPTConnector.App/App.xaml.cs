@@ -1,7 +1,9 @@
 using System.IO;
 using System.Text;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Threading;
+using ChatGPTConnector.Core;
 using Application = System.Windows.Application;
 using MessageBox = System.Windows.MessageBox;
 
@@ -12,6 +14,14 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        if (e.Args.Length == 2 && e.Args[0].Equals("--restore-watchdog", StringComparison.OrdinalIgnoreCase)
+            && int.TryParse(e.Args[1], out var parentProcessId))
+        {
+            try { Process.GetProcessById(parentProcessId).WaitForExit(); } catch { }
+            new ManagedCodexEnvironment().Restore();
+            Shutdown(0);
+            return;
+        }
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
 
