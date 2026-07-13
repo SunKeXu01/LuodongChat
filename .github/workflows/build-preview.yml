@@ -149,7 +149,7 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
       - name: Synchronize release files
         run: |
-          rsync -az --delete \
+          rsync -rz --delete \
             --exclude='.git/' \
             --exclude='.env' \
             --exclude='node_modules/' \
@@ -193,7 +193,7 @@ jobs:
           test -s "$executable"
           test -s "$checksum"
           printf '{"version":"%s","executableUrl":"https://520skx.com/client/download/ChatGPTConnector.exe","checksumUrl":"https://520skx.com/client/download/ChatGPTConnector.exe.sha256"}\n' "${VERSION#v}" > update.json
-          rsync -az "$executable" connector-deploy@8.140.211.162:/app/module/client-releases/ChatGPTConnector.exe.next
-          rsync -az "$checksum" connector-deploy@8.140.211.162:/app/module/client-releases/ChatGPTConnector.exe.sha256.next
-          rsync -az update.json connector-deploy@8.140.211.162:/app/module/client-releases/update.json.next
+          rsync -rz "$executable" connector-deploy@8.140.211.162:/app/module/client-releases/ChatGPTConnector.exe.next
+          rsync -rz "$checksum" connector-deploy@8.140.211.162:/app/module/client-releases/ChatGPTConnector.exe.sha256.next
+          rsync -rz update.json connector-deploy@8.140.211.162:/app/module/client-releases/update.json.next
           ssh connector-deploy@8.140.211.162 'cd /app/module/client-releases && mv ChatGPTConnector.exe.next ChatGPTConnector.exe && mv ChatGPTConnector.exe.sha256.next ChatGPTConnector.exe.sha256 && mv update.json.next update.json'
