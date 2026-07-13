@@ -59,8 +59,7 @@ public sealed class CodexConfigPlanner
                 "auth.OPENAI_API_KEY",
             ],
             [
-                $"模型提供方：{settings.ProviderId}",
-                $"模型：{settings.Model}",
+                $"AI 模型：{ConnectorSettings.DisplayModel}",
                 $"网关地址：{settings.GatewayBaseUri.ToString().TrimEnd('/')}",
                 "凭证：将写入用户网关密钥（界面不显示完整值）",
             ]);

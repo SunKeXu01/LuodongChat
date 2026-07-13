@@ -3,10 +3,12 @@ namespace ChatGPTConnector.Core;
 public sealed record ConnectorSettings(
     Uri GatewayBaseUri,
     string GatewayKey,
-    string Model = "gpt-5.5",
+    string Model = "gpt-5.6-sol",
     string ProviderId = "ChatGPTConnector",
     string ReasoningEffort = "xhigh")
 {
+    public const string DisplayModel = "GPT-5.6";
+
     public void Validate()
     {
         if (GatewayBaseUri.Scheme != Uri.UriSchemeHttps)

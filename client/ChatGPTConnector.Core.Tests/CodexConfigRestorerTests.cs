@@ -54,7 +54,7 @@ public sealed class CodexConfigRestorerTests : IDisposable
 
         var plan = new CodexConfigRestorer().CreatePlan(
             install.Manifest,
-            applied.UpdatedConfigToml.Replace("model = \"gpt-5.5\"", "model = \"user-choice\""),
+            applied.UpdatedConfigToml.Replace("model = \"gpt-5.6-sol\"", "model = \"user-choice\""),
             applied.UpdatedAuthJson);
 
         Assert.Contains("model", plan.Conflicts);

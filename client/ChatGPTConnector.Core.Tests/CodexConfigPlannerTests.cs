@@ -27,7 +27,7 @@ public sealed class CodexConfigPlannerTests
         var authModel = JsonNode.Parse(plan.UpdatedAuthJson)!.AsObject();
 
         Assert.Equal("on-request", model["approval_policy"]);
-        Assert.Equal("gpt-5.5", model["model"]);
+        Assert.Equal("gpt-5.6-sol", model["model"]);
         Assert.Equal("ChatGPTConnector", model["model_provider"]);
         Assert.Equal("keep-me", authModel["OTHER_TOKEN"]!.GetValue<string>());
         Assert.Equal("gw_test_secret", authModel["OPENAI_API_KEY"]!.GetValue<string>());
@@ -48,6 +48,9 @@ public sealed class CodexConfigPlannerTests
         Assert.Equal("responses", provider["wire_api"]);
         Assert.True((bool)provider["requires_openai_auth"]!);
         Assert.DoesNotContain("gw_sensitive", string.Join("\n", plan.ChangeSummary));
+        Assert.Contains("AI 模型：GPT-5.6", plan.ChangeSummary);
+        Assert.DoesNotContain("gpt-5.6-sol", string.Join("\n", plan.ChangeSummary));
+        Assert.DoesNotContain("ChatGPTConnector", string.Join("\n", plan.ChangeSummary));
     }
 
     [Fact]

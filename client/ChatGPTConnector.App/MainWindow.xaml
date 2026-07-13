@@ -19,6 +19,8 @@
             <Ellipse x:Name="StatusDot" Width="18" Height="18" Fill="#9CA3AF" HorizontalAlignment="Center" />
             <TextBlock x:Name="StatusText" Text="正在检测 Codex 配置…" FontSize="18"
                        HorizontalAlignment="Center" Margin="0,12,0,28" TextAlignment="Center" />
+            <TextBlock Text="AI 模型：GPT-5.6" FontWeight="SemiBold" TextAlignment="Center"
+                       Foreground="#374151" Margin="0,-16,0,22" />
             <Border x:Name="EnrollmentPanel" BorderBrush="#D1D5DB" BorderThickness="1" CornerRadius="6" Padding="14" Margin="0,0,0,18">
                 <StackPanel>
                     <TextBlock x:Name="EnrollmentTitle" Text="没有密钥？通过邮箱自助领取" FontWeight="SemiBold" Margin="0,0,0,10" />
