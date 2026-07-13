@@ -1,6 +1,6 @@
 # Windows开发预览版
 
-当前版本为 `0.1.0-preview.12`，Windows 目标平台为 Windows 10/11 x64，采用 .NET 10 自包含单文件发布；Android 预览版目标为 Android 10 及以上。
+当前版本为 `0.1.0-preview.13`，Windows 目标平台为 Windows 10/11 x64，采用 .NET 10 自包含单文件发布；Android 预览版目标为 Android 10 及以上。
 
 ## 限制
 
@@ -27,8 +27,8 @@
 下载的 Artifact 内同时包含带版本号的 EXE、ZIP 及各自的 `.sha256` 文件。可在 PowerShell 中执行：
 
 ```powershell
-$expected = (Get-Content .\ChatGPTConnector-0.1.0-preview.12-win-x64.zip.sha256).Trim()
+$expected = (Get-Content .\ChatGPTConnector-0.1.0-preview.13-win-x64.zip.sha256).Trim()
 .\deploy\Test-PreviewBuild.ps1 `
-  -ZipPath .\ChatGPTConnector-0.1.0-preview.12-win-x64.zip `
+  -ZipPath .\ChatGPTConnector-0.1.0-preview.13-win-x64.zip `
   -ExpectedSha256 $expected
 ```
