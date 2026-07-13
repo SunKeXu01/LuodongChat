@@ -22,7 +22,7 @@
 - [GitHub Releases](https://github.com/SunKeXu01/ChatGPTConnector/releases)
 - [直接下载最新 EXE](https://520skx.com/client/download/ChatGPTConnector.exe)
 
-Release 中的 EXE、ZIP 和校验文件均包含版本号，例如 `ChatGPTConnector-0.1.0-preview.14-win-x64.exe`。Android 测试 APK 暂时作为 Actions 构建产物提供。
+Release 中的 EXE、ZIP 和校验文件均包含版本号，例如 `ChatGPTConnector-0.1.0-preview.15-win-x64.exe`。Android 测试 APK 暂时作为 Actions 构建产物提供。
 
 当前预览版尚未进行代码签名。如果 Windows 显示“Windows 已保护你的电脑”，请确认文件来自本仓库或上述下载地址，然后点击“更多信息”→“仍要运行”。
 
