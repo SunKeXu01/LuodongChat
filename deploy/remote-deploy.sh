@@ -27,6 +27,7 @@ trap deployment_failed ERR
 
 cd "$APP_DIR"
 test -s "$ENV_FILE"
+install -d -o connector-deploy -g connector-deploy -m 755 /app/module/client-releases
 
 install -m 644 "$APP_DIR/deploy/systemd/chatgpt-connector-alert-check.service" /etc/systemd/system/
 install -m 644 "$APP_DIR/deploy/systemd/chatgpt-connector-alert-check.timer" /etc/systemd/system/
