@@ -38,19 +38,8 @@
                     Margin="0,18,0,0" IsEnabled="False" Click="EnableButton_OnClick" />
             <Button x:Name="RestoreButton" Content="恢复原配置" Height="42" Margin="0,12,0,0"
                     Click="RestoreButton_OnClick" />
-            <Grid x:Name="ActionGrid" Margin="0,12,0,0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition x:Name="LaunchColumn" />
-                    <ColumnDefinition x:Name="InstallColumn" />
-                    <ColumnDefinition x:Name="UpdateColumn" />
-                </Grid.ColumnDefinitions>
-                <Button x:Name="LaunchButton" Content="启动 ChatGPT" Height="42" Margin="0,0,6,0"
-                        Click="LaunchButton_OnClick" />
-                <Button x:Name="InstallButton" Grid.Column="1" Content="下载 ChatGPT" Height="42" Margin="6,0,6,0"
-                        Click="InstallButton_OnClick" />
-                <Button x:Name="UpdateButton" Grid.Column="2" Content="检查更新" Height="42" Margin="6,0,0,0"
-                        Click="UpdateButton_OnClick" />
-            </Grid>
+            <Button x:Name="UpdateButton" Content="检查客户端更新" Height="42" Margin="0,12,0,0"
+                    Click="UpdateButton_OnClick" />
             <TextBlock x:Name="UpdateText" Foreground="#047857" FontSize="12" TextAlignment="Center" Margin="0,7,0,0" />
             <TextBlock Text="修改前会展示摘要，并自动创建可校验备份。"
                        Foreground="#6B7280" TextWrapping="Wrap" TextAlignment="Center" Margin="0,14,0,0" />

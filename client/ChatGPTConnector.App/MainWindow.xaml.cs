@@ -126,21 +126,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void LaunchButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            if (!_chatGpt.Launch())
-            {
-                if (MessageBox.Show("没有找到 ChatGPT/Codex。是否打开官方下载页面？", "尚未安装", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
-                    _chatGpt.OpenDownloadPage();
-            }
-        }
-        catch (Exception error) { MessageBox.Show(error.Message, "启动失败", MessageBoxButton.OK, MessageBoxImage.Error); }
-    }
-
-    private void InstallButton_OnClick(object sender, RoutedEventArgs e) => _chatGpt.OpenDownloadPage();
-
     private async void UpdateButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (_availableUpdate is null) { await CheckForUpdatesAsync(silent: false); return; }
@@ -161,7 +146,7 @@ public partial class MainWindow : Window
             var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
                 ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
             _availableUpdate = await _updates.CheckAsync(version);
-            UpdateButton.Content = _availableUpdate is null ? "检查更新" : "立即更新";
+            UpdateButton.Content = _availableUpdate is null ? "检查客户端更新" : "立即更新";
             UpdateText.Text = _availableUpdate is null ? (silent ? string.Empty : "当前已是最新版本") : $"发现新版本：{_availableUpdate.Version}";
         }
         catch (Exception error)
@@ -235,12 +220,6 @@ public partial class MainWindow : Window
         StatusDot.Fill = configured ? Brushes.MediumSeaGreen : Brushes.Gray;
         StatusText.Text = configured ? "已检测到连接器配置" : "尚未配置";
         RestoreButton.IsEnabled = Directory.Exists(Path.Combine(_paths.CodexDirectory, ".chatgpt-connector", "backups"));
-        var app = _chatGpt.Detect();
-        LaunchButton.IsEnabled = app.IsInstalled || !app.IsRunning;
-        InstallButton.Visibility = app.IsInstalled ? Visibility.Collapsed : Visibility.Visible;
-        InstallColumn.Width = app.IsInstalled ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
-        LaunchColumn.Width = new GridLength(1, GridUnitType.Star);
-        UpdateColumn.Width = new GridLength(1, GridUnitType.Star);
     }
 
     private void FitToWorkingArea()
@@ -262,8 +241,6 @@ public partial class MainWindow : Window
         VerificationCodeInput.IsEnabled = !busy;
         RequestCodeButton.IsEnabled = !busy;
         ClaimKeyButton.IsEnabled = !busy;
-        LaunchButton.IsEnabled = !busy;
-        InstallButton.IsEnabled = !busy;
         UpdateButton.IsEnabled = !busy;
         if (status is not null) StatusText.Text = status;
     }
