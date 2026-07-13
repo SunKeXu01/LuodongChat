@@ -8,6 +8,7 @@ class MemoryEnrollmentRepository implements EnrollmentRepository {
   active = false;
   rotated = false;
   async createChallenge(identityHash: string, codeHash: string): Promise<"created"> { this.identityHash = identityHash; this.codeHash = codeHash; return "created"; }
+  async cancelLatestChallenge(): Promise<void> { this.codeHash = ""; }
   async verifyChallenge(identityHash: string, codeHash: string): Promise<"verified" | "invalid"> { return identityHash === this.identityHash && codeHash === this.codeHash ? "verified" : "invalid"; }
   async hasActiveKey(): Promise<boolean> { return this.active; }
   async issueKey(_identityHash: string, _keyHash: string, keyPrefix: string, _defaults: SelfServiceKeyDefaults, rotate: boolean): Promise<"created"> {
@@ -48,4 +49,11 @@ test("requires explicit rotation when an active key exists", async () => {
   assert.deepEqual(await service.verifyAndIssue("user@example.com", mailer.code, false), { status: "active_key_exists" });
   assert.equal((await service.verifyAndIssue("user@example.com", mailer.code, true)).status, "created");
   assert.equal(repository.rotated, true);
+});
+
+test("removes an unusable challenge when email delivery fails", async () => {
+  const repository = new MemoryEnrollmentRepository();
+  const service = new EnrollmentService(repository, { sendCode: async () => { throw new Error("smtp failed"); } }, defaults);
+  await assert.rejects(service.requestCode("user@example.com", "ip"), /smtp failed/);
+  assert.equal(repository.codeHash, "");
 });

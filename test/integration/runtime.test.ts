@@ -5,6 +5,7 @@ import { createClient } from "redis";
 import { hashGatewayKey, PostgresGatewayKeyLimitProvider, PostgresGatewayKeyVerifier } from "../../src/auth.js";
 import { RedisRequestLimiter, type RedisScriptClient } from "../../src/limiter.js";
 import { runMigrations } from "../../src/migrate.js";
+import { PostgresEnrollmentRepository } from "../../src/self-service.js";
 
 const databaseUrl = process.env.INTEGRATION_DATABASE_URL;
 const redisUrl = process.env.INTEGRATION_REDIS_URL;
@@ -47,5 +48,20 @@ test("enforces the daily quota atomically in Redis", { skip: !integrationAvailab
     assert.deepEqual(await limiter.acquire("integration", { dailyLimit: 1, now: 1 }), { ok: false, reason: "daily" });
   } finally {
     await redis.quit();
+  }
+});
+
+test("creates and cancels a self-service enrollment challenge", { skip: !databaseUrl }, async () => {
+  assert.ok(databaseUrl);
+  await runMigrations(databaseUrl);
+  const pool = new pg.Pool({ connectionString: databaseUrl });
+  try {
+    const repository = new PostgresEnrollmentRepository(pool);
+    assert.equal(await repository.createChallenge("a".repeat(64), "b".repeat(64), "ip-test"), "created");
+    await repository.cancelLatestChallenge("a".repeat(64));
+    const result = await pool.query("SELECT count(*) FROM enrollment_challenges WHERE identity_hash = decode($1, 'hex')", ["a".repeat(64)]);
+    assert.equal(Number(result.rows[0].count), 0);
+  } finally {
+    await pool.end();
   }
 });

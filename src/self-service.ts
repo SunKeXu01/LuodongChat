@@ -11,6 +11,7 @@ export interface SelfServiceKeyDefaults {
 
 export interface EnrollmentRepository {
   createChallenge(identityHash: string, codeHash: string, ipFingerprint: string): Promise<"created" | "rate_limited">;
+  cancelLatestChallenge(identityHash: string): Promise<void>;
   verifyChallenge(identityHash: string, codeHash: string, consume: boolean): Promise<"verified" | "invalid" | "expired" | "locked">;
   issueKey(identityHash: string, keyHash: string, keyPrefix: string, defaults: SelfServiceKeyDefaults, rotate: boolean): Promise<"created" | "active_key_exists">;
   hasActiveKey(identityHash: string): Promise<boolean>;
@@ -28,11 +29,11 @@ export class PostgresEnrollmentRepository implements EnrollmentRepository {
     const recent = await this.db.query(
       `SELECT
          count(*) FILTER (WHERE identity_hash = decode($1, 'hex')) AS identity_count,
-         count(*) FILTER (WHERE ip_fingerprint = $3) AS ip_count,
+         count(*) FILTER (WHERE ip_fingerprint = $2) AS ip_count,
          bool_or(identity_hash = decode($1, 'hex') AND created_at > now() - interval '60 seconds') AS too_soon
        FROM enrollment_challenges
        WHERE created_at > now() - interval '1 hour'`,
-      [identityHash, codeHash, ipFingerprint],
+      [identityHash, ipFingerprint],
     );
     const row = recent.rows[0] ?? {};
     if (Boolean(row.too_soon) || Number(row.identity_count ?? 0) >= 5 || Number(row.ip_count ?? 0) >= 20) return "rate_limited";
@@ -42,6 +43,16 @@ export class PostgresEnrollmentRepository implements EnrollmentRepository {
       [identityHash, codeHash, ipFingerprint],
     );
     return "created";
+  }
+
+  async cancelLatestChallenge(identityHash: string): Promise<void> {
+    await this.db.query(
+      `DELETE FROM enrollment_challenges WHERE id = (
+         SELECT id FROM enrollment_challenges
+         WHERE identity_hash = decode($1, 'hex') AND consumed_at IS NULL
+         ORDER BY created_at DESC LIMIT 1
+       )`, [identityHash],
+    );
   }
 
   async verifyChallenge(identityHash: string, codeHash: string, consume: boolean): Promise<"verified" | "invalid" | "expired" | "locked"> {
@@ -138,7 +149,11 @@ export class EnrollmentService {
     const identityHash = EnrollmentService.digest(email);
     const status = await this.repository.createChallenge(identityHash, EnrollmentService.digest(code), ipFingerprint);
     if (status === "rate_limited") return status;
-    await this.mailer.sendCode(email, code);
+    try { await this.mailer.sendCode(email, code); }
+    catch (error) {
+      await this.repository.cancelLatestChallenge(identityHash).catch(() => undefined);
+      throw error;
+    }
     return "sent";
   }
   async verifyAndIssue(email: string, code: string, rotate: boolean): Promise<{ status: "created"; key: string; prefix: string } | { status: "invalid" | "expired" | "locked" | "active_key_exists" }> {
