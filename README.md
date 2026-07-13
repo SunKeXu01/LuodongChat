@@ -81,6 +81,10 @@ dotnet build client/ChatGPTConnector.App/ChatGPTConnector.App.csproj
 
 The WPF preview verifies the gateway, previews managed configuration changes, creates integrity-checked backups, applies Codex configuration atomically, and restores managed fields with conflict detection.
 
+The Windows client can obtain a gateway key through email verification, detects a running ChatGPT/Codex process before changing configuration, locates or launches the installed desktop app, links to the official download page when needed, and clearly identifies the resulting session as API-key mode. The branded multi-resolution icon is embedded in both the executable and main window.
+
+The client checks the `520skx.com` update channel at startup. Updates remain user-confirmed, download only over HTTPS from the gateway, require a matching SHA-256 release checksum, replace the portable executable after exit, and restart the verified version. GitHub release publication updates this channel without embedding private-repository credentials in the client.
+
 ## Download a Windows preview
 
 Every push to `main` runs gateway and .NET tests and creates a Windows x64 self-contained preview package:

@@ -8,6 +8,16 @@ namespace ChatGPTConnector.Core.Tests;
 public sealed class GatewayEnrollmentClientTests
 {
     [Fact]
+    public async Task ReadsSelfServiceAvailability()
+    {
+        var handler = new StubHandler((_, _) => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{\"enabled\":true}", Encoding.UTF8, "application/json")
+        });
+        Assert.True(await new GatewayEnrollmentClient(new HttpClient(handler)).IsEnabledAsync(new Uri("https://gateway.example")));
+    }
+
+    [Fact]
     public async Task RequestsCodeAndReadsIssuedKey()
     {
         var handler = new StubHandler((request, call) => call == 1

@@ -23,7 +23,7 @@
 
 ## 从GitHub Actions下载
 
-推送到`main`后，`Build and test`工作流会自动运行网关测试、核心库测试和Windows发布构建。成功后，在该次运行的Artifacts区域下载`ChatGPTConnector-0.1.0-preview.1-win-x64`。
+推送到`main`后，`Build and test`工作流会自动运行网关测试、核心库测试和Windows发布构建。成功后，在该次运行的Artifacts区域下载`ChatGPTConnector-0.1.0-preview.2-win-x64`。
 
 下载的Artifact内包含发布ZIP和对应的`.sha256`文件。可在PowerShell中执行：
 

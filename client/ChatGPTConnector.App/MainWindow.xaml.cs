@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Net.Http;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using ChatGPTConnector.Core;
 
 namespace ChatGPTConnector.App;
@@ -14,11 +15,21 @@ public partial class MainWindow : Window
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(90) };
     private readonly CodexPaths _paths = CodexPaths.ForCurrentUser();
     private readonly GatewayEnrollmentClient _enrollment = new(Http);
+    private readonly ChatGptAppService _chatGpt = new();
+    private readonly ClientUpdateService _updates = new(Http);
+    private ClientUpdate? _availableUpdate;
 
     public MainWindow()
     {
         InitializeComponent();
-        Loaded += (_, _) => RefreshStatus();
+        Loaded += async (_, _) =>
+        {
+            RefreshStatus();
+            var enabled = await _enrollment.IsEnabledAsync(GatewayUri);
+            EnrollmentPanel.IsEnabled = enabled;
+            EnrollmentTitle.Text = enabled ? "没有密钥？通过邮箱自助领取" : "自助领取暂未开放，可填写已有网关密钥";
+            await CheckForUpdatesAsync(silent: true);
+        };
     }
 
     private void GatewayKeyInput_OnPasswordChanged(object sender, RoutedEventArgs e) =>
@@ -63,6 +74,11 @@ public partial class MainWindow : Window
 
     private async void EnableButton_OnClick(object sender, RoutedEventArgs e)
     {
+        if (_chatGpt.Detect().IsRunning)
+        {
+            MessageBox.Show("ChatGPT/Codex 正在运行。请先完全退出程序，再开启连接，避免配置未被重新加载。", "请先退出 ChatGPT", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
         SetBusy(true, "正在验证网关连接…");
         try
         {
@@ -87,10 +103,12 @@ public partial class MainWindow : Window
 
             await new CodexConfigInstaller(GetType().Assembly.GetName().Version?.ToString() ?? "0.1.0")
                 .ApplyAsync(_paths, plan);
+            var postApply = await new GatewayConnectionTester(Http).TestAsync(settings);
+            if (!postApply.Success) throw new InvalidOperationException($"配置已写入，但最终网关验证失败：{postApply.Message}");
             GatewayKeyInput.Password = string.Empty;
             StatusDot.Fill = Brushes.MediumSeaGreen;
-            StatusText.Text = "已连接";
-            MessageBox.Show("Codex 配置完成。重新打开 Codex 后生效。", "配置成功");
+            StatusText.Text = "已连接，网关验证成功";
+            MessageBox.Show("配置和网关链路验证均已完成。现在可以启动 ChatGPT。", "配置成功");
         }
         catch (Exception error)
         {
@@ -99,6 +117,50 @@ public partial class MainWindow : Window
         finally
         {
             SetBusy(false);
+        }
+    }
+
+    private void LaunchButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (!_chatGpt.Launch())
+            {
+                if (MessageBox.Show("没有找到 ChatGPT/Codex。是否打开官方下载页面？", "尚未安装", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
+                    _chatGpt.OpenDownloadPage();
+            }
+        }
+        catch (Exception error) { MessageBox.Show(error.Message, "启动失败", MessageBoxButton.OK, MessageBoxImage.Error); }
+    }
+
+    private void InstallButton_OnClick(object sender, RoutedEventArgs e) => _chatGpt.OpenDownloadPage();
+
+    private async void UpdateButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_availableUpdate is null) { await CheckForUpdatesAsync(silent: false); return; }
+        if (MessageBox.Show($"发现新版本 {_availableUpdate.Version}。下载、校验并立即更新？", "客户端更新", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        SetBusy(true, "正在下载并校验更新…");
+        try
+        {
+            await _updates.DownloadAndScheduleAsync(_availableUpdate, Environment.ProcessPath ?? throw new InvalidOperationException("无法确定当前程序路径。"));
+            Application.Current.Shutdown();
+        }
+        catch (Exception error) { MessageBox.Show(error.Message, "更新失败", MessageBoxButton.OK, MessageBoxImage.Error); SetBusy(false); }
+    }
+
+    private async Task CheckForUpdatesAsync(bool silent)
+    {
+        try
+        {
+            var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+                ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
+            _availableUpdate = await _updates.CheckAsync(version);
+            UpdateButton.Content = _availableUpdate is null ? "检查更新" : "立即更新";
+            UpdateText.Text = _availableUpdate is null ? (silent ? string.Empty : "当前已是最新版本") : $"发现新版本：{_availableUpdate.Version}";
+        }
+        catch (Exception error)
+        {
+            if (!silent) MessageBox.Show($"暂时无法检查更新：{error.Message}", "检查更新", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -167,6 +229,9 @@ public partial class MainWindow : Window
         StatusDot.Fill = configured ? Brushes.MediumSeaGreen : Brushes.Gray;
         StatusText.Text = configured ? "已检测到连接器配置" : "尚未配置";
         RestoreButton.IsEnabled = Directory.Exists(Path.Combine(_paths.CodexDirectory, ".chatgpt-connector", "backups"));
+        var app = _chatGpt.Detect();
+        LaunchButton.IsEnabled = app.IsInstalled || !app.IsRunning;
+        InstallButton.Visibility = app.IsInstalled ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void SetBusy(bool busy, string? status = null)
@@ -178,6 +243,9 @@ public partial class MainWindow : Window
         VerificationCodeInput.IsEnabled = !busy;
         RequestCodeButton.IsEnabled = !busy;
         ClaimKeyButton.IsEnabled = !busy;
+        LaunchButton.IsEnabled = !busy;
+        InstallButton.IsEnabled = !busy;
+        UpdateButton.IsEnabled = !busy;
         if (status is not null) StatusText.Text = status;
     }
 }

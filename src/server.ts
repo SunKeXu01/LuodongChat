@@ -3,6 +3,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
+import { createReadStream } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
 import {
   extractBearerKey,
   hashGatewayKey,
@@ -106,6 +109,30 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
         "x-frame-options": "DENY",
       });
       return res.end(LANDING_PAGE);
+    }
+    const releaseRoot = process.env.CLIENT_RELEASE_ROOT?.trim();
+    if (req.method === "GET" && req.url === "/client/update.json" && releaseRoot) {
+      try {
+        const manifest = await readFile(join(releaseRoot, "update.json"));
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-cache", "x-content-type-options": "nosniff" });
+        return res.end(manifest);
+      } catch { return json(res, 404, { error: { code: "client_release_unavailable" } }); }
+    }
+    const clientAsset = req.method === "GET" && req.url === "/client/download/ChatGPTConnector.exe" ? "ChatGPTConnector.exe"
+      : req.method === "GET" && req.url === "/client/download/ChatGPTConnector.exe.sha256" ? "ChatGPTConnector.exe.sha256" : null;
+    if (clientAsset && releaseRoot) {
+      try {
+        const path = join(releaseRoot, clientAsset);
+        const metadata = await stat(path);
+        res.writeHead(200, {
+          "content-type": clientAsset.endsWith(".exe") ? "application/vnd.microsoft.portable-executable" : "text/plain; charset=utf-8",
+          "content-length": metadata.size,
+          "cache-control": "public, max-age=300",
+          "content-disposition": `attachment; filename="${clientAsset}"`,
+          "x-content-type-options": "nosniff",
+        });
+        return createReadStream(path).pipe(res);
+      } catch { return json(res, 404, { error: { code: "client_release_unavailable" } }); }
     }
     if (req.method === "GET" && req.url === "/enrollment/status") {
       res.setHeader("cache-control", "no-store");

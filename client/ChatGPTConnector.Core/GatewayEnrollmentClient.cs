@@ -8,6 +8,19 @@ public sealed record EnrollmentResult(bool Success, string? GatewayKey, string M
 
 public sealed class GatewayEnrollmentClient(HttpClient http)
 {
+    public async Task<bool> IsEnabledAsync(Uri gateway, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await http.GetAsync(new Uri(gateway, "/enrollment/status"), cancellationToken);
+            if (!response.IsSuccessStatusCode) return false;
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+            return body.TryGetProperty("enabled", out var enabled) && enabled.GetBoolean();
+        }
+        catch (HttpRequestException) { return false; }
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested) { return false; }
+    }
+
     public async Task<(bool Success, string Message)> RequestCodeAsync(Uri gateway, string email, CancellationToken cancellationToken = default)
     {
         using var response = await http.PostAsJsonAsync(new Uri(gateway, "/enrollment/code"), new { email }, cancellationToken);

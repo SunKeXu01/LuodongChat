@@ -90,15 +90,19 @@ jobs:
         run: |
           dotnet test client/ChatGPTConnector.Core.Tests/ChatGPTConnector.Core.Tests.csproj --configuration Release
           dotnet publish client/ChatGPTConnector.App/ChatGPTConnector.App.csproj --configuration Release --runtime win-x64 --output artifacts/publish
-          Compress-Archive -Path artifacts/publish/* -DestinationPath artifacts/ChatGPTConnector-0.1.0-preview.1-win-x64.zip
-          (Get-FileHash artifacts/ChatGPTConnector-0.1.0-preview.1-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant() |
-            Set-Content artifacts/ChatGPTConnector-0.1.0-preview.1-win-x64.sha256
+          (Get-FileHash artifacts/publish/ChatGPTConnector.exe -Algorithm SHA256).Hash.ToLowerInvariant() |
+            Set-Content artifacts/publish/ChatGPTConnector.exe.sha256
+          Compress-Archive -Path artifacts/publish/* -DestinationPath artifacts/ChatGPTConnector-0.1.0-preview.2-win-x64.zip
+          (Get-FileHash artifacts/ChatGPTConnector-0.1.0-preview.2-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant() |
+            Set-Content artifacts/ChatGPTConnector-0.1.0-preview.2-win-x64.sha256
       - uses: actions/upload-artifact@v6
         with:
-          name: ChatGPTConnector-0.1.0-preview.1-win-x64
+          name: ChatGPTConnector-0.1.0-preview.2-win-x64
           path: |
-            artifacts/ChatGPTConnector-0.1.0-preview.1-win-x64.zip
-            artifacts/ChatGPTConnector-0.1.0-preview.1-win-x64.sha256
+            artifacts/ChatGPTConnector-0.1.0-preview.2-win-x64.zip
+            artifacts/ChatGPTConnector-0.1.0-preview.2-win-x64.sha256
+            artifacts/publish/ChatGPTConnector.exe
+            artifacts/publish/ChatGPTConnector.exe.sha256
           if-no-files-found: error
           retention-days: 14
       - name: Publish GitHub prerelease
@@ -109,8 +113,10 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           $files = @(
-            "artifacts/ChatGPTConnector-0.1.0-preview.1-win-x64.zip",
-            "artifacts/ChatGPTConnector-0.1.0-preview.1-win-x64.sha256"
+            "artifacts/ChatGPTConnector-0.1.0-preview.2-win-x64.zip",
+            "artifacts/ChatGPTConnector-0.1.0-preview.2-win-x64.sha256",
+            "artifacts/publish/ChatGPTConnector.exe",
+            "artifacts/publish/ChatGPTConnector.exe.sha256"
           )
           gh release view $tag 2>$null
           if ($LASTEXITCODE -eq 0) {
@@ -118,3 +124,76 @@ jobs:
           } else {
             gh release create $tag $files --title "ChatGPT Connector $tag" --prerelease --generate-notes
           }
+
+  deploy-production:
+    name: Deploy production
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [gateway, core, integration, windows-preview]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure pinned SSH identity
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          test -n "$DEPLOY_SSH_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+      - name: Synchronize release files
+        run: |
+          rsync -az --delete \
+            --exclude='.git/' \
+            --exclude='.env' \
+            --exclude='node_modules/' \
+            --exclude='dist/' \
+            --exclude='artifacts/' \
+            --exclude='**/bin/' \
+            --exclude='**/obj/' \
+            ./ connector-deploy@8.140.211.162:/app/chatgpt_connector/
+      - name: Back up, migrate, and deploy
+        run: ssh connector-deploy@8.140.211.162 sudo /usr/bin/env APP_VERSION=${{ github.sha }} /app/chatgpt_connector/deploy/remote-deploy.sh
+      - name: Verify public health
+        run: curl --fail --silent --show-error --max-time 15 https://520skx.com/healthz
+
+  publish-client-update:
+    name: Publish client update channel
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [windows-preview]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ChatGPTConnector-0.1.0-preview.2-win-x64
+          path: release
+      - name: Configure pinned SSH identity
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          test -n "$DEPLOY_SSH_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+      - name: Publish verified executable and update manifest
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          executable="$(find release -type f -name ChatGPTConnector.exe -print -quit)"
+          checksum="$(find release -type f -name ChatGPTConnector.exe.sha256 -print -quit)"
+          test -s "$executable"
+          test -s "$checksum"
+          printf '{"version":"%s","executableUrl":"https://520skx.com/client/download/ChatGPTConnector.exe","checksumUrl":"https://520skx.com/client/download/ChatGPTConnector.exe.sha256"}\n' "${VERSION#v}" > update.json
+          rsync -az "$executable" connector-deploy@8.140.211.162:/app/module/client-releases/ChatGPTConnector.exe.next
+          rsync -az "$checksum" connector-deploy@8.140.211.162:/app/module/client-releases/ChatGPTConnector.exe.sha256.next
+          rsync -az update.json connector-deploy@8.140.211.162:/app/module/client-releases/update.json.next
+          ssh connector-deploy@8.140.211.162 'cd /app/module/client-releases && mv ChatGPTConnector.exe.next ChatGPTConnector.exe && mv ChatGPTConnector.exe.sha256.next ChatGPTConnector.exe.sha256 && mv update.json.next update.json'

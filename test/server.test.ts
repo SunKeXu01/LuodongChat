@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { hashGatewayKey } from "../src/auth.js";
 import type { GatewayConfig } from "../src/config.js";
 import { createGatewayServer } from "../src/server.js";
@@ -12,6 +15,32 @@ async function listen(server: ReturnType<typeof createServer>): Promise<number> 
   if (!address || typeof address === "string") throw new Error("missing server address");
   return address.port;
 }
+
+test("serves the public client update manifest and fixed release assets", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "connector-release-"));
+  const previous = process.env.CLIENT_RELEASE_ROOT;
+  process.env.CLIENT_RELEASE_ROOT = directory;
+  await writeFile(join(directory, "update.json"), '{"version":"0.1.0-preview.2"}');
+  await writeFile(join(directory, "ChatGPTConnector.exe.sha256"), "abc123\n");
+  t.after(async () => {
+    if (previous === undefined) delete process.env.CLIENT_RELEASE_ROOT; else process.env.CLIENT_RELEASE_ROOT = previous;
+    await rm(directory, { recursive: true, force: true });
+  });
+  const config: GatewayConfig = {
+    port: 0, upstreamBaseUrl: "https://upstream.invalid", upstreamApiKey: "unused", upstreamApiKeys: ["unused"],
+    upstreamResponsesPath: "/responses", gatewayKeyHashes: new Set([hashGatewayKey("gw_test")]),
+    requestsPerMinute: 10, maxConcurrentRequests: 2, upstreamTimeoutMs: 5_000,
+  };
+  const gateway = createGatewayServer(config);
+  const port = await listen(gateway);
+  t.after(() => gateway.close());
+  const manifest = await fetch(`http://127.0.0.1:${port}/client/update.json`);
+  assert.equal(manifest.status, 200);
+  assert.equal(manifest.headers.get("cache-control"), "no-cache");
+  assert.deepEqual(await manifest.json(), { version: "0.1.0-preview.2" });
+  const checksum = await fetch(`http://127.0.0.1:${port}/client/download/ChatGPTConnector.exe.sha256`);
+  assert.equal(await checksum.text(), "abc123\n");
+});
 
 test("authenticates and proxies a Responses request", async (t) => {
   const upstream = createServer(async (req, res) => {
