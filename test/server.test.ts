@@ -209,3 +209,49 @@ test("isolates a rejected credential and fails over before streaming", async (t)
   assert.deepEqual(await response.json(), { id: "resp_failover", status: "completed" });
   assert.deepEqual(seenCredentials, ["Bearer rejected-key", "Bearer healthy-key"]);
 });
+
+test("fails over between credentials hosted on different upstream endpoints", async (t) => {
+  const rejected = createServer(async (req, res) => {
+    assert.equal(req.url, "/responses");
+    for await (const _chunk of req) { /* consume request */ }
+    res.writeHead(401, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: { message: "invalid key" } }));
+  });
+  const healthy = createServer(async (req, res) => {
+    assert.equal(req.url, "/v1/responses");
+    assert.equal(req.headers.authorization, "Bearer secondary-key");
+    for await (const _chunk of req) { /* consume request */ }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ id: "resp_secondary", status: "completed" }));
+  });
+  const rejectedPort = await listen(rejected);
+  const healthyPort = await listen(healthy);
+  t.after(() => { rejected.close(); healthy.close(); });
+
+  const config: GatewayConfig = {
+    port: 0,
+    upstreamBaseUrl: `http://127.0.0.1:${rejectedPort}`,
+    upstreamApiKey: "rejected-key",
+    upstreamApiKeys: ["rejected-key"],
+    upstreamResponsesPath: "/responses",
+    upstreams: [
+      { baseUrl: `http://127.0.0.1:${rejectedPort}`, responsesPath: "/responses", apiKey: "rejected-key" },
+      { baseUrl: `http://127.0.0.1:${healthyPort}`, responsesPath: "/v1/responses", apiKey: "secondary-key" },
+    ],
+    gatewayKeyHashes: new Set([hashGatewayKey("gw_test_secret")]),
+    requestsPerMinute: 10,
+    maxConcurrentRequests: 2,
+    upstreamTimeoutMs: 5_000,
+  };
+  const gateway = createGatewayServer(config);
+  const gatewayPort = await listen(gateway);
+  t.after(() => gateway.close());
+
+  const response = await fetch(`http://127.0.0.1:${gatewayPort}/responses`, {
+    method: "POST",
+    headers: { authorization: "Bearer gw_test_secret", "content-type": "application/json" },
+    body: JSON.stringify({ model: "test-model", input: "hello" }),
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { id: "resp_secondary", status: "completed" });
+});

@@ -4,6 +4,7 @@ export interface GatewayConfig {
   upstreamApiKey: string;
   upstreamApiKeys: readonly string[];
   upstreamResponsesPath: string;
+  upstreams?: readonly UpstreamEndpoint[];
   gatewayKeyHashes: ReadonlySet<string>;
   adminKeyHashes?: ReadonlySet<string>;
   requestsPerMinute: number;
@@ -22,6 +23,34 @@ export interface GatewayConfig {
     maxConcurrentRequests: number;
     expiresInDays: number;
   };
+}
+
+export interface UpstreamEndpoint {
+  baseUrl: string;
+  responsesPath: string;
+  apiKey: string;
+}
+
+function parseAdditionalUpstreams(raw: string | undefined): UpstreamEndpoint[] {
+  if (!raw?.trim()) return [];
+  let value: unknown;
+  try { value = JSON.parse(raw); }
+  catch { throw new Error("UPSTREAM_ENDPOINTS_JSON must be valid JSON"); }
+  if (!Array.isArray(value)) throw new Error("UPSTREAM_ENDPOINTS_JSON must be a JSON array");
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object") throw new Error(`UPSTREAM_ENDPOINTS_JSON[${index}] must be an object`);
+    const record = item as Record<string, unknown>;
+    const baseUrl = typeof record.baseUrl === "string" ? record.baseUrl.trim().replace(/\/$/, "") : "";
+    const responsesPath = typeof record.responsesPath === "string" ? record.responsesPath.trim() : "/v1/responses";
+    const apiKey = typeof record.apiKey === "string" ? record.apiKey.trim() : "";
+    let parsedUrl: URL;
+    try { parsedUrl = new URL(baseUrl); }
+    catch { throw new Error(`UPSTREAM_ENDPOINTS_JSON[${index}].baseUrl must be an absolute URL`); }
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error(`UPSTREAM_ENDPOINTS_JSON[${index}].baseUrl must use HTTP or HTTPS`);
+    if (!responsesPath.startsWith("/")) throw new Error(`UPSTREAM_ENDPOINTS_JSON[${index}].responsesPath must start with /`);
+    if (!apiKey) throw new Error(`UPSTREAM_ENDPOINTS_JSON[${index}].apiKey is required`);
+    return { baseUrl, responsesPath, apiKey };
+  });
 }
 
 function positiveInteger(name: string, fallback: number): number {
@@ -44,6 +73,10 @@ export function loadConfig(): GatewayConfig {
     .map((value) => value.trim())
     .filter(Boolean);
   if (!upstreamResponsesPath.startsWith("/")) throw new Error("UPSTREAM_RESPONSES_PATH must start with /");
+  const upstreams = [
+    ...upstreamApiKeys.map((apiKey) => ({ baseUrl: upstreamBaseUrl, responsesPath: upstreamResponsesPath, apiKey })),
+    ...parseAdditionalUpstreams(process.env.UPSTREAM_ENDPOINTS_JSON),
+  ];
 
   const gatewayKeyHashes = new Set(
     (process.env.GATEWAY_KEY_HASHES ?? "")
@@ -76,6 +109,7 @@ export function loadConfig(): GatewayConfig {
     upstreamApiKey,
     upstreamApiKeys,
     upstreamResponsesPath,
+    upstreams,
     gatewayKeyHashes,
     adminKeyHashes,
     requestsPerMinute: positiveInteger("REQUESTS_PER_MINUTE", 30),

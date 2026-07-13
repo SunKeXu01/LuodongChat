@@ -88,7 +88,7 @@ export interface GatewayServerOptions {
 
 export function createGatewayServer(config: GatewayConfig, options: GatewayServerOptions = {}) {
   const limiter = options.limiter ?? new InMemoryLimiter(config.requestsPerMinute, config.maxConcurrentRequests);
-  const upstreamPool = new UpstreamPool(config.upstreamApiKeys);
+  const upstreamPool = new UpstreamPool(config.upstreams ?? config.upstreamApiKeys);
   const ledger = options.ledger ?? new InMemoryRequestLedger();
   const keyVerifier = options.keyVerifier ?? new StaticGatewayKeyVerifier(config.gatewayKeyHashes);
   const adminLoginGuard = options.adminLoginProtector ?? new AdminLoginGuard();
@@ -328,7 +328,9 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
         attempts = attempt;
         const attemptStartedAt = Date.now();
         try {
-          upstream = await fetch(`${config.upstreamBaseUrl}${config.upstreamResponsesPath}`, {
+          const baseUrl = credential.baseUrl ?? config.upstreamBaseUrl;
+          const responsesPath = credential.responsesPath ?? config.upstreamResponsesPath;
+          upstream = await fetch(`${baseUrl}${responsesPath}`, {
             method: "POST",
             headers: {
               authorization: `Bearer ${credential.apiKey}`,

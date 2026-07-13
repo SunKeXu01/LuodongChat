@@ -5,6 +5,8 @@ export type HealthState = "healthy" | "degraded" | "open" | "half_open";
 export interface UpstreamCredential {
   id: string;
   apiKey: string;
+  baseUrl?: string;
+  responsesPath?: string;
 }
 
 interface CredentialState extends UpstreamCredential {
@@ -26,19 +28,26 @@ export class UpstreamPool {
   private cursor = 0;
 
   constructor(
-    apiKeys: readonly string[],
+    credentials: readonly (string | Omit<UpstreamCredential, "id">)[],
     private readonly failureThreshold = 3,
     private readonly cooldownMs = 30_000,
   ) {
-    if (apiKeys.length === 0) throw new Error("At least one upstream credential is required");
-    this.credentials = apiKeys.map((apiKey) => ({
+    if (credentials.length === 0) throw new Error("At least one upstream credential is required");
+    this.credentials = credentials.map((credential) => {
+      const { apiKey, baseUrl, responsesPath } = typeof credential === "string"
+        ? { apiKey: credential, baseUrl: undefined, responsesPath: undefined }
+        : credential;
+      return {
       id: createHash("sha256").update(apiKey).digest("hex"),
       apiKey,
+      baseUrl,
+      responsesPath,
       health: "healthy",
       consecutiveFailures: 0,
       openUntil: 0,
       inFlight: 0,
-    }));
+      };
+    });
   }
 
   acquire(excludedIds: ReadonlySet<string> = new Set(), now = Date.now()): UpstreamCredential | null {
@@ -57,7 +66,12 @@ export class UpstreamPool {
     if (!selected) return null;
     this.cursor += 1;
     selected.inFlight += 1;
-    return { id: selected.id, apiKey: selected.apiKey };
+    return {
+      id: selected.id,
+      apiKey: selected.apiKey,
+      baseUrl: selected.baseUrl,
+      responsesPath: selected.responsesPath,
+    };
   }
 
   recordSuccess(id: string): void {

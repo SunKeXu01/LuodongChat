@@ -36,3 +36,16 @@ test("does not degrade a credential for non-retryable errors", () => {
   pool.recordFailure(credential.id, false);
   assert.equal(pool.snapshot()[0]?.health, "healthy");
 });
+
+test("returns the endpoint attached to each credential without exposing it in snapshots", () => {
+  const pool = new UpstreamPool([{
+    apiKey: "secondary-secret",
+    baseUrl: "https://secondary.example/v1",
+    responsesPath: "/responses",
+  }]);
+  const credential = pool.acquire();
+  assert.ok(credential);
+  assert.equal(credential.baseUrl, "https://secondary.example/v1");
+  assert.equal(credential.responsesPath, "/responses");
+  assert.equal(JSON.stringify(pool.snapshot()).includes("secondary.example"), false);
+});
