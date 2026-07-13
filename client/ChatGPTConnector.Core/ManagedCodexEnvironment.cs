@@ -11,7 +11,7 @@ public sealed class ManagedCodexEnvironment
     private string StatePath => Path.Combine(_root, "codex-environment.json");
     public string ManagedHome => Path.Combine(_root, "codex-home");
 
-    public async Task ActivateAsync(Uri localGateway)
+    public async Task ActivateAsync(Uri localGateway, string localAccessKey)
     {
         Directory.CreateDirectory(_root);
         var previous = Environment.GetEnvironmentVariable("CODEX_HOME", EnvironmentVariableTarget.User);
@@ -23,7 +23,7 @@ public sealed class ManagedCodexEnvironment
         var sourceAuth = Path.Combine(sourceHome, "auth.json");
         var config = File.Exists(sourceConfig) ? await File.ReadAllTextAsync(sourceConfig) : string.Empty;
         var auth = File.Exists(sourceAuth) ? await File.ReadAllTextAsync(sourceAuth) : "{}";
-        var plan = new CodexConfigPlanner().CreatePlan(config, auth, new ConnectorSettings(localGateway, "local_connector_session"));
+        var plan = new CodexConfigPlanner().CreatePlan(config, auth, new ConnectorSettings(localGateway, localAccessKey));
         await new CodexConfigInstaller("managed-home").ApplyAsync(new CodexPaths(ManagedHome), plan);
         await File.WriteAllTextAsync(StatePath, JsonSerializer.Serialize(new CodexEnvironmentState(previous, ManagedHome)));
         Environment.SetEnvironmentVariable("CODEX_HOME", ManagedHome, EnvironmentVariableTarget.User);

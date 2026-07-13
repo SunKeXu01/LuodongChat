@@ -3,6 +3,7 @@ using System.IO;
 using System.Reflection;
 using System.Net.Http;
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -103,9 +104,10 @@ public partial class MainWindow : Window
         StopConnection();
         try
         {
-            _proxy = new LocalGatewayProxy(Http, GatewayUri, _session.GatewayKey);
+            var localAccessKey = $"local_{Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant()}";
+            _proxy = new LocalGatewayProxy(Http, GatewayUri, _session.GatewayKey, localAccessKey);
             _proxy.Start();
-            await _codexEnvironment.ActivateAsync(_proxy.BaseUri);
+            await _codexEnvironment.ActivateAsync(_proxy.BaseUri, localAccessKey);
             StartRestoreWatchdog();
             StatusDot.Fill = Brushes.MediumSeaGreen;
             StatusText.Text = "已登录，本地连接正在运行";
@@ -182,10 +184,14 @@ public partial class MainWindow : Window
     private static ImageSource? DecodeAvatar(string? base64)
     {
         if (string.IsNullOrWhiteSpace(base64)) return null;
-        var image = new BitmapImage();
-        using var stream = new MemoryStream(Convert.FromBase64String(base64));
-        image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad; image.StreamSource = stream; image.EndInit(); image.Freeze();
-        return image;
+        try
+        {
+            var image = new BitmapImage();
+            using var stream = new MemoryStream(Convert.FromBase64String(base64));
+            image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad; image.StreamSource = stream; image.EndInit(); image.Freeze();
+            return image;
+        }
+        catch { return null; }
     }
 
     private void StopConnection()

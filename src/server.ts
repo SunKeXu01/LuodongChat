@@ -184,7 +184,14 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
         const input = await readJsonObject(req);
         const mediaType = typeof input.mediaType === "string" ? input.mediaType : "";
         const dataBase64 = typeof input.dataBase64 === "string" ? input.dataBase64.replace(/\s/g, "") : "";
-        if (!new Set(["image/jpeg", "image/png", "image/webp"]).has(mediaType) || !/^[A-Za-z0-9+/]+={0,2}$/.test(dataBase64) || dataBase64.length > 700_000) {
+        let avatar: Buffer | null = null;
+        try { avatar = Buffer.from(dataBase64, "base64"); } catch { }
+        const signatureValid = avatar && avatar.length > 0 && avatar.length <= 512 * 1024 && (
+          (mediaType === "image/jpeg" && avatar[0] === 0xff && avatar[1] === 0xd8 && avatar[2] === 0xff)
+          || (mediaType === "image/png" && avatar.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])))
+          || (mediaType === "image/webp" && avatar.subarray(0, 4).toString("ascii") === "RIFF" && avatar.subarray(8, 12).toString("ascii") === "WEBP")
+        );
+        if (!signatureValid || !/^[A-Za-z0-9+/]+={0,2}$/.test(dataBase64)) {
           return json(res, 400, { error: { code: "invalid_avatar", message: "头像必须是小于 512 KB 的 JPG、PNG 或 WebP 图片" } });
         }
         const profile = await options.enrollmentService.updateAvatar(accessToken, mediaType, dataBase64);
