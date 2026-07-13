@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     internal MainWindow(bool skipStartupChecks)
     {
         InitializeComponent();
+        FitToWorkingArea();
         if (skipStartupChecks) return;
         Loaded += async (_, _) =>
         {
@@ -237,6 +238,19 @@ public partial class MainWindow : Window
         var app = _chatGpt.Detect();
         LaunchButton.IsEnabled = app.IsInstalled || !app.IsRunning;
         InstallButton.Visibility = app.IsInstalled ? Visibility.Collapsed : Visibility.Visible;
+        InstallColumn.Width = app.IsInstalled ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+        LaunchColumn.Width = new GridLength(1, GridUnitType.Star);
+        UpdateColumn.Width = new GridLength(1, GridUnitType.Star);
+    }
+
+    private void FitToWorkingArea()
+    {
+        const double screenMargin = 24;
+        var workArea = SystemParameters.WorkArea;
+        MaxWidth = Math.Max(MinWidth, workArea.Width - screenMargin);
+        MaxHeight = Math.Max(MinHeight, workArea.Height - screenMargin);
+        Width = Math.Min(Width, MaxWidth);
+        Height = Math.Min(Height, MaxHeight);
     }
 
     private void SetBusy(bool busy, string? status = null)

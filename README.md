@@ -24,7 +24,7 @@
 - [进入 Releases 下载页面](https://github.com/SunKeXu01/ChatGPTConnector/releases)
 - [直接下载 ChatGPTConnector.exe](https://520skx.com/client/download/ChatGPTConnector.exe)
 
-Release 中的 EXE 和 ZIP 文件名都包含版本号。下载后无需安装，直接运行类似 `ChatGPTConnector-0.1.0-preview.4-win-x64.exe` 的文件即可。
+Release 中的 EXE 和 ZIP 文件名都包含版本号。下载后无需安装，直接运行类似 `ChatGPTConnector-0.1.0-preview.5-win-x64.exe` 的文件即可。
 
 当前预览版尚未进行代码签名。如果 Windows 显示“Windows 已保护你的电脑”，请确认文件来自本仓库或上述下载地址，然后点击“更多信息”→“仍要运行”。
 
