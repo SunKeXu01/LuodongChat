@@ -2,6 +2,8 @@ using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Threading;
+using Application = System.Windows.Application;
+using MessageBox = System.Windows.MessageBox;
 
 namespace ChatGPTConnector.App;
 
@@ -20,6 +22,7 @@ public partial class App : Application
             window.Show();
             if (smokeTest)
             {
+                window.PrepareForExit();
                 window.Close();
                 Shutdown(0);
             }
@@ -40,6 +43,7 @@ public partial class App : Application
     {
         ReportFatalError(e.Exception);
         e.Handled = true;
+        (Current.MainWindow as MainWindow)?.PrepareForExit();
         Current.Shutdown(1);
     }
 

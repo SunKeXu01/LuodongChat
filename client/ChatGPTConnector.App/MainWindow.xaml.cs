@@ -5,7 +5,11 @@ using System.Net.Http;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.ComponentModel;
 using ChatGPTConnector.Core;
+using Application = System.Windows.Application;
+using MessageBox = System.Windows.MessageBox;
+using Brushes = System.Windows.Media.Brushes;
 
 namespace ChatGPTConnector.App;
 
@@ -18,6 +22,8 @@ public partial class MainWindow : Window
     private readonly ChatGptAppService _chatGpt = new();
     private readonly ClientUpdateService _updates = new(Http);
     private ClientUpdate? _availableUpdate;
+    private TrayIconService? _trayIcon;
+    private bool _allowExit;
 
     public MainWindow() : this(skipStartupChecks: false)
     {
@@ -27,6 +33,9 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         FitToWorkingArea();
+        InitializeTrayIcon();
+        Closing += MainWindow_OnClosing;
+        Application.Current.SessionEnding += (_, _) => _allowExit = true;
         if (skipStartupChecks) return;
         Loaded += async (_, _) =>
         {
@@ -134,7 +143,7 @@ public partial class MainWindow : Window
         try
         {
             await _updates.DownloadAndScheduleAsync(_availableUpdate, Environment.ProcessPath ?? throw new InvalidOperationException("无法确定当前程序路径。"));
-            Application.Current.Shutdown();
+            ExitApplication();
         }
         catch (Exception error) { MessageBox.Show(error.Message, "更新失败", MessageBoxButton.OK, MessageBoxImage.Error); SetBusy(false); }
     }
@@ -230,6 +239,43 @@ public partial class MainWindow : Window
         MaxHeight = Math.Max(MinHeight, workArea.Height - screenMargin);
         Width = Math.Min(Width, MaxWidth);
         Height = Math.Min(Height, MaxHeight);
+    }
+
+    private void InitializeTrayIcon()
+    {
+        _trayIcon = new TrayIconService("ChatGPT 连接器", ShowMainWindow, ExitApplication);
+    }
+
+    private void MainWindow_OnClosing(object? sender, CancelEventArgs e)
+    {
+        if (_allowExit) return;
+        e.Cancel = true;
+        Hide();
+        ShowInTaskbar = false;
+    }
+
+    private void ShowMainWindow()
+    {
+        ShowInTaskbar = true;
+        Show();
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    private void ExitApplication()
+    {
+        PrepareForExit();
+        Application.Current.Shutdown();
+    }
+
+    internal void PrepareForExit()
+    {
+        _allowExit = true;
+        if (_trayIcon is not null)
+        {
+            _trayIcon.Dispose();
+            _trayIcon = null;
+        }
     }
 
     private void SetBusy(bool busy, string? status = null)
