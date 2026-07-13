@@ -245,17 +245,15 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
         }
         if (req.method === "POST" && req.url === "/admin/api/keys") {
           const input = await readJsonObject(req);
-          const dailyLimit = positiveAdminInteger(input.dailyLimit);
           const requestsPerMinute = positiveAdminInteger(input.requestsPerMinute, 10_000);
           const maxConcurrentRequests = positiveAdminInteger(input.maxConcurrentRequests, 1_000);
-          const expiresInDays = input.expiresInDays === null ? null : positiveAdminInteger(input.expiresInDays, 3_650);
-          if (!dailyLimit || !requestsPerMinute || !maxConcurrentRequests || (input.expiresInDays !== null && !expiresInDays)) {
+          if (!requestsPerMinute || !maxConcurrentRequests) {
             return json(res, 400, { error: { code: "invalid_admin_input", message: "Key limits are invalid" } });
           }
           const plaintextKey = `gw_${randomBytes(24).toString("hex")}`;
           const prefix = plaintextKey.slice(0, 11);
           await options.adminRepository!.createKey(
-            { dailyLimit, requestsPerMinute, maxConcurrentRequests, expiresInDays },
+            { dailyLimit: null, requestsPerMinute, maxConcurrentRequests, expiresInDays: null },
             hashGatewayKey(plaintextKey), prefix, actorFingerprint,
           );
           return json(res, 201, { key: plaintextKey, prefix });
@@ -263,14 +261,13 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
         const quotaMatch = /^\/admin\/api\/keys\/(gw_[a-f\d]{8})\/quota$/.exec(req.url);
         if (req.method === "PUT" && quotaMatch) {
           const input = await readJsonObject(req);
-          const dailyLimit = positiveAdminInteger(input.dailyLimit);
           const requestsPerMinute = positiveAdminInteger(input.requestsPerMinute, 10_000);
           const maxConcurrentRequests = positiveAdminInteger(input.maxConcurrentRequests, 1_000);
-          if (!dailyLimit || !requestsPerMinute || !maxConcurrentRequests) {
+          if (!requestsPerMinute || !maxConcurrentRequests) {
             return json(res, 400, { error: { code: "invalid_admin_input", message: "Key limits are invalid" } });
           }
           const updated = await options.adminRepository!.updateQuota(
-            quotaMatch[1]!, { dailyLimit, requestsPerMinute, maxConcurrentRequests }, actorFingerprint,
+            quotaMatch[1]!, { dailyLimit: null, requestsPerMinute, maxConcurrentRequests }, actorFingerprint,
           );
           return updated ? json(res, 200, { status: "updated" }) : json(res, 404, { error: { code: "key_not_found" } });
         }

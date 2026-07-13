@@ -3,10 +3,10 @@ import nodemailer from "nodemailer";
 import { hashGatewayKey } from "./auth.js";
 
 export interface SelfServiceKeyDefaults {
-  dailyLimit: number;
+  dailyLimit: number | null;
   requestsPerMinute: number;
   maxConcurrentRequests: number;
-  expiresInDays: number;
+  expiresInDays: number | null;
 }
 
 export interface EnrollmentRepository {
@@ -110,7 +110,8 @@ export class PostgresEnrollmentRepository implements EnrollmentRepository {
       if (rotate) await client.query("UPDATE gateway_keys SET status = 'revoked', revoked_at = now() WHERE user_id = $1 AND status = 'active'", [userId]);
       await client.query(
         `INSERT INTO gateway_keys (user_id, key_hash, key_prefix, daily_request_limit, requests_per_minute, max_concurrent_requests, expires_at)
-         VALUES ($1, decode($2, 'hex'), $3, $4, $5, $6, now() + ($7 * interval '1 day'))`,
+         VALUES ($1, decode($2, 'hex'), $3, $4, $5, $6,
+           CASE WHEN $7::integer IS NULL THEN NULL ELSE now() + ($7::integer * interval '1 day') END)`,
         [userId, keyHash, keyPrefix, defaults.dailyLimit, defaults.requestsPerMinute, defaults.maxConcurrentRequests, defaults.expiresInDays],
       );
       await client.query("COMMIT");

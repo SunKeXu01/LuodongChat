@@ -92,19 +92,20 @@ jobs:
           dotnet publish client/ChatGPTConnector.App/ChatGPTConnector.App.csproj --configuration Release --runtime win-x64 --output artifacts/publish
           & artifacts/publish/ChatGPTConnector.exe --smoke-test
           if ($LASTEXITCODE -ne 0) { throw "Published Windows executable failed its startup smoke test." }
-          (Get-FileHash artifacts/publish/ChatGPTConnector.exe -Algorithm SHA256).Hash.ToLowerInvariant() |
-            Set-Content artifacts/publish/ChatGPTConnector.exe.sha256
-          Compress-Archive -Path artifacts/publish/* -DestinationPath artifacts/ChatGPTConnector-0.1.0-preview.3-win-x64.zip
-          (Get-FileHash artifacts/ChatGPTConnector-0.1.0-preview.3-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant() |
-            Set-Content artifacts/ChatGPTConnector-0.1.0-preview.3-win-x64.sha256
+          Copy-Item artifacts/publish/ChatGPTConnector.exe artifacts/ChatGPTConnector-0.1.0-preview.4-win-x64.exe
+          (Get-FileHash artifacts/ChatGPTConnector-0.1.0-preview.4-win-x64.exe -Algorithm SHA256).Hash.ToLowerInvariant() |
+            Set-Content artifacts/ChatGPTConnector-0.1.0-preview.4-win-x64.exe.sha256
+          Compress-Archive -Path artifacts/publish/* -DestinationPath artifacts/ChatGPTConnector-0.1.0-preview.4-win-x64.zip
+          (Get-FileHash artifacts/ChatGPTConnector-0.1.0-preview.4-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant() |
+            Set-Content artifacts/ChatGPTConnector-0.1.0-preview.4-win-x64.zip.sha256
       - uses: actions/upload-artifact@v6
         with:
           name: ChatGPTConnector-win-x64
           path: |
-            artifacts/ChatGPTConnector-0.1.0-preview.3-win-x64.zip
-            artifacts/ChatGPTConnector-0.1.0-preview.3-win-x64.sha256
-            artifacts/publish/ChatGPTConnector.exe
-            artifacts/publish/ChatGPTConnector.exe.sha256
+            artifacts/ChatGPTConnector-0.1.0-preview.4-win-x64.exe
+            artifacts/ChatGPTConnector-0.1.0-preview.4-win-x64.exe.sha256
+            artifacts/ChatGPTConnector-0.1.0-preview.4-win-x64.zip
+            artifacts/ChatGPTConnector-0.1.0-preview.4-win-x64.zip.sha256
           if-no-files-found: error
           retention-days: 14
       - name: Publish GitHub prerelease
@@ -115,10 +116,10 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           $files = @(
-            "artifacts/ChatGPTConnector-0.1.0-preview.3-win-x64.zip",
-            "artifacts/ChatGPTConnector-0.1.0-preview.3-win-x64.sha256",
-            "artifacts/publish/ChatGPTConnector.exe",
-            "artifacts/publish/ChatGPTConnector.exe.sha256"
+            "artifacts/ChatGPTConnector-0.1.0-preview.4-win-x64.exe",
+            "artifacts/ChatGPTConnector-0.1.0-preview.4-win-x64.exe.sha256",
+            "artifacts/ChatGPTConnector-0.1.0-preview.4-win-x64.zip",
+            "artifacts/ChatGPTConnector-0.1.0-preview.4-win-x64.zip.sha256"
           )
           gh release view $tag 2>$null
           if ($LASTEXITCODE -eq 0) {
@@ -190,8 +191,8 @@ jobs:
         env:
           VERSION: ${{ github.ref_name }}
         run: |
-          executable="$(find release -type f -name ChatGPTConnector.exe -print -quit)"
-          checksum="$(find release -type f -name ChatGPTConnector.exe.sha256 -print -quit)"
+          executable="$(find release -type f -name 'ChatGPTConnector-*-win-x64.exe' -print -quit)"
+          checksum="$(find release -type f -name 'ChatGPTConnector-*-win-x64.exe.sha256' -print -quit)"
           test -s "$executable"
           test -s "$checksum"
           printf '{"version":"%s","executableUrl":"https://520skx.com/client/download/ChatGPTConnector.exe","checksumUrl":"https://520skx.com/client/download/ChatGPTConnector.exe.sha256"}\n' "${VERSION#v}" > update.json

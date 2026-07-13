@@ -7,12 +7,13 @@ class MemoryEnrollmentRepository implements EnrollmentRepository {
   identityHash = "";
   active = false;
   rotated = false;
+  defaults?: SelfServiceKeyDefaults;
   async createChallenge(identityHash: string, codeHash: string): Promise<"created"> { this.identityHash = identityHash; this.codeHash = codeHash; return "created"; }
   async cancelLatestChallenge(): Promise<void> { this.codeHash = ""; }
   async verifyChallenge(identityHash: string, codeHash: string): Promise<"verified" | "invalid"> { return identityHash === this.identityHash && codeHash === this.codeHash ? "verified" : "invalid"; }
   async hasActiveKey(): Promise<boolean> { return this.active; }
-  async issueKey(_identityHash: string, _keyHash: string, keyPrefix: string, _defaults: SelfServiceKeyDefaults, rotate: boolean): Promise<"created"> {
-    assert.match(keyPrefix, /^gw_[a-f\d]{8}$/); this.rotated = rotate; this.active = true; return "created";
+  async issueKey(_identityHash: string, _keyHash: string, keyPrefix: string, defaults: SelfServiceKeyDefaults, rotate: boolean): Promise<"created"> {
+    assert.match(keyPrefix, /^gw_[a-f\d]{8}$/); this.defaults = defaults; this.rotated = rotate; this.active = true; return "created";
   }
 }
 
@@ -21,7 +22,7 @@ class MemoryMailer implements EnrollmentMailer {
   async sendCode(email: string, code: string): Promise<void> { assert.equal(email, "user@example.com"); this.code = code; }
 }
 
-const defaults = { dailyLimit: 100, requestsPerMinute: 30, maxConcurrentRequests: 2, expiresInDays: 30 };
+const defaults = { dailyLimit: null, requestsPerMinute: 30, maxConcurrentRequests: 2, expiresInDays: null };
 
 test("normalizes email and rejects malformed addresses", () => {
   assert.equal(EnrollmentService.normalizeEmail(" User@Example.COM "), "user@example.com");
@@ -38,6 +39,8 @@ test("emails a hashed one-time code and issues a key", async () => {
   const result = await service.verifyAndIssue("user@example.com", mailer.code, false);
   assert.equal(result.status, "created");
   if (result.status === "created") assert.match(result.key, /^gw_[a-f\d]{48}$/);
+  assert.equal(repository.defaults?.dailyLimit, null);
+  assert.equal(repository.defaults?.expiresInDays, null);
 });
 
 test("requires explicit rotation when an active key exists", async () => {

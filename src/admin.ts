@@ -51,7 +51,7 @@ export interface AdminRepository {
 }
 
 export interface AdminQuotaInput {
-  dailyLimit: number;
+  dailyLimit: number | null;
   requestsPerMinute: number;
   maxConcurrentRequests: number;
 }

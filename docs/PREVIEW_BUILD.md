@@ -1,6 +1,6 @@
 # Windows开发预览版
 
-当前版本为 `0.1.0-preview.3`，目标平台为 Windows 10/11 x64，采用 .NET 10 自包含单文件发布。
+当前版本为 `0.1.0-preview.4`，目标平台为 Windows 10/11 x64，采用 .NET 10 自包含单文件发布。
 
 ## 限制
 
@@ -25,11 +25,11 @@
 
 推送到 `main` 后，`Build and test` 工作流会自动运行网关测试、核心库测试、Windows 发布构建及可执行文件启动冒烟测试。成功后，在该次运行的 Artifacts 区域下载 `ChatGPTConnector-win-x64`。
 
-下载的Artifact内包含发布ZIP和对应的`.sha256`文件。可在PowerShell中执行：
+下载的 Artifact 内同时包含带版本号的 EXE、ZIP 及各自的 `.sha256` 文件。可在 PowerShell 中执行：
 
 ```powershell
-$expected = (Get-Content .\ChatGPTConnector-0.1.0-preview.3-win-x64.sha256).Trim()
+$expected = (Get-Content .\ChatGPTConnector-0.1.0-preview.4-win-x64.zip.sha256).Trim()
 .\deploy\Test-PreviewBuild.ps1 `
-  -ZipPath .\ChatGPTConnector-0.1.0-preview.3-win-x64.zip `
+  -ZipPath .\ChatGPTConnector-0.1.0-preview.4-win-x64.zip `
   -ExpectedSha256 $expected
 ```

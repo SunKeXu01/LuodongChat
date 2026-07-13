@@ -160,7 +160,7 @@ test("protects the read-only admin dashboard API with a separate key", async (t)
   const created = await fetch(`http://127.0.0.1:${gatewayPort}/admin/api/keys`, {
     method: "POST",
     headers: { authorization: `Bearer ${adminKey}`, "content-type": "application/json" },
-    body: JSON.stringify({ dailyLimit: 100, requestsPerMinute: 30, maxConcurrentRequests: 2, expiresInDays: 30 }),
+    body: JSON.stringify({ requestsPerMinute: 30, maxConcurrentRequests: 2 }),
   });
   assert.equal(created.status, 201);
   const createdBody = await created.json() as { key: string; prefix: string };

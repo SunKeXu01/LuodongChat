@@ -77,8 +77,8 @@ local daily = tonumber(redis.call('GET', KEYS[3]) or '0')
 if requests >= tonumber(ARGV[1]) then return -1 end
 if concurrent >= tonumber(ARGV[2]) then return -2 end
 if tonumber(ARGV[5]) > 0 and daily >= tonumber(ARGV[5]) then return -3 end
-redis.call('INCR', KEYS[1])
-redis.call('PEXPIRE', KEYS[1], ARGV[3])
+local requestCount = redis.call('INCR', KEYS[1])
+if requestCount == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[3]) end
 redis.call('INCR', KEYS[2])
 redis.call('PEXPIRE', KEYS[2], ARGV[4])
 if tonumber(ARGV[5]) > 0 then

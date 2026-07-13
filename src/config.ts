@@ -18,10 +18,10 @@ export interface GatewayConfig {
     smtpUser: string;
     smtpPassword: string;
     smtpFrom: string;
-    dailyLimit: number;
+    dailyLimit: number | null;
     requestsPerMinute: number;
     maxConcurrentRequests: number;
-    expiresInDays: number;
+    expiresInDays: number | null;
   };
 }
 
@@ -123,10 +123,10 @@ export function loadConfig(): GatewayConfig {
       smtpUser: smtpUser!,
       smtpPassword: smtpPassword!,
       smtpFrom: smtpFrom!,
-      dailyLimit: positiveInteger("SELF_SERVICE_DAILY_LIMIT", 100),
+      dailyLimit: null,
       requestsPerMinute: positiveInteger("SELF_SERVICE_REQUESTS_PER_MINUTE", 30),
       maxConcurrentRequests: positiveInteger("SELF_SERVICE_MAX_CONCURRENT", 2),
-      expiresInDays: positiveInteger("SELF_SERVICE_KEY_EXPIRES_DAYS", 30),
+      expiresInDays: null,
     } : undefined,
   };
 }
