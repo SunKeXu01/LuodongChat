@@ -39,19 +39,46 @@
           </StackPanel>
         </ScrollViewer>
       </TabItem>
+      <TabItem Header="聊天">
+        <Grid Margin="14,18">
+          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+          <DockPanel>
+            <TextBlock Text="GPT-5.6" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <Button x:Name="NewChatButton" Content="新建会话" HorizontalAlignment="Right" Padding="14,6" Click="NewChatButton_OnClick"/>
+          </DockPanel>
+          <ListBox x:Name="ChatMessagesList" Grid.Row="1" Margin="0,12" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <Border Background="#F3F4F6" CornerRadius="8" Padding="12" Margin="2,4" MaxWidth="390" HorizontalAlignment="Stretch">
+                  <StackPanel>
+                    <TextBlock Text="{Binding Sender}" FontWeight="SemiBold" Foreground="#0F766E"/>
+                    <TextBlock Text="{Binding Content}" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <TextBlock x:Name="ChatNotice" Grid.Row="2" Foreground="#B91C1C" TextWrapping="Wrap" Margin="2,0,2,6"/>
+          <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="82"/></Grid.ColumnDefinitions>
+            <TextBox x:Name="ChatInput" MinHeight="44" MaxHeight="110" Padding="10,8" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+            <Button x:Name="ChatSendButton" Grid.Column="1" Content="发送" Margin="10,0,0,0" Click="ChatSendButton_OnClick"/>
+          </Grid>
+        </Grid>
+      </TabItem>
       <TabItem Header="个人">
         <ScrollViewer VerticalScrollBarVisibility="Auto">
           <StackPanel Margin="20,24">
             <Border Width="104" Height="104" CornerRadius="52" BorderBrush="#D1D5DB" BorderThickness="1" HorizontalAlignment="Center" ClipToBounds="True">
               <Image x:Name="AvatarImage" Stretch="UniformToFill"/>
             </Border>
-            <Button Content="上传头像" Width="110" Margin="0,10,0,22" HorizontalAlignment="Center" Click="UploadAvatarButton_OnClick"/>
+            <Button x:Name="UploadAvatarButton" Content="上传头像" Width="110" Margin="0,10,0,22" HorizontalAlignment="Center" Click="UploadAvatarButton_OnClick"/>
             <TextBlock Text="邮箱" Foreground="#6B7280"/>
             <TextBlock x:Name="ProfileEmailText" FontSize="16" Margin="0,4,0,16" TextWrapping="Wrap"/>
             <TextBlock Text="网名" Foreground="#6B7280"/>
             <TextBox x:Name="NicknameInput" Height="40" Padding="10,7" MaxLength="20" Margin="0,5,0,0"/>
-            <Button Content="保存个人资料" Height="42" Margin="0,12,0,0" Click="SaveProfileButton_OnClick"/>
-            <Button Content="退出登录" Height="42" Margin="0,28,0,0" Foreground="#B91C1C" Click="LogoutButton_OnClick"/>
+            <Button x:Name="SaveProfileButton" Content="保存个人资料" Height="42" Margin="0,12,0,0" Click="SaveProfileButton_OnClick"/>
+            <Button x:Name="LogoutButton" Content="退出登录" Height="42" Margin="0,28,0,0" Foreground="#B91C1C" Click="LogoutButton_OnClick"/>
           </StackPanel>
         </ScrollViewer>
       </TabItem>

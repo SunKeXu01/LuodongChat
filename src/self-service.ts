@@ -22,9 +22,7 @@ export interface EnrollmentRepository {
   createChallenge(identityHash: string, codeHash: string, ipFingerprint: string): Promise<"created" | "rate_limited">;
   cancelLatestChallenge(identityHash: string): Promise<void>;
   verifyChallenge(identityHash: string, codeHash: string, consume: boolean): Promise<"verified" | "invalid" | "expired" | "locked">;
-  issueKey(identityHash: string, keyHash: string, keyPrefix: string, defaults: SelfServiceKeyDefaults, rotate: boolean): Promise<"created" | "active_key_exists">;
-  hasActiveKey(identityHash: string): Promise<boolean>;
-  login(identityHash: string, email: string, sessionHash: string, keyHash: string, keyPrefix: string, defaults: SelfServiceKeyDefaults): Promise<AccountProfile>;
+  login(identityHash: string, email: string, sessionHash: string, keyHash: string, keyPrefix: string, defaults: SelfServiceKeyDefaults): Promise<AccountProfile | null>;
   authenticate(sessionHash: string): Promise<AccountProfile | null>;
   updateProfile(sessionHash: string, nickname: string): Promise<AccountProfile | null>;
   updateAvatar(sessionHash: string, mediaType: string, dataBase64: string): Promise<AccountProfile | null>;
@@ -100,43 +98,7 @@ export class PostgresEnrollmentRepository implements EnrollmentRepository {
     } finally { client.release(); }
   }
 
-  async hasActiveKey(identityHash: string): Promise<boolean> {
-    const result = await this.db.query(
-      `SELECT 1 FROM gateway_keys key JOIN users ON users.id = key.user_id
-       WHERE users.identity_hash = decode($1, 'hex') AND key.status = 'active'
-         AND (key.expires_at IS NULL OR key.expires_at > now()) LIMIT 1`, [identityHash],
-    );
-    return (result.rowCount ?? result.rows.length) > 0;
-  }
-
-  async issueKey(identityHash: string, keyHash: string, keyPrefix: string, defaults: SelfServiceKeyDefaults, rotate: boolean): Promise<"created" | "active_key_exists"> {
-    const client = await this.db.connect();
-    try {
-      await client.query("BEGIN");
-      const user = await client.query(
-        `INSERT INTO users (identity_hash) VALUES (decode($1, 'hex'))
-         ON CONFLICT (identity_hash) WHERE identity_hash IS NOT NULL
-         DO UPDATE SET updated_at = now() RETURNING id`, [identityHash],
-      );
-      const userId = user.rows[0]!.id;
-      const active = await client.query("SELECT 1 FROM gateway_keys WHERE user_id = $1 AND status = 'active' AND (expires_at IS NULL OR expires_at > now()) FOR UPDATE", [userId]);
-      if ((active.rowCount ?? active.rows.length) > 0 && !rotate) { await client.query("ROLLBACK"); return "active_key_exists"; }
-      if (rotate) await client.query("UPDATE gateway_keys SET status = 'revoked', revoked_at = now() WHERE user_id = $1 AND status = 'active'", [userId]);
-      await client.query(
-        `INSERT INTO gateway_keys (user_id, key_hash, key_prefix, daily_request_limit, requests_per_minute, max_concurrent_requests, expires_at)
-         VALUES ($1, decode($2, 'hex'), $3, $4, $5, $6,
-           CASE WHEN $7::integer IS NULL THEN NULL ELSE now() + ($7::integer * interval '1 day') END)`,
-        [userId, keyHash, keyPrefix, defaults.dailyLimit, defaults.requestsPerMinute, defaults.maxConcurrentRequests, defaults.expiresInDays],
-      );
-      await client.query("COMMIT");
-      return "created";
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => undefined);
-      throw error;
-    } finally { client.release(); }
-  }
-
-  async login(identityHash: string, email: string, sessionHash: string, keyHash: string, keyPrefix: string, defaults: SelfServiceKeyDefaults): Promise<AccountProfile> {
+  async login(identityHash: string, email: string, sessionHash: string, keyHash: string, keyPrefix: string, defaults: SelfServiceKeyDefaults): Promise<AccountProfile | null> {
     const client = await this.db.connect();
     try {
       await client.query("BEGIN");
@@ -144,8 +106,10 @@ export class PostgresEnrollmentRepository implements EnrollmentRepository {
         `INSERT INTO users (identity_hash, email, nickname) VALUES (decode($1, 'hex'), $2, $3)
          ON CONFLICT (identity_hash) WHERE identity_hash IS NOT NULL
          DO UPDATE SET email = EXCLUDED.email, nickname = COALESCE(users.nickname, EXCLUDED.nickname), updated_at = now()
+         WHERE users.status = 'active'
          RETURNING id`, [identityHash, email, email.split("@")[0]!.slice(0, 20) || "GPT 用户"],
       );
+      if (!user.rows[0]) { await client.query("ROLLBACK"); return null; }
       const userId = String(user.rows[0]!.id);
       await client.query(`INSERT INTO user_wallets (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`, [userId]);
       await client.query(
@@ -154,7 +118,8 @@ export class PostgresEnrollmentRepository implements EnrollmentRepository {
       );
       await client.query(
         `INSERT INTO gateway_keys (user_id, key_hash, key_prefix, daily_request_limit, requests_per_minute, max_concurrent_requests, expires_at)
-         VALUES ($1, decode($2, 'hex'), $3, $4, $5, $6, NULL)`,
+         VALUES ($1, decode($2, 'hex'), $3, $4, $5, $6, NULL)
+         ON CONFLICT (user_id) WHERE status = 'active' DO NOTHING`,
         [userId, keyHash, keyPrefix, defaults.dailyLimit, defaults.requestsPerMinute, defaults.maxConcurrentRequests],
       );
       const profile = await client.query(
@@ -175,7 +140,8 @@ export class PostgresEnrollmentRepository implements EnrollmentRepository {
       `UPDATE user_sessions session SET last_used_at = now()
        FROM users, user_wallets wallet
        WHERE session.token_hash = decode($1, 'hex') AND session.revoked_at IS NULL
-         AND session.expires_at > now() AND users.id = session.user_id AND wallet.user_id = users.id
+         AND session.expires_at > now() AND users.id = session.user_id AND users.status = 'active'
+         AND wallet.user_id = users.id
        RETURNING users.id, users.email, users.nickname, users.avatar_media_type,
                  encode(users.avatar_data, 'base64') AS avatar_base64, wallet.balance_microunits`, [sessionHash],
     );
@@ -184,8 +150,10 @@ export class PostgresEnrollmentRepository implements EnrollmentRepository {
 
   async updateProfile(sessionHash: string, nickname: string): Promise<AccountProfile | null> {
     const session = await this.db.query(
-      `SELECT user_id FROM user_sessions WHERE token_hash = decode($1, 'hex')
-       AND revoked_at IS NULL AND expires_at > now()`, [sessionHash],
+      `SELECT session.user_id FROM user_sessions session
+       JOIN users ON users.id = session.user_id
+       WHERE session.token_hash = decode($1, 'hex') AND session.revoked_at IS NULL
+         AND session.expires_at > now() AND users.status = 'active'`, [sessionHash],
     );
     if (!session.rows[0]) return null;
     await this.db.query("UPDATE users SET nickname = $2, updated_at = now() WHERE id = $1", [session.rows[0].user_id, nickname]);
@@ -194,8 +162,10 @@ export class PostgresEnrollmentRepository implements EnrollmentRepository {
 
   async updateAvatar(sessionHash: string, mediaType: string, dataBase64: string): Promise<AccountProfile | null> {
     const session = await this.db.query(
-      `SELECT user_id FROM user_sessions WHERE token_hash = decode($1, 'hex')
-       AND revoked_at IS NULL AND expires_at > now()`, [sessionHash],
+      `SELECT session.user_id FROM user_sessions session
+       JOIN users ON users.id = session.user_id
+       WHERE session.token_hash = decode($1, 'hex') AND session.revoked_at IS NULL
+         AND session.expires_at > now() AND users.status = 'active'`, [sessionHash],
     );
     if (!session.rows[0]) return null;
     await this.db.query(
@@ -253,34 +223,24 @@ export class EnrollmentService {
     }
     return "sent";
   }
-  async verifyAndIssue(email: string, code: string, rotate: boolean): Promise<{ status: "created"; key: string; prefix: string } | { status: "invalid" | "expired" | "locked" | "active_key_exists" }> {
-    const identityHash = EnrollmentService.digest(email);
-    const hasActiveKey = await this.repository.hasActiveKey(identityHash);
-    const verified = await this.repository.verifyChallenge(identityHash, EnrollmentService.digest(code), rotate || !hasActiveKey);
-    if (verified !== "verified") return { status: verified };
-    if (hasActiveKey && !rotate) return { status: "active_key_exists" };
-    const key = `gw_${randomBytes(24).toString("hex")}`;
-    const prefix = key.slice(0, 11);
-    const issued = await this.repository.issueKey(identityHash, hashGatewayKey(key), prefix, this.defaults, rotate);
-    return issued === "created" ? { status: "created", key, prefix } : { status: issued };
-  }
-
   async verifyAndLogin(email: string, code: string): Promise<
-    { status: "authenticated"; accessToken: string; gatewayKey: string; profile: AccountProfile }
-    | { status: "invalid" | "expired" | "locked" }
+    { status: "authenticated"; accessToken: string; profile: AccountProfile }
+    | { status: "invalid" | "expired" | "locked" | "disabled" }
   > {
     const identityHash = EnrollmentService.digest(email);
     const verified = await this.repository.verifyChallenge(identityHash, EnrollmentService.digest(code), true);
     if (verified !== "verified") return { status: verified };
     const accessToken = `usr_${randomBytes(32).toString("hex")}`;
-    const gatewayKey = `gw_${randomBytes(24).toString("hex")}`;
+    const internalKey = `gw_${randomBytes(24).toString("hex")}`;
     const profile = await this.repository.login(
-      identityHash, email, hashGatewayKey(accessToken), hashGatewayKey(gatewayKey), gatewayKey.slice(0, 11), this.defaults,
+      identityHash, email, hashGatewayKey(accessToken), hashGatewayKey(internalKey), internalKey.slice(0, 11), this.defaults,
     );
-    return { status: "authenticated", accessToken, gatewayKey, profile };
+    if (!profile) return { status: "disabled" };
+    return { status: "authenticated", accessToken, profile };
   }
 
   authenticate(accessToken: string): Promise<AccountProfile | null> { return this.repository.authenticate(hashGatewayKey(accessToken)); }
+  getRequestLimits(): SelfServiceKeyDefaults { return { ...this.defaults }; }
   updateProfile(accessToken: string, nickname: string): Promise<AccountProfile | null> { return this.repository.updateProfile(hashGatewayKey(accessToken), nickname); }
   updateAvatar(accessToken: string, mediaType: string, dataBase64: string): Promise<AccountProfile | null> { return this.repository.updateAvatar(hashGatewayKey(accessToken), mediaType, dataBase64); }
   logout(accessToken: string): Promise<void> { return this.repository.logout(hashGatewayKey(accessToken)); }

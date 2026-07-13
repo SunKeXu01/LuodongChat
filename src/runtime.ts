@@ -13,6 +13,7 @@ import {
 import { PostgresAdminRepository, type AdminRepository } from "./admin.js";
 import { RedisAdminLoginGuard, type AdminLoginProtector } from "./admin-security.js";
 import { EnrollmentService, PostgresEnrollmentRepository, SmtpEnrollmentMailer } from "./self-service.js";
+import { PostgresChatSyncRepository, type ChatSyncRepository } from "./sync.js";
 
 export interface RuntimeDependencies {
   ledger?: RequestLedger;
@@ -22,6 +23,7 @@ export interface RuntimeDependencies {
   adminRepository?: AdminRepository;
   adminLoginProtector?: AdminLoginProtector;
   enrollmentService?: EnrollmentService;
+  chatSyncRepository?: ChatSyncRepository;
   close(): Promise<void>;
 }
 
@@ -34,6 +36,7 @@ export async function createRuntimeDependencies(config: GatewayConfig): Promise<
   let adminRepository: AdminRepository | undefined;
   let adminLoginProtector: AdminLoginProtector | undefined;
   let enrollmentService: EnrollmentService | undefined;
+  let chatSyncRepository: ChatSyncRepository | undefined;
 
   if (process.env.DATABASE_URL) {
     const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 10 });
@@ -42,6 +45,7 @@ export async function createRuntimeDependencies(config: GatewayConfig): Promise<
     keyVerifier = new PostgresGatewayKeyVerifier(pool, new StaticGatewayKeyVerifier(config.gatewayKeyHashes));
     keyLimitProvider = new PostgresGatewayKeyLimitProvider(pool, config.requestsPerMinute, config.maxConcurrentRequests);
     adminRepository = new PostgresAdminRepository(pool);
+    chatSyncRepository = new PostgresChatSyncRepository(pool);
     if (config.selfService) {
       enrollmentService = new EnrollmentService(
         new PostgresEnrollmentRepository(pool),
@@ -69,6 +73,7 @@ export async function createRuntimeDependencies(config: GatewayConfig): Promise<
     adminRepository,
     adminLoginProtector,
     enrollmentService,
+    chatSyncRepository,
     close: async () => {
       for (const close of closers.reverse()) await close();
     },

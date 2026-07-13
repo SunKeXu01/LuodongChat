@@ -41,8 +41,10 @@ test("verifies active database keys and falls back to static keys", async () => 
 });
 
 test("loads per-key limits and daily quota state", async () => {
+  const calls: string[] = [];
   const database = {
-    async query() {
+    async query(sql: string) {
+      calls.push(sql);
       return {
         rowCount: 1,
         rows: [{ requests_per_minute: 12, max_concurrent_requests: 3, daily_request_limit: 100 }],
@@ -55,4 +57,14 @@ test("loads per-key limits and daily quota state", async () => {
     maxConcurrentRequests: 3,
     dailyLimit: 100,
   });
+});
+
+test("requires an active account when loading account-owned limits", async () => {
+  let sql = "";
+  const provider = new PostgresGatewayKeyLimitProvider({
+    async query(value: string) { sql = value; return { rows: [] }; },
+  }, 30, 2);
+  assert.equal(await provider.getLimitsForUser("00000000-0000-4000-8000-000000000001"), null);
+  assert.match(sql, /JOIN users AS owner/);
+  assert.match(sql, /owner\.status = 'active'/);
 });

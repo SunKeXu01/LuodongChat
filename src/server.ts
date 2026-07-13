@@ -23,6 +23,7 @@ import type { AdminRepository } from "./admin.js";
 import { ADMIN_HTML, ADMIN_JS } from "./admin-assets.js";
 import { AdminLoginGuard, type AdminLoginProtector } from "./admin-security.js";
 import { EnrollmentService } from "./self-service.js";
+import type { ChatSyncRepository, SyncedMessage } from "./sync.js";
 
 const MAX_REQUEST_BYTES = 10 * 1024 * 1024;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
@@ -84,6 +85,7 @@ export interface GatewayServerOptions {
   adminRepository?: AdminRepository;
   adminLoginProtector?: AdminLoginProtector;
   enrollmentService?: EnrollmentService;
+  chatSyncRepository?: ChatSyncRepository;
 }
 
 export function createGatewayServer(config: GatewayConfig, options: GatewayServerOptions = {}) {
@@ -109,6 +111,10 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
         "x-frame-options": "DENY",
       });
       return res.end(LANDING_PAGE);
+    }
+    if (req.url?.startsWith("/enrollment/")) {
+      res.setHeader("cache-control", "no-store");
+      return json(res, 410, { error: { code: "account_login_required", message: "请使用客户端邮箱登录，网关密钥不再向用户发放" } });
     }
     const releaseRoot = process.env.CLIENT_RELEASE_ROOT?.trim();
     if (req.method === "GET" && req.url === "/client/update.json" && releaseRoot) {
@@ -164,6 +170,7 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
       const result = await options.enrollmentService.verifyAndLogin(email, code);
       res.setHeader("cache-control", "no-store");
       if (result.status === "authenticated") return json(res, 200, result);
+      if (result.status === "disabled") return json(res, 403, { error: { code: "account_disabled", message: "账号已停用" } });
       return json(res, 401, { error: { code: `verification_${result.status}`, message: "验证码无效或已过期" } });
     }
     if (req.url?.startsWith("/account/") && options.enrollmentService) {
@@ -202,40 +209,43 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
         return json(res, 200, { status: "logged_out" });
       }
     }
-    if (req.method === "POST" && req.url === "/enrollment/code" && options.enrollmentService) {
-      try {
-        const input = await readJsonObject(req);
-        const email = typeof input.email === "string" ? EnrollmentService.normalizeEmail(input.email) : null;
-        if (!email) return json(res, 400, { error: { code: "invalid_email", message: "Email address is invalid" } });
-        const clientAddress = req.headers["x-real-ip"]?.toString().trim() || req.socket.remoteAddress || "unknown";
-        const result = await options.enrollmentService.requestCode(email, hashGatewayKey(clientAddress).slice(0, 16));
-        if (result === "rate_limited") {
-          res.setHeader("retry-after", "60");
-          return json(res, 429, { error: { code: "enrollment_rate_limited", message: "Please wait before requesting another code" } });
-        }
-        res.setHeader("cache-control", "no-store");
-        return json(res, 202, { status: "code_sent", expiresInSeconds: 600 });
-      } catch (error) {
-        if (error instanceof SyntaxError || (error instanceof Error && error.message === "invalid_json")) return json(res, 400, { error: { code: "invalid_json" } });
-        console.error(JSON.stringify({ event: "enrollment_email_failed", requestId, error: error instanceof Error ? error.name : "unknown" }));
-        return json(res, 503, { error: { code: "email_unavailable", message: "Verification email is temporarily unavailable" } });
+    if (req.url?.startsWith("/sync/") && options.enrollmentService && options.chatSyncRepository) {
+      const accessToken = extractBearerKey(req.headers.authorization);
+      const account = accessToken?.startsWith("usr_") ? await options.enrollmentService.authenticate(accessToken) : null;
+      if (!account) return json(res, 401, { error: { code: "login_required", message: "请先登录" } });
+      res.setHeader("cache-control", "no-store");
+      if (req.method === "GET" && req.url.startsWith("/sync/state")) {
+        const parsed = new URL(req.url, "http://localhost");
+        const sinceValue = parsed.searchParams.get("since");
+        const since = sinceValue ? new Date(sinceValue) : new Date(0);
+        if (Number.isNaN(since.getTime())) return json(res, 400, { error: { code: "invalid_sync_cursor", message: "同步时间无效" } });
+        return json(res, 200, await options.chatSyncRepository.getChanges(account.id, since));
       }
-    }
-    if (req.method === "POST" && req.url === "/enrollment/verify" && options.enrollmentService) {
-      try {
+      if (req.method === "POST" && req.url === "/sync/conversations") {
         const input = await readJsonObject(req);
-        const email = typeof input.email === "string" ? EnrollmentService.normalizeEmail(input.email) : null;
-        const code = typeof input.code === "string" && /^\d{6}$/.test(input.code) ? input.code : null;
-        const rotate = input.rotate === true;
-        if (!email || !code) return json(res, 400, { error: { code: "invalid_verification_input" } });
-        const result = await options.enrollmentService.verifyAndIssue(email, code, rotate);
-        res.setHeader("cache-control", "no-store");
-        if (result.status === "created") return json(res, 201, { key: result.key, prefix: result.prefix });
-        if (result.status === "active_key_exists") return json(res, 409, { error: { code: result.status, message: "An active key already exists; explicitly request rotation" } });
-        return json(res, 401, { error: { code: `verification_${result.status}`, message: "Verification code is invalid or unavailable" } });
-      } catch (error) {
-        if (error instanceof SyntaxError || (error instanceof Error && error.message === "invalid_json")) return json(res, 400, { error: { code: "invalid_json" } });
-        throw error;
+        const id = typeof input.id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.id) ? input.id : null;
+        const title = typeof input.title === "string" ? input.title.trim() : "";
+        if (!id || title.length < 1 || title.length > 120) return json(res, 400, { error: { code: "invalid_conversation" } });
+        const conversation = await options.chatSyncRepository.upsertConversation(account.id, id, title);
+        return conversation ? json(res, 200, conversation) : json(res, 409, { error: { code: "conversation_conflict" } });
+      }
+      const deleteMatch = /^\/sync\/conversations\/([0-9a-f-]{36})$/.exec(req.url);
+      if (req.method === "DELETE" && deleteMatch) {
+        const deleted = await options.chatSyncRepository.deleteConversation(account.id, deleteMatch[1]!);
+        return deleted ? json(res, 200, { status: "deleted" }) : json(res, 404, { error: { code: "conversation_not_found" } });
+      }
+      if (req.method === "POST" && req.url === "/sync/messages") {
+        const input = await readJsonObject(req);
+        const uuid = (value: unknown) => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value) ? value : null;
+        const id = uuid(input.id); const conversationId = uuid(input.conversationId);
+        const role = typeof input.role === "string" && ["user", "assistant", "system"].includes(input.role) ? input.role as SyncedMessage["role"] : null;
+        const content = typeof input.content === "string" ? input.content.trim() : "";
+        const clientCreatedAt = typeof input.clientCreatedAt === "string" ? new Date(input.clientCreatedAt) : new Date();
+        if (!id || !conversationId || !role || content.length < 1 || content.length > 32_000 || Number.isNaN(clientCreatedAt.getTime())) {
+          return json(res, 400, { error: { code: "invalid_message" } });
+        }
+        const message = await options.chatSyncRepository.appendMessage(account.id, { id, conversationId, role, content, clientCreatedAt });
+        return message ? json(res, 200, message) : json(res, 404, { error: { code: "conversation_not_found" } });
       }
     }
     const adminEnabled = (config.adminKeyHashes?.size ?? 0) > 0 && options.adminRepository;
@@ -352,14 +362,36 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
       return json(res, 404, { error: { code: "not_found", message: "Route not found" } });
     }
 
-    const gatewayKey = extractBearerKey(req.headers.authorization);
-    if (!gatewayKey || !await keyVerifier.verify(gatewayKey)) {
-      return json(res, 401, { error: { code: "invalid_gateway_key", message: "Gateway key is invalid or revoked" } });
+    const credential = extractBearerKey(req.headers.authorization);
+    let requestUserId: string | undefined;
+    let keyHash: string | undefined;
+    let subject: string;
+    let limits;
+    if (credential?.startsWith("usr_") && options.enrollmentService) {
+      const account = await options.enrollmentService.authenticate(credential);
+      if (!account) return json(res, 401, { error: { code: "session_expired", message: "登录已过期，请重新登录" } });
+      requestUserId = account.id;
+      subject = `user:${account.id}`;
+      const accountLimits = options.enrollmentService.getRequestLimits();
+      if (options.keyLimitProvider?.getLimitsForUser) {
+        limits = await options.keyLimitProvider.getLimitsForUser(account.id);
+        if (!limits) return json(res, 403, { error: { code: "account_gateway_disabled", message: "账号连接权限已停用" } });
+      } else {
+        limits = {
+          requestsPerMinute: accountLimits.requestsPerMinute,
+          maxConcurrentRequests: accountLimits.maxConcurrentRequests,
+          dailyLimit: accountLimits.dailyLimit,
+        };
+      }
+    } else {
+      if (!credential || !await keyVerifier.verify(credential)) {
+        return json(res, 401, { error: { code: "invalid_gateway_key", message: "Gateway key is invalid or revoked" } });
+      }
+      keyHash = hashGatewayKey(credential);
+      subject = safeSubject(credential);
+      limits = await options.keyLimitProvider?.getLimits(keyHash);
     }
-
-    const keyHash = hashGatewayKey(gatewayKey);
-    const limits = await options.keyLimitProvider?.getLimits(keyHash);
-    const permit = await limiter.acquire(safeSubject(gatewayKey), limits ? {
+    const permit = await limiter.acquire(subject, limits ? {
       requestsPerMinute: limits.requestsPerMinute,
       maxConcurrent: limits.maxConcurrentRequests,
       dailyLimit: limits.dailyLimit ?? undefined,
@@ -374,7 +406,7 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
     let ledgerStarted = false;
     let attempts = 0;
     try {
-      await ledger.startRequest({ requestId, gatewayKeyHash: keyHash, startedAt: new Date(startedAt) });
+      await ledger.startRequest({ requestId, gatewayKeyHash: keyHash, userId: requestUserId, startedAt: new Date(startedAt) });
       ledgerStarted = true;
       const body = await readBody(req);
       let upstream: Response | undefined;

@@ -11,6 +11,8 @@ namespace ChatGPTConnector.App;
 
 public partial class App : Application
 {
+    private Mutex? _singleInstanceMutex;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -19,6 +21,16 @@ public partial class App : Application
         {
             try { Process.GetProcessById(parentProcessId).WaitForExit(); } catch { }
             new ManagedCodexEnvironment().Restore();
+            Shutdown(0);
+            return;
+        }
+        _singleInstanceMutex = new Mutex(true, @"Local\ChatGPTConnector.WindowsClient", out var isFirstInstance);
+        if (!isFirstInstance)
+        {
+            MessageBox.Show("ChatGPT 连接器已经在运行，请在任务栏托盘中打开主界面。", "ChatGPT 连接器",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            _singleInstanceMutex.Dispose();
+            _singleInstanceMutex = null;
             Shutdown(0);
             return;
         }
@@ -42,6 +54,16 @@ public partial class App : Application
             ReportFatalError(error);
             Shutdown(1);
         }
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        if (_singleInstanceMutex is not null)
+        {
+            _singleInstanceMutex.ReleaseMutex();
+            _singleInstanceMutex.Dispose();
+        }
+        base.OnExit(e);
     }
 
     private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)

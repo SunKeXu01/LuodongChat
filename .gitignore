@@ -6,6 +6,11 @@ dist/
 coverage/
 **/bin/
 **/obj/
+**/.gradle/
+**/build/
+android/local.properties
+*.apk
+*.aab
 .vs/
 artifacts/
 test/fixtures/**/tmp/

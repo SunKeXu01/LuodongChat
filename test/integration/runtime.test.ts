@@ -14,7 +14,7 @@ const integrationAvailable = Boolean(databaseUrl && redisUrl);
 test("applies migrations idempotently and verifies database-backed keys", { skip: !integrationAvailable }, async () => {
   assert.ok(databaseUrl);
   const first = await runMigrations(databaseUrl);
-  assert.deepEqual(first, ["001_initial.sql", "002_gateway_key_limits.sql", "003_admin_audit.sql", "004_deployment_history.sql", "005_self_service_enrollment.sql", "006_unlimited_key_policy.sql", "007_user_accounts.sql"]);
+  assert.deepEqual(first, ["001_initial.sql", "002_gateway_key_limits.sql", "003_admin_audit.sql", "004_deployment_history.sql", "005_self_service_enrollment.sql", "006_unlimited_key_policy.sql", "007_user_accounts.sql", "008_cross_device_chat_sync.sql", "009_one_gateway_key_per_account.sql"]);
   assert.deepEqual(await runMigrations(databaseUrl), []);
 
   const pool = new pg.Pool({ connectionString: databaseUrl });
@@ -76,10 +76,27 @@ test("creates and authenticates a passwordless user account", { skip: !databaseU
       "c".repeat(64), "account@example.com", hashGatewayKey("usr_integration"),
       hashGatewayKey("gw_account_integration"), "gw_account", { dailyLimit: null, requestsPerMinute: 30, maxConcurrentRequests: 2, expiresInDays: null },
     );
+    assert.ok(profile);
     assert.equal(profile.email, "account@example.com");
+    await repository.login(
+      "c".repeat(64), "account@example.com", hashGatewayKey("usr_integration_second"),
+      hashGatewayKey("gw_account_second"), "gw_account", { dailyLimit: null, requestsPerMinute: 30, maxConcurrentRequests: 2, expiresInDays: null },
+    );
+    const keys = await pool.query(
+      `SELECT count(*) AS count FROM gateway_keys key JOIN users ON users.id = key.user_id
+       WHERE users.email = $1 AND key.status = 'active'`, ["account@example.com"],
+    );
+    assert.equal(Number(keys.rows[0]?.count), 1);
     assert.equal((await repository.authenticate(hashGatewayKey("usr_integration")))?.email, "account@example.com");
     assert.equal((await repository.updateProfile(hashGatewayKey("usr_integration"), "测试用户"))?.nickname, "测试用户");
     await repository.logout(hashGatewayKey("usr_integration"));
     assert.equal(await repository.authenticate(hashGatewayKey("usr_integration")), null);
+    await pool.query("UPDATE users SET status = 'disabled' WHERE email = $1", ["account@example.com"]);
+    assert.equal(await repository.authenticate(hashGatewayKey("usr_integration_second")), null);
+    assert.equal(await new PostgresGatewayKeyLimitProvider(pool, 30, 2).getLimitsForUser(profile.id), null);
+    assert.equal(await repository.login(
+      "c".repeat(64), "account@example.com", hashGatewayKey("usr_integration_third"),
+      hashGatewayKey("gw_account_third"), "gw_account", { dailyLimit: null, requestsPerMinute: 30, maxConcurrentRequests: 2, expiresInDays: null },
+    ), null);
   } finally { await pool.end(); }
 });

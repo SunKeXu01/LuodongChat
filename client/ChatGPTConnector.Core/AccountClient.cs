@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace ChatGPTConnector.Core;
 
 public sealed record AccountProfile(string Id, string Email, string Nickname, string? AvatarMediaType, string? AvatarBase64, long BalanceMicrounits);
-public sealed record AccountSession(string AccessToken, string GatewayKey, AccountProfile Profile);
+public sealed record AccountSession(string AccessToken, AccountProfile Profile);
 
 public sealed class AccountClient(HttpClient http)
 {
@@ -21,7 +21,7 @@ public sealed class AccountClient(HttpClient http)
         await EnsureSuccessAsync(response, cancellationToken);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
         var root = document.RootElement;
-        return new AccountSession(root.GetProperty("accessToken").GetString()!, root.GetProperty("gatewayKey").GetString()!, ParseProfile(root.GetProperty("profile")));
+        return new AccountSession(root.GetProperty("accessToken").GetString()!, ParseProfile(root.GetProperty("profile")));
     }
 
     public async Task<AccountProfile?> GetProfileAsync(Uri gateway, string accessToken, CancellationToken cancellationToken = default)

@@ -2,7 +2,8 @@ export type RequestStatus = "in_progress" | "completed" | "failed";
 
 export interface RequestStart {
   requestId: string;
-  gatewayKeyHash: string;
+  gatewayKeyHash?: string;
+  userId?: string;
   startedAt: Date;
 }
 
@@ -16,10 +17,16 @@ export class PostgresRequestLedger implements RequestLedger {
   async startRequest(record: RequestStart): Promise<void> {
     await this.db.query(
       `INSERT INTO user_requests (id, user_id, gateway_key_id, status, started_at)
-       SELECT $1::uuid, key.user_id, key.id, 'in_progress', $3::timestamptz
+       SELECT $1::uuid, COALESCE($4::uuid, key.user_id), key.id, 'in_progress', $3::timestamptz
        FROM (SELECT 1) AS seed
-       LEFT JOIN gateway_keys AS key ON key.key_hash = decode($2, 'hex')`,
-      [record.requestId, record.gatewayKeyHash, record.startedAt],
+       LEFT JOIN LATERAL (
+         SELECT candidate.id, candidate.user_id
+         FROM gateway_keys candidate
+         WHERE ($2::text IS NOT NULL AND candidate.key_hash = decode($2, 'hex'))
+            OR ($4::uuid IS NOT NULL AND candidate.user_id = $4::uuid AND candidate.status = 'active')
+         ORDER BY candidate.created_at DESC LIMIT 1
+       ) AS key ON true`,
+      [record.requestId, record.gatewayKeyHash ?? null, record.startedAt, record.userId ?? null],
     );
   }
 

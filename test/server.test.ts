@@ -8,6 +8,7 @@ import { hashGatewayKey } from "../src/auth.js";
 import type { GatewayConfig } from "../src/config.js";
 import { createGatewayServer } from "../src/server.js";
 import { InMemoryRequestLedger } from "../src/ledger.js";
+import type { EnrollmentService } from "../src/self-service.js";
 
 async function listen(server: ReturnType<typeof createServer>): Promise<number> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -90,6 +91,68 @@ test("authenticates and proxies a Responses request", async (t) => {
   assert.equal(JSON.stringify({ requests: [...ledger.requests.values()], attempts: ledger.attempts }).includes("hello"), false);
 });
 
+test("uses an authenticated account session without exposing a gateway key", async (t) => {
+  const upstream = createServer(async (req, res) => {
+    for await (const _chunk of req) { /* consume request */ }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ id: "resp_account", status: "completed" }));
+  });
+  const upstreamPort = await listen(upstream);
+  t.after(() => upstream.close());
+  const config: GatewayConfig = {
+    port: 0, upstreamBaseUrl: `http://127.0.0.1:${upstreamPort}`, upstreamApiKey: "upstream-secret",
+    upstreamApiKeys: ["upstream-secret"], upstreamResponsesPath: "/responses", gatewayKeyHashes: new Set(),
+    requestsPerMinute: 10, maxConcurrentRequests: 2, upstreamTimeoutMs: 5_000,
+  };
+  const profile = { id: "00000000-0000-4000-8000-000000000002", email: "user@example.com", nickname: "user", avatarMediaType: null, avatarBase64: null, balanceMicrounits: 0 };
+  const enrollmentService = {
+    authenticate: async (token: string) => token === "usr_valid" ? profile : null,
+    getRequestLimits: () => ({ dailyLimit: null, requestsPerMinute: 10, maxConcurrentRequests: 2, expiresInDays: null }),
+  } as unknown as EnrollmentService;
+  const ledger = new InMemoryRequestLedger();
+  const gateway = createGatewayServer(config, { enrollmentService, ledger });
+  const port = await listen(gateway);
+  t.after(() => gateway.close());
+
+  const expired = await fetch(`http://127.0.0.1:${port}/responses`, { method: "POST", headers: { authorization: "Bearer usr_expired" } });
+  assert.equal(expired.status, 401);
+  const response = await fetch(`http://127.0.0.1:${port}/responses`, {
+    method: "POST", headers: { authorization: "Bearer usr_valid", "content-type": "application/json" },
+    body: JSON.stringify({ model: "gpt-5.6-sol", input: "hello" }),
+  });
+  assert.equal(response.status, 200);
+  const recorded = [...ledger.requests.values()][0];
+  assert.equal(recorded?.userId, profile.id);
+  assert.equal(recorded?.gatewayKeyHash, undefined);
+});
+
+test("scopes cross-device sync calls to the signed-in account", async (t) => {
+  const config: GatewayConfig = {
+    port: 0, upstreamBaseUrl: "http://127.0.0.1:1", upstreamApiKey: "unused", upstreamApiKeys: ["unused"],
+    upstreamResponsesPath: "/responses", gatewayKeyHashes: new Set(), requestsPerMinute: 10,
+    maxConcurrentRequests: 2, upstreamTimeoutMs: 100,
+  };
+  const userId = "00000000-0000-4000-8000-000000000003";
+  const enrollmentService = {
+    authenticate: async (token: string) => token === "usr_valid" ? { id: userId, email: "sync@example.com", nickname: "sync", avatarMediaType: null, avatarBase64: null, balanceMicrounits: 0 } : null,
+  } as unknown as EnrollmentService;
+  const calls: string[] = [];
+  const chatSyncRepository = {
+    getChanges: async (owner: string) => { calls.push(owner); return { conversations: [], messages: [], serverTime: new Date(0).toISOString() }; },
+    upsertConversation: async () => null,
+    deleteConversation: async () => false,
+    appendMessage: async () => null,
+  };
+  const gateway = createGatewayServer(config, { enrollmentService, chatSyncRepository });
+  const port = await listen(gateway);
+  t.after(() => gateway.close());
+  const unauthorized = await fetch(`http://127.0.0.1:${port}/sync/state`);
+  assert.equal(unauthorized.status, 401);
+  const response = await fetch(`http://127.0.0.1:${port}/sync/state`, { headers: { authorization: "Bearer usr_valid" } });
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [userId]);
+});
+
 test("serves a safe public landing page", async (t) => {
   const config: GatewayConfig = {
     port: 0,
@@ -111,6 +174,20 @@ test("serves a safe public landing page", async (t) => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html/);
   assert.equal(response.headers.get("x-frame-options"), "DENY");
   assert.match(await response.text(), /ChatGPT 连接器/);
+});
+
+test("does not expose the legacy user gateway-key enrollment API", async (t) => {
+  const config: GatewayConfig = {
+    port: 0, upstreamBaseUrl: "http://127.0.0.1:1", upstreamApiKey: "unused", upstreamApiKeys: ["unused"],
+    upstreamResponsesPath: "/responses", gatewayKeyHashes: new Set(), requestsPerMinute: 10,
+    maxConcurrentRequests: 2, upstreamTimeoutMs: 100,
+  };
+  const gateway = createGatewayServer(config);
+  const port = await listen(gateway);
+  t.after(() => gateway.close());
+  const response = await fetch(`http://127.0.0.1:${port}/enrollment/status`);
+  assert.equal(response.status, 410);
+  assert.equal(JSON.stringify(await response.json()).includes("gw_"), false);
 });
 
 test("protects the read-only admin dashboard API with a separate key", async (t) => {

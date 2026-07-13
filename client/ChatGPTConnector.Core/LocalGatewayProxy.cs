@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace ChatGPTConnector.Core;
 
-public sealed class LocalGatewayProxy(HttpClient http, Uri upstream, string gatewayKey, string localAccessKey, int port = 51234) : IAsyncDisposable
+public sealed class LocalGatewayProxy(HttpClient http, Uri upstream, string accountAccessToken, string localAccessKey, int port = 51234) : IAsyncDisposable
 {
     private readonly HttpListener _listener = new();
     private readonly CancellationTokenSource _stopping = new();
@@ -36,7 +36,7 @@ public sealed class LocalGatewayProxy(HttpClient http, Uri upstream, string gate
                 context.Response.StatusCode = 401;
                 return;
             }
-            var target = new Uri(upstream, context.Request.RawUrl ?? "/");
+            var target = ResolveTarget(upstream, context.Request.Url);
             using var request = new HttpRequestMessage(new HttpMethod(context.Request.HttpMethod), target);
             if (context.Request.HasEntityBody) request.Content = new StreamContent(context.Request.InputStream);
             foreach (var key in context.Request.Headers.AllKeys)
@@ -48,7 +48,7 @@ public sealed class LocalGatewayProxy(HttpClient http, Uri upstream, string gate
                 if (values is null) continue;
                 if (!request.Headers.TryAddWithoutValidation(key, values)) request.Content?.Headers.TryAddWithoutValidation(key, values);
             }
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", gatewayKey);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accountAccessToken);
             using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, _stopping.Token);
             context.Response.StatusCode = (int)response.StatusCode;
             foreach (var header in response.Headers.Concat(response.Content.Headers))
@@ -67,6 +67,16 @@ public sealed class LocalGatewayProxy(HttpClient http, Uri upstream, string gate
             await context.Response.OutputStream.WriteAsync(body);
         }
         finally { context.Response.Close(); }
+    }
+
+    internal static Uri ResolveTarget(Uri upstream, Uri? requestUrl)
+    {
+        var target = new Uri(upstream, requestUrl?.PathAndQuery ?? "/");
+        if (!string.Equals(target.Scheme, upstream.Scheme, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(target.Host, upstream.Host, StringComparison.OrdinalIgnoreCase)
+            || target.Port != upstream.Port)
+            throw new InvalidOperationException("Local proxy target must remain on the configured gateway origin.");
+        return target;
     }
 
     public async ValueTask DisposeAsync()
