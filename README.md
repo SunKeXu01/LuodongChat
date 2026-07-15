@@ -17,13 +17,13 @@
 
 ## 下载
 
-- [GitHub Releases](https://github.com/SunKeXu01/ChatGPTConnector/releases)
+- [GitHub Releases](https://github.com/SunKeXu01/LuodongChat/releases)
 - [直接下载最新 Windows EXE](https://520skx.com/client/download/LuodongChat.exe)
 - [直接下载最新 Android APK](https://520skx.com/client/download/LuodongChat.apk)
 
-Release 文件均包含版本号，例如 `LuodongChat-0.1.0-preview.18-win-x64.exe` 与 `LuodongChat-0.1.0-preview.18-android.apk`，并同时提供 SHA-256 校验文件。
+Release 文件均包含版本号，例如 `LuodongChat-1.0-win-x64.exe` 与 `LuodongChat-1.0-android.apk`，并同时提供 SHA-256 校验文件。
 
-当前 Windows 预览版尚未进行代码签名。如果系统显示“Windows 已保护你的电脑”，请确认安装包来自本仓库或上述下载地址，然后点击“更多信息”→“仍要运行”。Android 版使用固定发布证书签名，更新时会覆盖旧版本并保留账号数据。
+当前 Windows 版尚未进行代码签名。如果系统显示“Windows 已保护你的电脑”，请确认安装包来自本仓库或上述下载地址，然后点击“更多信息”→“仍要运行”。Android 版使用固定发布证书签名，更新时会覆盖旧版本并保留账号数据。
 
 ## Windows 使用方式
 
@@ -47,7 +47,7 @@ Windows 与 Android 客户端启动时都会检查新版本。更新文件只从
 
 - 服务地址：`https://520skx.com`
 - 客服：`2554798585（QQ）`
-- 项目主页：<https://github.com/SunKeXu01/ChatGPTConnector>
+- 项目主页：<https://github.com/SunKeXu01/LuodongChat>
 
 ## 开源参考
 

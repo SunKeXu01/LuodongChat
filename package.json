@@ -1,6 +1,6 @@
 {
-  "name": "chatgpt-connector",
-  "version": "0.1.0",
+  "name": "luodong-chat",
+  "version": "1.0.0",
   "private": true,
   "packageManager": "pnpm@10.14.0",
   "type": "module",

@@ -24,6 +24,15 @@ public sealed class ClientUpdateServiceTests
     }
 
     [Fact]
+    public async Task StableV1IsNewerThanPreviewRelease()
+    {
+        const string json = """{"version":"1.0","executableUrl":"https://520skx.com/client/download/LuodongChat.exe","checksumUrl":"https://520skx.com/client/download/LuodongChat.exe.sha256"}""";
+        var update = await new ClientUpdateService(new HttpClient(new StubHandler(json))).CheckAsync("0.1.0-preview.18");
+        Assert.NotNull(update);
+        Assert.Equal("1.0", update.Version);
+    }
+
+    [Fact]
     public void InstallerWaitsForExitAndDeletesThePreviousExecutable()
     {
         var script = ClientUpdateService.BuildInstallScript(@"C:\Temp\new.exe", @"C:\Apps\LuodongChat.exe", 4321);

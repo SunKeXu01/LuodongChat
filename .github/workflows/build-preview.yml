@@ -76,7 +76,7 @@ jobs:
       - run: pnpm test:integration
 
   windows-preview:
-    name: Windows preview
+    name: Windows client
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -112,7 +112,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   android-preview:
-    name: Android preview
+    name: Android client
     runs-on: ubuntu-latest
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
@@ -211,7 +211,7 @@ jobs:
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "${files[@]}" --clobber
           else
-            gh release create "$tag" "${files[@]}" --title "泺栋chat $tag" --prerelease --generate-notes
+            gh release create "$tag" "${files[@]}" --title "泺栋chat $tag" --generate-notes
           fi
 
   deploy-production:
