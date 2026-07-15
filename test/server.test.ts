@@ -249,7 +249,7 @@ test("serves a safe public landing page", async (t) => {
   const page = await response.text();
   assert.match(page, /泺栋chat/);
   assert.match(page, /luodongchat-app\.oss-cn-beijing\.aliyuncs\.com\/latest\/LuodongChat-Setup\.exe/);
-  assert.match(page, /luodongchat-app\.oss-cn-beijing\.aliyuncs\.com\/latest\/LuodongChat\.apk/);
+  assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat\.apk/);
   assert.match(page, /github\.com\/SunKeXu01\/LuodongChat\/releases\/latest/);
 });
 
