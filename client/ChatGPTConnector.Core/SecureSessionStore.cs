@@ -6,8 +6,8 @@ namespace ChatGPTConnector.Core;
 
 public sealed class SecureSessionStore(string path)
 {
-    public static SecureSessionStore ForCurrentUser() => new(Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ChatGPTConnector", "session.dat"));
+    public static SecureSessionStore ForApplicationDirectory() =>
+        new(Path.Combine(ApplicationDirectories.Data, "session.dat"));
 
     public void Save(AccountSession session)
     {

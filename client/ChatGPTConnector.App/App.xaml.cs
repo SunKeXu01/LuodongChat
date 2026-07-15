@@ -2,6 +2,7 @@ using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Threading;
+using ChatGPTConnector.Core;
 using Application = System.Windows.Application;
 using MessageBox = System.Windows.MessageBox;
 
@@ -29,6 +30,7 @@ public partial class App : Application
 
         try
         {
+            ApplicationDirectories.EnsureWritable();
             var smokeTest = e.Args.Contains("--smoke-test", StringComparer.OrdinalIgnoreCase);
             var window = new MainWindow(skipStartupChecks: smokeTest);
             window.Show();
@@ -83,10 +85,7 @@ public partial class App : Application
     {
         try
         {
-            var directory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "LuodongChat",
-                "logs");
+            var directory = ApplicationDirectories.Logs;
             Directory.CreateDirectory(directory);
             var path = Path.Combine(directory, $"crash-{DateTime.Now:yyyyMMdd-HHmmss}.log");
             File.WriteAllText(path, $"泺栋chat {DateTimeOffset.Now:O}{Environment.NewLine}{error}", new UTF8Encoding(false));

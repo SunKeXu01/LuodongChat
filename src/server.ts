@@ -124,7 +124,9 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
         return res.end(manifest);
       } catch { return json(res, 404, { error: { code: "client_release_unavailable" } }); }
     }
-    const clientAsset = req.method === "GET" && req.url === "/client/download/LuodongChat.exe" ? "LuodongChat.exe"
+    const clientAsset = req.method === "GET" && req.url === "/client/download/LuodongChat-Setup.exe" ? "LuodongChat-Setup.exe"
+      : req.method === "GET" && req.url === "/client/download/LuodongChat-Setup.exe.sha256" ? "LuodongChat-Setup.exe.sha256"
+      : req.method === "GET" && req.url === "/client/download/LuodongChat.exe" ? "LuodongChat.exe"
       : req.method === "GET" && req.url === "/client/download/LuodongChat.exe.sha256" ? "LuodongChat.exe.sha256"
       : req.method === "GET" && req.url === "/client/download/LuodongChat.apk" ? "LuodongChat.apk"
       : req.method === "GET" && req.url === "/client/download/LuodongChat.apk.sha256" ? "LuodongChat.apk.sha256"

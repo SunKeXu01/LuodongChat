@@ -18,16 +18,16 @@
 ## 下载
 
 - [GitHub Releases](https://github.com/SunKeXu01/LuodongChat/releases)
-- [直接下载最新 Windows EXE](https://520skx.com/client/download/LuodongChat.exe)
+- [直接下载最新 Windows 安装程序](https://520skx.com/client/download/LuodongChat-Setup.exe)
 - [直接下载最新 Android APK](https://520skx.com/client/download/LuodongChat.apk)
 
-Release 文件均包含版本号，例如 `LuodongChat-1.0-win-x64.exe` 与 `LuodongChat-1.0-android.apk`，并同时提供 SHA-256 校验文件。
+Release 文件均包含版本号，例如 `LuodongChat-1.0-win-x64-setup.exe`、`LuodongChat-1.0-win-x64-portable.zip` 与 `LuodongChat-1.0-android.apk`，并同时提供 SHA-256 校验文件。
 
 当前 Windows 版尚未进行代码签名。如果系统显示“Windows 已保护你的电脑”，请确认安装包来自本仓库或上述下载地址，然后点击“更多信息”→“仍要运行”。Android 版使用固定发布证书签名，更新时会覆盖旧版本并保留账号数据。
 
 ## Windows 使用方式
 
-1. 下载并运行 `LuodongChat` Windows 客户端。
+1. 下载并运行安装程序，可自行选择英文安装目录；默认目录为 `%LOCALAPPDATA%\Programs\LuodongChat`。
 2. 首次使用时选择“注册 / 重置密码”，输入邮箱、密码和邮件中的 6 位验证码。
 3. 注册成功后可直接使用邮箱和密码登录。
 4. 进入“聊天”页面即可与 GPT-5.6 对话，无需安装其他聊天软件。
@@ -35,13 +35,15 @@ Release 文件均包含版本号，例如 `LuodongChat-1.0-win-x64.exe` 与 `Luo
 
 关闭窗口右上角叉号会隐藏到系统托盘。需要完全退出时，右键托盘图标并选择“退出”。退出泺栋chat不会更改用户电脑上的 Codex 或其他 AI 软件配置。
 
+安装版只在所选的 `LuodongChat` 目录中存放程序和数据，目录内包含 `Uninstall.exe`。ZIP 版解压即用，登录状态、日志与更新缓存统一保存在解压目录下的 `data` 子目录。程序不会把运行数据写入其他用户目录，也不会创建桌面或开始菜单快捷方式。
+
 ## Android 使用方式
 
 Android 版采用 Kotlin 与 Jetpack Compose，登录账号后可直接流式对话。顶部提供“复制当前对话”按钮；当前阶段不提供历史记录列表。发现新版时，登录页和聊天页都会显示更新提醒，下载并校验 APK 后交由 Android 系统覆盖安装。
 
 ## 自动更新
 
-Windows 与 Android 客户端启动时都会检查新版本。更新文件只从 `https://520skx.com` 下载并校验 SHA-256。Windows 会在退出旧进程后替换并删除旧程序；Android 由系统安装器覆盖旧版本。
+Windows 与 Android 客户端启动时都会检查新版本。更新文件只从 `https://520skx.com` 下载并校验 SHA-256。Windows 安装版通过新版安装程序在原目录覆盖升级，ZIP 便携版原地替换主程序；两者均保留 `data`。Android 由系统安装器覆盖旧版本。
 
 ## 服务信息
 

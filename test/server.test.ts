@@ -25,6 +25,8 @@ test("serves the public client update manifest and fixed release assets", async 
   await writeFile(join(directory, "ChatGPTConnector.exe.sha256"), "abc123\n");
   await writeFile(join(directory, "ChatGPTConnector.apk"), "apk-bytes");
   await writeFile(join(directory, "LuodongChat.exe.sha256"), "def456\n");
+  await writeFile(join(directory, "LuodongChat-Setup.exe"), "setup-bytes");
+  await writeFile(join(directory, "LuodongChat-Setup.exe.sha256"), "setup456\n");
   await writeFile(join(directory, "LuodongChat.apk"), "luodong-apk");
   t.after(async () => {
     if (previous === undefined) delete process.env.CLIENT_RELEASE_ROOT; else process.env.CLIENT_RELEASE_ROOT = previous;
@@ -50,6 +52,9 @@ test("serves the public client update manifest and fixed release assets", async 
   const currentApk = await fetch(`http://127.0.0.1:${port}/client/download/LuodongChat.apk`);
   assert.equal(currentApk.headers.get("content-type"), "application/vnd.android.package-archive");
   assert.equal(await currentApk.text(), "luodong-apk");
+  const setup = await fetch(`http://127.0.0.1:${port}/client/download/LuodongChat-Setup.exe`);
+  assert.equal(setup.headers.get("content-type"), "application/vnd.microsoft.portable-executable");
+  assert.equal(await setup.text(), "setup-bytes");
 });
 
 test("rejects malformed account email before requesting delivery", async (t) => {

@@ -5,7 +5,12 @@ using System.Text.Json;
 
 namespace ChatGPTConnector.Core;
 
-public sealed record ClientUpdate(string Version, Uri ExecutableUri, Uri ChecksumUri);
+public sealed record ClientUpdate(
+    string Version,
+    Uri PortableExecutableUri,
+    Uri PortableChecksumUri,
+    Uri? InstallerUri,
+    Uri? InstallerChecksumUri);
 
 public sealed class ClientUpdateService(HttpClient http)
 {
@@ -19,38 +24,75 @@ public sealed class ClientUpdateService(HttpClient http)
         var root = document.RootElement;
         var version = root.GetProperty("version").GetString() ?? string.Empty;
         if (!IsNewer(version, currentVersion)) return null;
-        var executable = new Uri(root.GetProperty("executableUrl").GetString()!);
-        var checksum = new Uri(root.GetProperty("checksumUrl").GetString()!);
-        if (executable.Scheme != Uri.UriSchemeHttps || checksum.Scheme != Uri.UriSchemeHttps
-            || executable.Host != "520skx.com" || checksum.Host != "520skx.com")
-            throw new InvalidDataException("更新清单包含不受信任的下载地址。");
-        return new(version.TrimStart('v'), executable, checksum);
+        var executable = TrustedUri(root, "executableUrl");
+        var checksum = TrustedUri(root, "checksumUrl");
+        var installer = OptionalTrustedUri(root, "installerUrl");
+        var installerChecksum = OptionalTrustedUri(root, "installerChecksumUrl");
+        if ((installer is null) != (installerChecksum is null))
+            throw new InvalidDataException("更新清单中的安装程序信息不完整。");
+        return new(version.TrimStart('v'), executable, checksum, installer, installerChecksum);
     }
 
-    public async Task DownloadAndScheduleAsync(ClientUpdate update, string currentExecutable, int currentProcessId, CancellationToken cancellationToken = default)
+    public async Task DownloadAndScheduleAsync(
+        ClientUpdate update,
+        string currentExecutable,
+        int currentProcessId,
+        CancellationToken cancellationToken = default)
     {
-        var directory = Path.Combine(Path.GetTempPath(), $"ChatGPTConnector-update-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(directory);
-        var downloaded = Path.Combine(directory, "LuodongChat.exe");
-        var bytes = await http.GetByteArrayAsync(update.ExecutableUri, cancellationToken);
+        ApplicationDirectories.EnsureWritable();
+        var useInstaller = ApplicationDirectories.IsInstalled && update.InstallerUri is not null;
+        var sourceUri = useInstaller ? update.InstallerUri! : update.PortableExecutableUri;
+        var checksumUri = useInstaller ? update.InstallerChecksumUri! : update.PortableChecksumUri;
+        var safeVersion = string.Concat(update.Version.Where(character => char.IsLetterOrDigit(character) || character is '.' or '-' or '_'));
+        var downloaded = Path.Combine(ApplicationDirectories.Updates, useInstaller
+            ? $"LuodongChat-{safeVersion}-setup.exe"
+            : $"LuodongChat-{safeVersion}-portable.exe");
+        var bytes = await http.GetByteArrayAsync(sourceUri, cancellationToken);
         await File.WriteAllBytesAsync(downloaded, bytes, cancellationToken);
-        var expectedText = await http.GetStringAsync(update.ChecksumUri, cancellationToken);
+        var expectedText = await http.GetStringAsync(checksumUri, cancellationToken);
         var expected = expectedText.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)[0].Trim();
         var actual = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
         if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
         {
-            Directory.Delete(directory, true);
+            File.Delete(downloaded);
             throw new InvalidDataException("更新文件完整性校验失败，已取消安装。");
         }
-        var script = Path.Combine(directory, "install-update.cmd");
-        await File.WriteAllTextAsync(script, BuildInstallScript(downloaded, currentExecutable, currentProcessId), new UTF8Encoding(false), cancellationToken);
+
+        var script = Path.Combine(ApplicationDirectories.Updates, "install-update.cmd");
+        var contents = useInstaller
+            ? BuildInstallerScript(downloaded, ApplicationDirectories.Root, currentProcessId)
+            : BuildPortableInstallScript(downloaded, currentExecutable, currentProcessId);
+        await File.WriteAllTextAsync(script, contents, new UTF8Encoding(false), cancellationToken);
         Process.Start(new ProcessStartInfo(script) { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden });
     }
 
-    internal static string BuildInstallScript(string downloaded, string currentExecutable, int currentProcessId)
+    internal static string BuildInstallerScript(string installer, string applicationRoot, int currentProcessId)
     {
-        var escapedSource = downloaded.Replace("%", "%%");
-        var escapedTarget = currentExecutable.Replace("%", "%%");
+        var escapedInstaller = EscapeBatchValue(installer);
+        var escapedRoot = EscapeBatchValue(applicationRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        return $"""
+            @echo off
+            setlocal
+            :wait_for_exit
+            tasklist /FI "PID eq {currentProcessId}" /NH 2>nul | findstr /R /C:"[ ]{currentProcessId}[ ]" >nul
+            if not errorlevel 1 (
+              timeout /t 1 /nobreak >nul
+              goto wait_for_exit
+            )
+            set "installer={escapedInstaller}"
+            set "root={escapedRoot}"
+            start /wait "" "%installer%" /S "/D=%root%"
+            if errorlevel 1 exit /b %errorlevel%
+            del /f /q "%installer%" >nul 2>&1
+            start "" "%root%\LuodongChat.exe"
+            del "%~f0"
+            """;
+    }
+
+    internal static string BuildPortableInstallScript(string downloaded, string currentExecutable, int currentProcessId)
+    {
+        var escapedSource = EscapeBatchValue(downloaded);
+        var escapedTarget = EscapeBatchValue(currentExecutable);
         return $"""
             @echo off
             setlocal
@@ -74,6 +116,22 @@ public sealed class ClientUpdateService(HttpClient http)
             del /f /q "%backup%" >nul 2>&1
             del "%~f0"
             """;
+    }
+
+    private static string EscapeBatchValue(string value) => value.Replace("%", "%%");
+
+    private static Uri TrustedUri(JsonElement root, string property) =>
+        ValidateTrusted(new Uri(root.GetProperty(property).GetString()!));
+
+    private static Uri? OptionalTrustedUri(JsonElement root, string property) =>
+        root.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(value.GetString())
+            ? ValidateTrusted(new Uri(value.GetString()!)) : null;
+
+    private static Uri ValidateTrusted(Uri uri)
+    {
+        if (uri.Scheme != Uri.UriSchemeHttps || uri.Host != "520skx.com")
+            throw new InvalidDataException("更新清单包含不受信任的下载地址。");
+        return uri;
     }
 
     internal static Version NormalizeVersion(string value)

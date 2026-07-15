@@ -23,11 +23,11 @@
 
 推送版本标签后，`Build and test` 工作流会自动运行网关测试、核心库测试、Windows 发布构建及可执行文件启动冒烟测试、Android 单元测试和签名校验。全部成功后，Windows EXE、ZIP 与 Android APK 会同步上传至对应 GitHub Release。
 
-Release 内同时包含带版本号的 EXE、ZIP、APK 及各自的 `.sha256` 文件。可在 PowerShell 中验证 Windows ZIP：
+Release 内同时包含带版本号的安装 EXE、便携 ZIP、APK 及各自的 `.sha256` 文件。安装程序允许选择目录，并在该目录中创建 `Uninstall.exe`；便携版的所有运行数据保存在解压目录内。可在 PowerShell 中验证 Windows ZIP：
 
 ```powershell
-$expected = (Get-Content .\LuodongChat-1.0-win-x64.zip.sha256).Trim()
+$expected = (Get-Content .\LuodongChat-1.0-win-x64-portable.zip.sha256).Trim()
 .\deploy\Test-PreviewBuild.ps1 `
-  -ZipPath .\LuodongChat-1.0-win-x64.zip `
+  -ZipPath .\LuodongChat-1.0-win-x64-portable.zip `
   -ExpectedSha256 $expected
 ```

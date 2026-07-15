@@ -20,7 +20,7 @@ public partial class MainWindow : Window
     private static readonly Uri GatewayUri = new("https://520skx.com");
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(90) };
     private readonly AccountClient _accounts = new(Http);
-    private readonly SecureSessionStore _sessionStore = SecureSessionStore.ForCurrentUser();
+    private readonly SecureSessionStore _sessionStore = SecureSessionStore.ForApplicationDirectory();
     private readonly ClientUpdateService _updates = new(Http);
     private readonly ChatSyncClient _chat = new(Http);
     private readonly ObservableCollection<ChatDisplayMessage> _chatMessages = [];
