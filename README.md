@@ -22,7 +22,7 @@
 - [GitHub Releases](https://github.com/SunKeXu01/ChatGPTConnector/releases)
 - [直接下载最新 EXE](https://520skx.com/client/download/ChatGPTConnector.exe)
 
-Release 中的 EXE、ZIP 和校验文件均包含版本号，例如 `ChatGPTConnector-0.1.0-preview.16-win-x64.exe`。Android 测试 APK 暂时作为 Actions 构建产物提供。
+Release 中的 Windows EXE、ZIP、Android APK 和各自校验文件均包含版本号，例如 `ChatGPTConnector-0.1.0-preview.17-win-x64.exe` 与 `ChatGPTConnector-0.1.0-preview.17-android.apk`。
 
 当前预览版尚未进行代码签名。如果 Windows 显示“Windows 已保护你的电脑”，请确认文件来自本仓库或上述下载地址，然后点击“更多信息”→“仍要运行”。
 
@@ -39,7 +39,7 @@ Release 中的 EXE、ZIP 和校验文件均包含版本号，例如 `ChatGPTConn
 
 ## Android 预览版
 
-Android 客户端采用 Kotlin 与 Jetpack Compose，支持 Android 10 及以上版本。首版包括邮箱登录、GPT-5.6 流式聊天、安全保存登录会话和跨端聊天同步。Android 版是独立聊天客户端，不会修改其他 Android 应用的配置。
+Android 客户端采用 Kotlin 与 Jetpack Compose，支持 Android 10 及以上版本。首版包括邮箱登录、GPT-5.6 流式聊天、安全保存登录会话和跨端聊天同步。Android 版是独立聊天客户端，不会修改其他 Android 应用的配置。请从 Releases 下载带版本号的签名 APK；首次安装时需允许浏览器或文件管理器安装来自该来源的应用。
 
 ## 个人资料
 

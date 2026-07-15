@@ -11,6 +11,8 @@ coverage/
 android/local.properties
 *.apk
 *.aab
+*.jks
+*.keystore
 .vs/
 artifacts/
 test/fixtures/**/tmp/

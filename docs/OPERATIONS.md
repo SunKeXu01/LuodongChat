@@ -23,6 +23,10 @@ Required repository Actions secrets:
 
 - `DEPLOY_SSH_KEY`: dedicated private key used only for production deployment;
 - `DEPLOY_KNOWN_HOSTS`: pinned `known_hosts` entry for the production server.
+- `ANDROID_SIGNING_KEY_BASE64`: base64-encoded Android release keystore;
+- `ANDROID_SIGNING_STORE_PASSWORD`: Android release keystore password;
+- `ANDROID_SIGNING_KEY_ALIAS`: Android release key alias;
+- `ANDROID_SIGNING_KEY_PASSWORD`: Android release private-key password.
 
 ## Email alerts
 
