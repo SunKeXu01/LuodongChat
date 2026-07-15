@@ -26,23 +26,65 @@ import { EnrollmentService } from "./self-service.js";
 
 const MAX_REQUEST_BYTES = 10 * 1024 * 1024;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
-const LANDING_PAGE = `<!doctype html>
+function landingPage(userAgent = ""): string {
+  const isAndroid = /android/i.test(userAgent);
+  const isWindows = /windows/i.test(userAgent);
+  const recommended = isAndroid
+    ? {
+        label: "下载 Android 版",
+        href: "https://oss.520skx.com/latest/LuodongChat.apk",
+        meta: "v1.4 · Android 10+ · 约 2.4 MB",
+      }
+    : isWindows
+      ? {
+          label: "下载 Windows 安装版",
+          href: "https://oss.520skx.com/latest/LuodongChat-Setup.exe",
+          meta: "v1.4 · Windows 10/11 · 64 位 · 约 58 MB",
+        }
+      : {
+          label: "查看可用版本",
+          href: "#downloads",
+          meta: "目前支持 Windows 10/11 与 Android 10+",
+        };
+  const recommendation = isAndroid ? "已为此设备推荐 Android 版" : isWindows ? "已为此设备推荐 Windows 安装版" : "选择与你设备匹配的版本";
+
+  return `<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>泺栋chat</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="description" content="泺栋 Chat 是轻量、安全的独立 GPT 对话客户端。邮箱登录，无需 API Key，对话记录仅保存在本机。">
+  <title>泺栋 Chat - 轻量、安全的独立 GPT 对话客户端</title>
   <style>
-    :root{color-scheme:light dark;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
-    body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f7fb;color:#111827}
-    main{width:min(520px,calc(100% - 48px));padding:48px;border:1px solid #e5e7eb;border-radius:24px;background:white;box-shadow:0 18px 50px #11182712}
-    h1{margin:0 0 16px;font-size:32px}.status{display:flex;gap:10px;align-items:center;color:#047857;font-weight:600}.dot{width:10px;height:10px;border-radius:50%;background:#10b981;box-shadow:0 0 0 5px #10b98120}
-    p{line-height:1.7;color:#4b5563}.downloads{display:grid;gap:12px;margin-top:28px}.download{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-radius:12px;background:#111827;color:white;text-decoration:none;font-weight:650}.download.secondary{background:#eef2ff;color:#3730a3}.meta{margin-top:28px;padding-top:22px;border-top:1px solid #e5e7eb;font-size:14px;color:#6b7280}
-    @media(prefers-color-scheme:dark){body{background:#0b1020;color:#f9fafb}main{background:#111827;border-color:#263244}p,.meta{color:#9ca3af}.meta{border-color:#263244}}
+    :root{color-scheme:light dark;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-text-size-adjust:100%;--ink:#152033;--muted:#667085;--line:#e6eaf0;--surface:#fff;--soft:#f6f8fb;--brand:#172033;--brand-2:#14b8a6}
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{margin:0;min-height:100vh;min-height:100dvh;padding:max(28px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right)) max(28px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left));background:radial-gradient(circle at 50% 0,#edf7f7 0,#f6f8fb 42%,#f7f8fa 100%);color:var(--ink)}
+    main{width:min(860px,100%);margin:0 auto;padding:38px 44px 30px;border:1px solid var(--line);border-radius:26px;background:var(--surface);box-shadow:0 16px 48px #1420330b}
+    .topbar{display:flex;align-items:center;justify-content:space-between;gap:20px}.brand{display:flex;align-items:center;gap:13px}.brand-mark{display:grid;place-items:center;width:44px;height:44px;border-radius:14px;background:linear-gradient(145deg,#152033,#2c374c);box-shadow:inset 0 0 0 1px #ffffff18;color:#6ee7dc;font:800 17px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:-2px}.brand-name{font-size:19px;font-weight:760;letter-spacing:-.02em}.status{display:flex;align-items:center;gap:8px;padding:7px 11px;border:1px solid #b7eadc;border-radius:999px;background:#effcf7;color:#08785d;font-size:13px;font-weight:650;white-space:nowrap}.dot{width:8px;height:8px;border-radius:50%;background:#16b884;box-shadow:0 0 0 4px #16b88418}
+    .hero{padding:48px 0 34px;max-width:680px}h1{margin:0;font-size:clamp(34px,5vw,50px);line-height:1.08;letter-spacing:-.045em}.lead{margin:20px 0 0;max-width:650px;color:var(--muted);font-size:18px;line-height:1.75}.lead strong{color:var(--ink);font-weight:680}
+    .primary-area{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:18px;padding:24px;border:1px solid #dce3ea;border-radius:20px;background:linear-gradient(135deg,#f8fafc,#f2f7f7)}.primary-download{display:flex;align-items:center;justify-content:center;gap:14px;min-height:58px;padding:15px 24px;border-radius:14px;background:var(--brand);box-shadow:0 8px 22px #17203320;color:#fff;text-decoration:none;font-size:17px;font-weight:720;transition:transform .15s ease,filter .15s ease;touch-action:manipulation}.primary-download:hover{filter:brightness(1.14)}.primary-download:active{transform:scale(.985)}.arrow{font-size:23px;line-height:1}.release-meta{text-align:right}.release-meta strong{display:block;font-size:14px}.release-meta span{display:block;margin-top:5px;color:var(--muted);font-size:13px}
+    .trust{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0 0}.trust-item{display:flex;align-items:center;gap:9px;padding:12px 14px;border-radius:12px;background:var(--soft);color:#3e4b5e;font-size:13px;font-weight:620}.trust-icon{display:grid;place-items:center;flex:0 0 auto;width:23px;height:23px;border-radius:50%;background:#e5f7f3;color:#08785d;font-size:13px}
+    details{margin-top:28px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}summary{padding:20px 2px;cursor:pointer;list-style:none;font-weight:700;touch-action:manipulation}summary::-webkit-details-marker{display:none}summary::after{content:"＋";float:right;color:#8b95a5;font-size:20px;font-weight:400}details[open] summary::after{content:"−"}.download-list{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:0 0 20px}.download-option{display:flex;min-width:0;flex-direction:column;gap:6px;padding:16px;border:1px solid var(--line);border-radius:14px;background:#fff;color:var(--ink);text-decoration:none;transition:border-color .15s ease,background .15s ease}.download-option:hover{border-color:#9daabd;background:#fafcfd}.download-option strong{font-size:14px}.download-option span{color:var(--muted);font-size:12px;line-height:1.5}
+    .privacy-note{display:flex;align-items:flex-start;gap:12px;margin-top:24px;padding:16px 18px;border-radius:14px;background:#f0faf8;color:#315d56;font-size:13px;line-height:1.65}.privacy-note b{color:#174e45}.shield{font-size:20px;line-height:1.4}.footer{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:25px;color:#7a8494;font-size:13px}.footer nav{display:flex;flex-wrap:wrap;gap:8px 18px}.footer a{color:#667085;text-decoration:none}.footer a:hover{text-decoration:underline}.customer{white-space:nowrap}
+    a:focus-visible,summary:focus-visible{outline:3px solid #5ab9b0;outline-offset:3px}
+    @media(max-width:680px){body{padding:max(12px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left));background:var(--surface)}main{padding:24px 20px 22px;border-radius:20px;box-shadow:none}.brand-mark{width:40px;height:40px;border-radius:12px}.brand-name{font-size:17px}.status{padding:6px 9px;font-size:12px}.hero{padding:38px 0 28px}h1{font-size:34px}.lead{margin-top:16px;font-size:16px;line-height:1.7}.primary-area{grid-template-columns:1fr;padding:16px}.primary-download{width:100%;min-height:56px}.release-meta{text-align:left;padding:0 3px}.trust{grid-template-columns:1fr}.download-list{grid-template-columns:1fr}.download-option{min-height:72px}.privacy-note{padding:15px}.footer{align-items:flex-start;flex-direction:column}.customer{white-space:normal}}
+    @media(max-width:380px){main{padding-inline:16px}.topbar{align-items:flex-start;gap:10px}.brand{gap:9px}.status{margin-top:3px}.status .status-text{display:none}h1{font-size:31px}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.primary-download,.download-option{transition:none}}
+    @media(prefers-color-scheme:dark){:root{--ink:#f3f6fa;--muted:#9ba6b6;--line:#2a3547;--surface:#111827;--soft:#182235;--brand:#f4f7fb}body{background:#0b1020}main{box-shadow:none}.brand-mark{background:linear-gradient(145deg,#253147,#0e1523)}.status{border-color:#175e50;background:#102b27;color:#78ddc7}.primary-area{border-color:#2b3b4f;background:#151f30}.primary-download{color:#111827}.trust-item{color:#c6cfdb}.trust-icon{background:#173d36;color:#78ddc7}.download-option{background:#121b2a}.download-option:hover{border-color:#53627a;background:#182235}.privacy-note{background:#102925;color:#9fd6cc}.privacy-note b{color:#d4f3ed}.footer a{color:#a7b2c2}}
   </style>
 </head>
-<body><main><h1>泺栋chat</h1><div class="status"><span class="dot"></span>服务运行正常</div><p>独立的 GPT-5.6 对话客户端。使用邮箱账号登录，无需安装官方 ChatGPT，也无需配置 API 密钥。</p><div class="downloads"><a class="download" href="https://oss.520skx.com/latest/LuodongChat-Setup.exe">下载 Windows 安装版 <span>→</span></a><a class="download secondary" href="https://oss.520skx.com/latest/LuodongChat-portable.zip">下载 Windows 便携版 <span>→</span></a><a class="download secondary" href="https://oss.520skx.com/latest/LuodongChat.apk">下载 Android APK <span>→</span></a><a class="download secondary" href="https://github.com/SunKeXu01/LuodongChat/releases/latest">查看 GitHub Releases <span>→</span></a></div><div class="meta">Windows · Android · 对话仅存本机</div></main></body>
+<body><main>
+  <header class="topbar"><div class="brand"><div class="brand-mark" aria-hidden="true">›_</div><div class="brand-name">泺栋 Chat</div></div><div class="status"><span class="dot"></span><span class="status-text">服务正常</span></div></header>
+  <section class="hero"><h1>更轻量的独立<br>GPT 对话客户端</h1><p class="lead">使用邮箱账号直接登录，<strong>无需安装官方客户端，也无需配置 API Key</strong>。打开软件，只需开始对话。</p></section>
+  <section class="primary-area" aria-label="推荐下载"><a class="primary-download" href="${recommended.href}"><span>${recommended.label}</span><span class="arrow" aria-hidden="true">→</span></a><div class="release-meta"><strong>${recommended.meta}</strong><span>${recommendation}</span></div></section>
+  <div class="trust" aria-label="产品特性"><div class="trust-item"><span class="trust-icon">✓</span>对话仅存本机</div><div class="trust-item"><span class="trust-icon">✓</span>SHA-256 安全校验</div><div class="trust-item"><span class="trust-icon">↻</span>支持自动更新</div></div>
+  <details id="downloads"><summary>其他平台与便携版</summary><div class="download-list"><a class="download-option" href="https://oss.520skx.com/latest/LuodongChat-Setup.exe"><strong>Windows 安装版 →</strong><span>适合大多数用户，含桌面快捷方式与自动更新 · 约 58 MB</span></a><a class="download-option" href="https://oss.520skx.com/latest/LuodongChat-portable.zip"><strong>Windows 便携版 →</strong><span>无需安装，解压即用，数据保存在软件目录 · 约 59 MB</span></a><a class="download-option" href="https://oss.520skx.com/latest/LuodongChat.apk"><strong>Android APK →</strong><span>适用于 Android 10 及以上设备 · 约 2.4 MB</span></a></div></details>
+  <aside class="privacy-note"><span class="shield" aria-hidden="true">🛡</span><div><b>隐私与账号安全</b><br>聊天记录只保存在你的设备中，不上传到泺栋 Chat 服务器。Windows 登录凭据由系统加密后存放在软件目录；账号请求通过泺栋 Chat 网关转发，用户无需接触上游密钥。</div></aside>
+  <footer class="footer"><nav><a href="https://github.com/SunKeXu01/LuodongChat/blob/main/docs/DATA_MODEL.md">隐私说明</a><a href="https://github.com/SunKeXu01/LuodongChat#Windows-使用方式">安装帮助</a><a href="https://github.com/SunKeXu01/LuodongChat/releases/latest">更新记录</a><a href="https://github.com/SunKeXu01/LuodongChat">GitHub / 源代码</a></nav><span class="customer">客服 QQ：2554798585</span></footer>
+</main></body>
 </html>`;
+}
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
@@ -162,10 +204,11 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
         "content-type": "text/html; charset=utf-8",
         "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
         "referrer-policy": "no-referrer",
+        "vary": "User-Agent",
         "x-content-type-options": "nosniff",
         "x-frame-options": "DENY",
       });
-      return res.end(LANDING_PAGE);
+      return res.end(landingPage(req.headers["user-agent"]?.toString()));
     }
     if (req.url?.startsWith("/enrollment/")) {
       res.setHeader("cache-control", "no-store");
