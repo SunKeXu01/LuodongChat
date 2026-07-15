@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using ChatGPTConnector.Core;
 using Xunit;
 
@@ -17,6 +18,8 @@ public sealed class ChatSyncClientTests
 
             data: {"type":"response.output_text.delta","delta":"好"}
 
+            data: {"type":"response.completed","response":{"output":[{"type":"message","content":[{"type":"output_text","text":"你好","annotations":[{"type":"url_citation","url":"https://example.com/news","title":"示例来源"}]}]}]}}
+
             data: [DONE]
 
             """;
@@ -24,10 +27,27 @@ public sealed class ChatSyncClientTests
         var deltas = new List<string>();
         var result = await new ChatSyncClient(new HttpClient(handler)).StreamResponseAsync(
             new Uri("https://gateway.example"), "usr_test", [], new InlineProgress(deltas.Add));
-        Assert.Equal("你好", result);
+        Assert.Equal("你好", result.Text);
+        Assert.Equal(new ChatCitation("示例来源", "https://example.com/news"), Assert.Single(result.Citations));
         Assert.Equal(["你", "好"], deltas);
         Assert.Equal("Bearer", handler.AuthorizationScheme);
         Assert.Equal("usr_test", handler.AuthorizationValue);
+    }
+
+    [Fact]
+    public async Task EnablesWebSearchAndFallsBackWhenUpstreamDoesNotSupportIt()
+    {
+        var handler = new SequenceHandler();
+        var result = await new ChatSyncClient(new HttpClient(handler)).StreamResponseAsync(
+            new Uri("https://gateway.example"), "usr_test", [], enableWebSearch: true);
+
+        Assert.True(result.WebSearchUnavailable);
+        Assert.Equal("普通回答", result.Text);
+        Assert.Equal(2, handler.Bodies.Count);
+        using var first = JsonDocument.Parse(handler.Bodies[0]);
+        Assert.Equal("web_search", first.RootElement.GetProperty("tools")[0].GetProperty("type").GetString());
+        using var second = JsonDocument.Parse(handler.Bodies[1]);
+        Assert.False(second.RootElement.TryGetProperty("tools", out _));
     }
 
     private sealed class InlineProgress(Action<string> report) : IProgress<string> { public void Report(string value) => report(value); }
@@ -40,6 +60,21 @@ public sealed class ChatSyncClientTests
             AuthorizationScheme = request.Headers.Authorization?.Scheme;
             AuthorizationValue = request.Headers.Authorization?.Parameter;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(responseBody, Encoding.UTF8, mediaType) });
+        }
+    }
+
+
+    private sealed class SequenceHandler : HttpMessageHandler
+    {
+        public List<string> Bodies { get; } = [];
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Bodies.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
+            if (Bodies.Count == 1)
+                return new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent("{\"error\":{\"message\":\"unsupported tool\"}}", Encoding.UTF8, "application/json") };
+            return new HttpResponseMessage(HttpStatusCode.OK) {
+                Content = new StringContent("data: {\"type\":\"response.output_text.delta\",\"delta\":\"普通回答\"}\n\ndata: [DONE]\n\n", Encoding.UTF8, "text/event-stream"),
+            };
         }
     }
 }

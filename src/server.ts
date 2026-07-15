@@ -68,6 +68,16 @@ async function readJsonObject(req: IncomingMessage): Promise<Record<string, unkn
   return value as Record<string, unknown>;
 }
 
+function requestsWebSearch(body: Buffer): boolean {
+  try {
+    const value: unknown = JSON.parse(body.toString("utf8"));
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const tools = (value as Record<string, unknown>).tools;
+    return Array.isArray(tools) && tools.some((tool) =>
+      tool && typeof tool === "object" && (tool as Record<string, unknown>).type === "web_search");
+  } catch { return false; }
+}
+
 function positiveAdminInteger(value: unknown, maximum = 1_000_000): number | null {
   return Number.isSafeInteger(value) && Number(value) > 0 && Number(value) <= maximum ? Number(value) : null;
 }
@@ -88,7 +98,12 @@ export interface GatewayServerOptions {
 
 export function createGatewayServer(config: GatewayConfig, options: GatewayServerOptions = {}) {
   const limiter = options.limiter ?? new InMemoryLimiter(config.requestsPerMinute, config.maxConcurrentRequests);
-  const upstreamPool = new UpstreamPool(config.upstreams ?? config.upstreamApiKeys);
+  const configuredUpstreams = config.upstreams ?? config.upstreamApiKeys;
+  const webSearchUpstreamIndex = config.webSearchUpstreamIndex ?? Math.max(0, configuredUpstreams.length - 1);
+  const upstreamPool = new UpstreamPool(configuredUpstreams.map((item, index) =>
+    typeof item === "string"
+      ? { apiKey: item, supportsWebSearch: index === webSearchUpstreamIndex }
+      : { ...item, supportsWebSearch: index === webSearchUpstreamIndex }));
   const ledger = options.ledger ?? new InMemoryRequestLedger();
   const keyVerifier = options.keyVerifier ?? new StaticGatewayKeyVerifier(config.gatewayKeyHashes);
   const adminLoginGuard = options.adminLoginProtector ?? new AdminLoginGuard();
@@ -455,13 +470,22 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
       await ledger.startRequest({ requestId, gatewayKeyHash: keyHash, userId: requestUserId, startedAt: new Date(startedAt) });
       ledgerStarted = true;
       const body = await readBody(req);
+      const requiresWebSearch = requestsWebSearch(body);
       let upstream: Response | undefined;
       let selectedCredentialId: string | undefined;
       const attemptedCredentialIds = new Set<string>();
       for (let attempt = 1; attempt <= 2; attempt += 1) {
-        let credential = upstreamPool.acquire(attemptedCredentialIds);
-        if (!credential && attemptedCredentialIds.size > 0) credential = upstreamPool.acquire();
-        if (!credential) break;
+        let credential = upstreamPool.acquire(attemptedCredentialIds, Date.now(), requiresWebSearch);
+        if (!credential && attemptedCredentialIds.size > 0) credential = upstreamPool.acquire(new Set(), Date.now(), requiresWebSearch);
+        if (!credential)
+        {
+          if (requiresWebSearch && attempts === 0)
+          {
+            await ledger.finishRequest({ requestId, status: "failed", endedAt: new Date(), attempts: 0, errorClass: "web_search_unavailable" });
+            return json(res, 422, { error: { code: "web_search_unavailable", message: "Web search is temporarily unavailable" } });
+          }
+          break;
+        }
         selectedCredentialId = credential.id;
         attemptedCredentialIds.add(credential.id);
         attempts = attempt;
@@ -533,6 +557,19 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
       }
 
       if (!upstream) throw new Error("upstream_unavailable");
+      if (requiresWebSearch && (upstream.status === 401 || upstream.status === 403 || RETRYABLE_STATUS.has(upstream.status)))
+      {
+        await upstream.body?.cancel();
+        await ledger.finishRequest({
+          requestId,
+          status: "failed",
+          endedAt: new Date(),
+          statusCode: upstream.status,
+          attempts,
+          errorClass: "web_search_unavailable",
+        });
+        return json(res, 422, { error: { code: "web_search_unavailable", message: "Web search is temporarily unavailable" } });
+      }
       res.statusCode = upstream.status;
       for (const name of ["content-type", "cache-control", "openai-processing-ms"]) {
         const value = upstream.headers.get(name);

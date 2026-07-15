@@ -11,10 +11,14 @@ data class AccountProfile(
 
 data class AccountSession(val accessToken: String, val profile: AccountProfile)
 
+data class ChatCitation(val title: String, val url: String)
+data class ChatStreamResult(val text: String, val citations: List<ChatCitation>, val webSearchUnavailable: Boolean = false)
+
 data class ChatMessage(
     val id: String,
     val conversationId: String,
     val role: String,
     val content: String,
     val clientCreatedAt: String,
+    val citations: List<ChatCitation> = emptyList(),
 )

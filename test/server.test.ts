@@ -379,3 +379,53 @@ test("fails over between credentials hosted on different upstream endpoints", as
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { id: "resp_secondary", status: "completed" });
 });
+
+test("routes web search requests to the verified capable upstream", async (t) => {
+  let ordinaryCalls = 0;
+  const ordinary = createServer(async (req, res) => {
+    ordinaryCalls += 1;
+    for await (const _chunk of req) { /* consume request */ }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ id: "ordinary" }));
+  });
+  const search = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString()) as { tools?: { type?: string }[] };
+    assert.equal(body.tools?.[0]?.type, "web_search");
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ output: [{ type: "web_search_call", status: "completed" }] }));
+  });
+  const ordinaryPort = await listen(ordinary);
+  const searchPort = await listen(search);
+  t.after(() => { ordinary.close(); search.close(); });
+
+  const config: GatewayConfig = {
+    port: 0,
+    upstreamBaseUrl: `http://127.0.0.1:${ordinaryPort}`,
+    upstreamApiKey: "ordinary-key",
+    upstreamApiKeys: ["ordinary-key"],
+    upstreamResponsesPath: "/responses",
+    upstreams: [
+      { baseUrl: `http://127.0.0.1:${ordinaryPort}`, responsesPath: "/responses", apiKey: "ordinary-key" },
+      { baseUrl: `http://127.0.0.1:${searchPort}`, responsesPath: "/responses", apiKey: "search-key" },
+    ],
+    webSearchUpstreamIndex: 1,
+    gatewayKeyHashes: new Set([hashGatewayKey("gw_search")]),
+    requestsPerMinute: 10,
+    maxConcurrentRequests: 2,
+    upstreamTimeoutMs: 5_000,
+  };
+  const gateway = createGatewayServer(config);
+  const gatewayPort = await listen(gateway);
+  t.after(() => gateway.close());
+
+  const response = await fetch(`http://127.0.0.1:${gatewayPort}/responses`, {
+    method: "POST",
+    headers: { authorization: "Bearer gw_search", "content-type": "application/json" },
+    body: JSON.stringify({ model: "gpt-5.6-sol", tools: [{ type: "web_search" }], input: "latest" }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal(ordinaryCalls, 0);
+  assert.equal((await response.json() as { output: { type: string }[] }).output[0]?.type, "web_search_call");
+});

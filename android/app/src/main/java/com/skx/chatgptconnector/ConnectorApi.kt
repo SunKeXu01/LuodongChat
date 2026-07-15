@@ -31,16 +31,26 @@ class ConnectorApi(private val baseUrl: String = "https://520skx.com") {
 
     fun logout(token: String) { request("POST", "/account/logout", token) }
 
-    fun streamResponse(token: String, messages: List<ChatMessage>, onDelta: (String) -> Unit): String {
+    fun streamResponse(token: String, messages: List<ChatMessage>, onDelta: (String) -> Unit): ChatStreamResult = try {
+        streamResponseOnce(token, messages, onDelta, true)
+    } catch (error: ConnectorApiException) {
+        if (error.code !in setOf("web_search_unavailable", "upstream_unavailable")) throw error
+        streamResponseOnce(token, messages, onDelta, false).copy(webSearchUnavailable = true)
+    }
+
+    private fun streamResponseOnce(token: String, messages: List<ChatMessage>, onDelta: (String) -> Unit, enableWebSearch: Boolean): ChatStreamResult {
         val input = JSONArray()
         messages.forEach { input.put(JSONObject().put("role", it.role).put("content", it.content)) }
         val connection = open("POST", "/v1/responses", token).apply {
             setRequestProperty("Accept", "text/event-stream")
             doOutput = true
         }
-        connection.outputStream.use { it.write(JSONObject().put("model", "gpt-5.6-sol").put("input", input).put("stream", true).toString().toByteArray()) }
+        val request = JSONObject().put("model", "gpt-5.6-sol").put("input", input).put("stream", true)
+        if (enableWebSearch) request.put("tools", JSONArray().put(JSONObject().put("type", "web_search").put("search_context_size", "low"))).put("tool_choice", "auto")
+        connection.outputStream.use { it.write(request.toString().toByteArray()) }
         ensureSuccess(connection)
         val complete = StringBuilder()
+        val citations = linkedMapOf<String, ChatCitation>()
         connection.inputStream.bufferedReader().useLines { lines ->
             lines.filter { it.startsWith("data:") }.forEach { line ->
                 val data = line.removePrefix("data:").trim()
@@ -50,11 +60,28 @@ class ConnectorApi(private val baseUrl: String = "https://520skx.com") {
                     if (event.optString("type") == "response.output_text.delta") {
                         event.optString("delta").takeIf { it.isNotEmpty() }?.let { delta -> complete.append(delta); onDelta(delta) }
                     }
+                    if (event.optString("type") == "response.completed") collectCitations(event, citations)
                 }
             }
         }
         connection.disconnect()
-        return complete.toString()
+        return ChatStreamResult(complete.toString(), citations.values.toList())
+    }
+
+    private fun collectCitations(event: JSONObject, citations: MutableMap<String, ChatCitation>) {
+        val output = event.optJSONObject("response")?.optJSONArray("output") ?: return
+        for (i in 0 until output.length()) {
+            val content = output.optJSONObject(i)?.optJSONArray("content") ?: continue
+            for (j in 0 until content.length()) {
+                val annotations = content.optJSONObject(j)?.optJSONArray("annotations") ?: continue
+                for (k in 0 until annotations.length()) {
+                    val annotation = annotations.optJSONObject(k) ?: continue
+                    if (annotation.optString("type") != "url_citation") continue
+                    val url = annotation.optString("url").takeIf { it.startsWith("https://") || it.startsWith("http://") } ?: continue
+                    citations[url] = ChatCitation(annotation.optString("title").ifBlank { URI.create(url).host ?: url }, url)
+                }
+            }
+        }
     }
 
     private fun request(method: String, path: String, token: String? = null, body: JSONObject? = null): JSONObject {

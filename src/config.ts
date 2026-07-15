@@ -5,6 +5,7 @@ export interface GatewayConfig {
   upstreamApiKeys: readonly string[];
   upstreamResponsesPath: string;
   upstreams?: readonly UpstreamEndpoint[];
+  webSearchUpstreamIndex?: number;
   gatewayKeyHashes: ReadonlySet<string>;
   adminKeyHashes?: ReadonlySet<string>;
   requestsPerMinute: number;
@@ -77,6 +78,13 @@ export function loadConfig(): GatewayConfig {
     ...upstreamApiKeys.map((apiKey) => ({ baseUrl: upstreamBaseUrl, responsesPath: upstreamResponsesPath, apiKey })),
     ...parseAdditionalUpstreams(process.env.UPSTREAM_ENDPOINTS_JSON),
   ];
+  const configuredWebSearchIndex = process.env.WEB_SEARCH_UPSTREAM_INDEX;
+  const webSearchUpstreamIndex = configuredWebSearchIndex === undefined
+    ? Math.max(0, upstreams.length - 1)
+    : Number(configuredWebSearchIndex);
+  if (!Number.isSafeInteger(webSearchUpstreamIndex) || webSearchUpstreamIndex < 0 || webSearchUpstreamIndex >= upstreams.length) {
+    throw new Error("WEB_SEARCH_UPSTREAM_INDEX must identify a configured upstream");
+  }
 
   const gatewayKeyHashes = new Set(
     (process.env.GATEWAY_KEY_HASHES ?? "")
@@ -110,6 +118,7 @@ export function loadConfig(): GatewayConfig {
     upstreamApiKeys,
     upstreamResponsesPath,
     upstreams,
+    webSearchUpstreamIndex,
     gatewayKeyHashes,
     adminKeyHashes,
     requestsPerMinute: positiveInteger("REQUESTS_PER_MINUTE", 30),

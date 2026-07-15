@@ -7,6 +7,7 @@ export interface UpstreamCredential {
   apiKey: string;
   baseUrl?: string;
   responsesPath?: string;
+  supportsWebSearch?: boolean;
 }
 
 interface CredentialState extends UpstreamCredential {
@@ -34,14 +35,15 @@ export class UpstreamPool {
   ) {
     if (credentials.length === 0) throw new Error("At least one upstream credential is required");
     this.credentials = credentials.map((credential) => {
-      const { apiKey, baseUrl, responsesPath } = typeof credential === "string"
-        ? { apiKey: credential, baseUrl: undefined, responsesPath: undefined }
+      const { apiKey, baseUrl, responsesPath, supportsWebSearch } = typeof credential === "string"
+        ? { apiKey: credential, baseUrl: undefined, responsesPath: undefined, supportsWebSearch: false }
         : credential;
       return {
       id: createHash("sha256").update(apiKey).digest("hex"),
       apiKey,
       baseUrl,
       responsesPath,
+      supportsWebSearch: supportsWebSearch ?? false,
       health: "healthy",
       consecutiveFailures: 0,
       openUntil: 0,
@@ -50,13 +52,13 @@ export class UpstreamPool {
     });
   }
 
-  acquire(excludedIds: ReadonlySet<string> = new Set(), now = Date.now()): UpstreamCredential | null {
+  acquire(excludedIds: ReadonlySet<string> = new Set(), now = Date.now(), requireWebSearch = false): UpstreamCredential | null {
     for (const credential of this.credentials) {
       if (credential.health === "open" && now >= credential.openUntil) credential.health = "half_open";
     }
 
     const eligible = this.credentials.filter(
-      (item) => item.health !== "open" && !excludedIds.has(item.id),
+      (item) => item.health !== "open" && !excludedIds.has(item.id) && (!requireWebSearch || item.supportsWebSearch),
     );
     if (eligible.length === 0) return null;
     eligible.sort((a, b) => a.inFlight - b.inFlight);
@@ -71,6 +73,7 @@ export class UpstreamPool {
       apiKey: selected.apiKey,
       baseUrl: selected.baseUrl,
       responsesPath: selected.responsesPath,
+      supportsWebSearch: selected.supportsWebSearch,
     };
   }
 

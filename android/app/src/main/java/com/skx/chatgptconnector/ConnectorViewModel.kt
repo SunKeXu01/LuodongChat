@@ -156,7 +156,7 @@ class ConnectorViewModel(application: Application) : AndroidViewModel(applicatio
         state = state.copy(conversationId = conversationId, input = "", messages = context + placeholder, loading = true, error = null)
         viewModelScope.launch {
             try {
-                val answer = withContext(Dispatchers.IO) {
+                val result = withContext(Dispatchers.IO) {
                     api.streamResponse(session.accessToken, context) { delta ->
                         mainHandler.post {
                             state = state.copy(messages = state.messages.map {
@@ -165,8 +165,12 @@ class ConnectorViewModel(application: Application) : AndroidViewModel(applicatio
                         }
                     }
                 }
-                val assistant = placeholder.copy(content = answer.ifBlank { "暂时没有收到模型输出。" })
-                state = state.copy(messages = state.messages.map { if (it.id == assistantId) assistant else it }, loading = false)
+                val assistant = placeholder.copy(content = result.text.ifBlank { "暂时没有收到模型输出。" }, citations = result.citations)
+                state = state.copy(
+                    messages = state.messages.map { if (it.id == assistantId) assistant else it },
+                    loading = false,
+                    notice = if (result.webSearchUnavailable) "联网服务暂不可用，本次已自动使用普通回答。" else "",
+                )
             } catch (error: Exception) {
                 state = state.copy(messages = state.messages.filterNot { it.id == assistantId }, loading = false, error = error.message ?: "发送失败")
             }

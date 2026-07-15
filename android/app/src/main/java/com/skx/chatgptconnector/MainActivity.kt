@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
@@ -24,6 +25,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.text.KeyboardOptions
@@ -172,13 +176,21 @@ private fun UpdateNotice(state: ConnectorUiState, onUpdate: () -> Unit) {
 private fun MessageBubble(message: ChatMessage) {
     val user = message.role == "user"
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) {
-        Text(
-            message.content.ifBlank { "正在思考…" },
-            modifier = Modifier.widthIn(max = 320.dp).background(
-                if (user) Color(0xFFDDF7F1) else Color(0xFFF1F3F5), RoundedCornerShape(14.dp),
-            ).padding(horizontal = 14.dp, vertical = 10.dp),
-            color = Color(0xFF1F2937),
-        )
+        SelectionContainer {
+            Text(
+                buildAnnotatedString {
+                    append(message.content.ifBlank { "正在思考…" })
+                    message.citations.forEach { citation ->
+                        append("\n\n")
+                        withLink(LinkAnnotation.Url(citation.url)) { append("来源：${citation.title}") }
+                    }
+                },
+                modifier = Modifier.widthIn(max = 320.dp).background(
+                    if (user) Color(0xFFDDF7F1) else Color(0xFFF1F3F5), RoundedCornerShape(14.dp),
+                ).padding(horizontal = 14.dp, vertical = 10.dp),
+                color = Color(0xFF1F2937),
+            )
+        }
     }
 }
 

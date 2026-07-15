@@ -148,7 +148,30 @@
               <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
               <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="GPT-5.6" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"/><Button x:Name="CopyCurrentChatButton" Grid.Column="1" Content="复制当前对话" Style="{StaticResource SecondaryButton}" Click="CopyCurrentChatButton_OnClick"/></Grid>
               <ListBox x:Name="ChatMessagesList" Grid.Row="1" Margin="0,16" BorderThickness="0" Background="#F8FAFC" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                <ListBox.ItemTemplate><DataTemplate><Border Background="White" BorderBrush="#E4E7EC" BorderThickness="1" CornerRadius="9" Padding="13" Margin="8,5" MaxWidth="560" HorizontalAlignment="Stretch"><StackPanel><TextBlock Text="{Binding Sender}" FontWeight="SemiBold" Foreground="#1D4ED8"/><TextBlock Text="{Binding Content}" TextWrapping="Wrap" Margin="0,6,0,0"/></StackPanel></Border></DataTemplate></ListBox.ItemTemplate>
+                <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Focusable" Value="False"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/></Style></ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <Grid Margin="10,5">
+                      <Border x:Name="MessageBubble" Background="White" BorderBrush="#D0D5DD" BorderThickness="1" CornerRadius="14" Padding="13,10" MaxWidth="620" HorizontalAlignment="Left">
+                        <StackPanel>
+                          <TextBlock x:Name="MessageSender" Text="{Binding Sender}" FontWeight="SemiBold" Foreground="#1D4ED8"/>
+                          <TextBox x:Name="MessageContent" Text="{Binding Content}" IsReadOnly="True" IsReadOnlyCaretVisible="True" TextWrapping="Wrap" AcceptsReturn="True" BorderThickness="0" Background="Transparent" Padding="0" Margin="0,6,0,0" Cursor="IBeam" ToolTip="可拖动选择文字并复制"/>
+                          <ItemsControl ItemsSource="{Binding Sources}" Margin="0,8,0,0">
+                            <ItemsControl.ItemTemplate><DataTemplate><Button Content="{Binding Title}" Tag="{Binding Url}" ToolTip="{Binding Url}" HorizontalAlignment="Left" Padding="0,3" Background="Transparent" Foreground="#155EEF" BorderThickness="0" Cursor="Hand" Click="CitationButton_OnClick"/></DataTemplate></ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </StackPanel>
+                      </Border>
+                    </Grid>
+                    <DataTemplate.Triggers>
+                      <DataTrigger Binding="{Binding IsUser}" Value="True">
+                        <Setter TargetName="MessageBubble" Property="HorizontalAlignment" Value="Right"/>
+                        <Setter TargetName="MessageBubble" Property="Background" Value="#DCFCE7"/>
+                        <Setter TargetName="MessageBubble" Property="BorderBrush" Value="#86EFAC"/>
+                        <Setter TargetName="MessageSender" Property="Foreground" Value="#166534"/>
+                      </DataTrigger>
+                    </DataTemplate.Triggers>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
               </ListBox>
               <TextBlock x:Name="ChatNotice" Grid.Row="2" Foreground="#B42318" TextWrapping="Wrap" Margin="2,0,2,7"/>
               <Grid Grid.Row="3"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="90"/></Grid.ColumnDefinitions><TextBox x:Name="ChatInput" MinHeight="46" MaxHeight="120" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/><Button x:Name="StopGenerationButton" Grid.Column="1" Content="停止" Visibility="Collapsed" Margin="10,0,0,0" Style="{StaticResource SecondaryButton}" Click="StopGenerationButton_OnClick"/><Button x:Name="ChatSendButton" Grid.Column="2" Content="发送" Margin="10,0,0,0" Click="ChatSendButton_OnClick"/></Grid>

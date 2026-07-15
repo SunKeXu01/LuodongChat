@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Net.Http;
@@ -323,12 +324,18 @@ public partial class MainWindow : Window
                     display.Content += delta;
                     ChatMessagesList.ScrollIntoView(display);
                 });
-                var answer = await _chat.StreamResponseAsync(GatewayUri, _session.AccessToken, context, progress, cancellationToken);
-                assistant = assistant with { Content = string.IsNullOrWhiteSpace(answer) ? "暂时没有收到模型输出。" : answer };
+                var result = await _chat.StreamResponseAsync(
+                    GatewayUri, _session.AccessToken, context, progress, cancellationToken,
+                    enableWebSearch: true);
+                assistant = assistant with {
+                    Content = string.IsNullOrWhiteSpace(result.Text) ? "暂时没有收到模型输出。" : result.Text,
+                    Citations = result.Citations,
+                };
                 display.Content = assistant.Content;
                 display.Source = assistant;
                 _currentConversation = _currentConversation with { UpdatedAt = DateTimeOffset.UtcNow, Messages = _currentConversation.Messages.Append(assistant).ToArray() };
                 await SaveCurrentConversationAsync(cancellationToken);
+                if (result.WebSearchUnavailable) ChatNotice.Text = "当前上游暂不支持联网搜索，本次已自动使用普通对话。";
             }
             catch (OperationCanceledException)
             {
@@ -356,6 +363,14 @@ public partial class MainWindow : Window
             StopGenerationButton.Visibility = Visibility.Collapsed;
             ChatInput.Focus();
         }
+    }
+
+    private void CitationButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button { Tag: string url }
+            || !Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) return;
+        try { Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); }
+        catch (Exception error) { ChatNotice.Text = $"无法打开来源：{error.Message}"; }
     }
 
     private async Task SaveCurrentConversationAsync(CancellationToken cancellationToken)
@@ -445,10 +460,23 @@ public partial class MainWindow : Window
 public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyChanged
 {
     private string _content;
+    private SyncedChatMessage _source;
     public string Sender { get; init; } = "";
-    public SyncedChatMessage Source { get; set; }
+    public bool IsUser => _source.Role == "user";
+    public IReadOnlyList<ChatCitation> Sources => _source.Citations ?? [];
+    public SyncedChatMessage Source
+    {
+        get => _source;
+        set
+        {
+            _source = value;
+            PropertyChanged?.Invoke(this, new(nameof(Source)));
+            PropertyChanged?.Invoke(this, new(nameof(Sources)));
+            PropertyChanged?.Invoke(this, new(nameof(IsUser)));
+        }
+    }
     public string Content { get => _content; set { if (_content == value) return; _content = value; PropertyChanged?.Invoke(this, new(nameof(Content))); } }
-    private ChatDisplayMessage(SyncedChatMessage source) { Source = source; _content = source.Content; }
+    private ChatDisplayMessage(SyncedChatMessage source) { _source = source; _content = source.Content; }
     public static ChatDisplayMessage From(SyncedChatMessage source) => new(source) { Sender = source.Role == "user" ? "我" : "GPT-5.6" };
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
 }

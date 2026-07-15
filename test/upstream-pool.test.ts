@@ -49,3 +49,14 @@ test("returns the endpoint attached to each credential without exposing it in sn
   assert.equal(credential.responsesPath, "/responses");
   assert.equal(JSON.stringify(pool.snapshot()).includes("secondary.example"), false);
 });
+
+test("routes web search only to a capable upstream", () => {
+  const pool = new UpstreamPool([
+    { apiKey: "ordinary", supportsWebSearch: false },
+    { apiKey: "search", supportsWebSearch: true },
+  ]);
+  const selected = pool.acquire(new Set(), Date.now(), true);
+  assert.ok(selected);
+  assert.equal(selected.apiKey, "search");
+  pool.recordSuccess(selected.id);
+});
