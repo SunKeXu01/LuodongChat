@@ -109,7 +109,9 @@ jobs:
           (Get-FileHash "$asset-portable.zip" -Algorithm SHA256).Hash.ToLowerInvariant() |
             Set-Content "$asset-portable.zip.sha256"
           $setup = "$asset-setup.exe"
-          $makensis = (Get-Command makensis.exe).Source
+          $makensis = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
+          if (!(Test-Path $makensis)) { $makensis = Join-Path $env:ProgramFiles 'NSIS\makensis.exe' }
+          if (!(Test-Path $makensis)) { throw 'NSIS compiler was installed but makensis.exe was not found.' }
           & $makensis "/DVERSION=$version" "/DFILE_VERSION=$fileVersion" "/DSOURCE_EXE=$((Resolve-Path 'artifacts/publish/LuodongChat.exe').Path)" "/DOUTPUT_FILE=$((Resolve-Path 'artifacts').Path)\LuodongChat-$version-win-x64-setup.exe" "/DAPP_ICON=$((Resolve-Path 'client/ChatGPTConnector.App/Assets/AppIcon.ico').Path)" installer/LuodongChat.nsi
           if ($LASTEXITCODE -ne 0 -or !(Test-Path $setup)) { throw "NSIS installer build failed." }
           (Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant() |
