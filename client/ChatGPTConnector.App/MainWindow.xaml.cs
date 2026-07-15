@@ -19,7 +19,7 @@ namespace ChatGPTConnector.App;
 public partial class MainWindow : Window
 {
     private static readonly Uri GatewayUri = new("https://520skx.com");
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(90) };
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(5) };
     private static readonly HttpClient UpdateHttp = new() { Timeout = Timeout.InfiniteTimeSpan };
     private readonly AccountClient _accounts = new(Http);
     private readonly SecureSessionStore _sessionStore = SecureSessionStore.ForApplicationDirectory();
@@ -36,13 +36,14 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _sessionTimer = new() { Interval = TimeSpan.FromMinutes(5) };
     private CancellationTokenSource? _chatCancellation;
     private readonly CancellationTokenSource _updateCancellation = new();
+    private bool _chatScrollPending;
 
     public MainWindow() : this(false) { }
 
     internal MainWindow(bool skipStartupChecks)
     {
         InitializeComponent();
-        ChatMessagesList.ItemsSource = _chatMessages;
+        ChatMessagesItems.ItemsSource = _chatMessages;
         ConversationsList.ItemsSource = _conversations;
         FitToWorkingArea();
         InitializeTrayIcon();
@@ -282,7 +283,8 @@ public partial class MainWindow : Window
         _chatMessages.Clear();
         if (conversation is not null)
             foreach (var message in conversation.Messages.OrderBy(item => item.ClientCreatedAt))
-                _chatMessages.Add(ChatDisplayMessage.From(message));
+                _chatMessages.Add(CreateDisplayMessage(message));
+        ScrollChatToEnd();
     }
 
     private void CopyCurrentChatButton_OnClick(object sender, RoutedEventArgs e)
@@ -308,34 +310,46 @@ public partial class MainWindow : Window
             var conversationId = _currentConversation?.Id ?? Guid.NewGuid().ToString();
             var user = new SyncedChatMessage(Guid.NewGuid().ToString(), conversationId, "user", text, DateTimeOffset.UtcNow);
             ChatInput.Clear();
-            _chatMessages.Add(ChatDisplayMessage.From(user));
+            _chatMessages.Add(CreateDisplayMessage(user));
             _currentConversation = _currentConversation is null
                 ? new LocalConversation(conversationId, text[..Math.Min(text.Length, 40)], now, now, [user])
                 : _currentConversation with { UpdatedAt = now, Messages = _currentConversation.Messages.Append(user).ToArray() };
             await SaveCurrentConversationAsync(cancellationToken);
             var context = _chatMessages.Select(item => item.Source).ToArray();
             var assistant = new SyncedChatMessage(Guid.NewGuid().ToString(), conversationId, "assistant", "", DateTimeOffset.UtcNow);
-            var display = ChatDisplayMessage.From(assistant);
+            var display = CreateDisplayMessage(assistant);
             _chatMessages.Add(display);
             ChatNotice.Text = "";
             try
             {
                 var progress = new Progress<string>(delta => {
                     display.Content += delta;
-                    ChatMessagesList.ScrollIntoView(display);
+                    ScrollChatToEnd();
                 });
+                var wantsImage = ImageGenerationIntent.IsExplicit(text);
+                if (wantsImage) ChatNotice.Text = "正在生成图片，请稍候…";
                 var result = await _chat.StreamResponseAsync(
                     GatewayUri, _session.AccessToken, context, progress, cancellationToken,
-                    enableWebSearch: true);
+                    enableWebSearch: true, enableImageGeneration: wantsImage);
+                var storedImages = new List<GeneratedChatImage>();
+                foreach (var image in result.Images)
+                    storedImages.Add(await _conversationStore.SaveGeneratedImageAsync(
+                        _session.Profile.Id, conversationId, Guid.NewGuid().ToString(), image, cancellationToken));
                 assistant = assistant with {
-                    Content = string.IsNullOrWhiteSpace(result.Text) ? "暂时没有收到模型输出。" : result.Text,
+                    Content = string.IsNullOrWhiteSpace(result.Text)
+                        ? storedImages.Count > 0 ? "图片已生成" : "暂时没有收到模型输出。"
+                        : result.Text,
                     Citations = result.Citations,
+                    Images = storedImages,
                 };
                 display.Content = assistant.Content;
                 display.Source = assistant;
+                display.Images = ResolveImages(assistant);
                 _currentConversation = _currentConversation with { UpdatedAt = DateTimeOffset.UtcNow, Messages = _currentConversation.Messages.Append(assistant).ToArray() };
                 await SaveCurrentConversationAsync(cancellationToken);
-                if (result.WebSearchUnavailable) ChatNotice.Text = "当前上游暂不支持联网搜索，本次已自动使用普通对话。";
+                ChatNotice.Text = result.WebSearchUnavailable
+                    ? "当前上游暂不支持联网搜索，本次已自动使用普通对话。" : "";
+                ScrollChatToEnd();
             }
             catch (OperationCanceledException)
             {
@@ -371,6 +385,37 @@ public partial class MainWindow : Window
             || !Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) return;
         try { Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); }
         catch (Exception error) { ChatNotice.Text = $"无法打开来源：{error.Message}"; }
+    }
+
+    private void GeneratedImage_OnMouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Image { Tag: string path } || !File.Exists(path)) return;
+        try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }
+        catch (Exception error) { ChatNotice.Text = $"无法打开图片：{error.Message}"; }
+    }
+
+    private ChatDisplayMessage CreateDisplayMessage(SyncedChatMessage message) =>
+        ChatDisplayMessage.From(message, ResolveImages(message));
+
+    private IReadOnlyList<ChatDisplayImage> ResolveImages(SyncedChatMessage message)
+    {
+        if (_session is null || message.Images is null) return [];
+        return message.Images.Select(image =>
+        {
+            try { return ChatDisplayImage.TryCreate(_conversationStore.GetImagePath(_session.Profile.Id, image.RelativePath)); }
+            catch { return null; }
+        }).Where(image => image is not null).Cast<ChatDisplayImage>().ToArray();
+    }
+
+    private void ScrollChatToEnd()
+    {
+        if (_chatScrollPending) return;
+        _chatScrollPending = true;
+        Dispatcher.BeginInvoke(() =>
+        {
+            _chatScrollPending = false;
+            ChatMessagesScroll.ScrollToEnd();
+        }, DispatcherPriority.Background);
     }
 
     private async Task SaveCurrentConversationAsync(CancellationToken cancellationToken)
@@ -449,7 +494,12 @@ public partial class MainWindow : Window
         try { await operation(); }
         finally { SetBusy(false); _operationGate.Release(); }
     }
-    private void FitToWorkingArea() { var area = SystemParameters.WorkArea; MaxWidth = Math.Max(MinWidth, area.Width - 24); MaxHeight = Math.Max(MinHeight, area.Height - 24); Width = Math.Min(Width, MaxWidth); Height = Math.Min(Height, MaxHeight); }
+    private void FitToWorkingArea()
+    {
+        var area = SystemParameters.WorkArea;
+        Width = Math.Min(Width, Math.Max(MinWidth, area.Width));
+        Height = Math.Min(Height, Math.Max(MinHeight, area.Height));
+    }
     private void InitializeTrayIcon() => _trayIcon = new TrayIconService("泺栋chat", ShowMainWindow, ExitApplication);
     private void MainWindow_OnClosing(object? sender, CancelEventArgs e) { if (_allowExit) return; e.Cancel = true; Hide(); ShowInTaskbar = false; }
     private void ShowMainWindow() { ShowInTaskbar = true; Show(); if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal; Activate(); }
@@ -464,6 +514,8 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
     public string Sender { get; init; } = "";
     public bool IsUser => _source.Role == "user";
     public IReadOnlyList<ChatCitation> Sources => _source.Citations ?? [];
+    private IReadOnlyList<ChatDisplayImage> _images = [];
+    public IReadOnlyList<ChatDisplayImage> Images { get => _images; set { _images = value; PropertyChanged?.Invoke(this, new(nameof(Images))); } }
     public SyncedChatMessage Source
     {
         get => _source;
@@ -477,8 +529,28 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
     }
     public string Content { get => _content; set { if (_content == value) return; _content = value; PropertyChanged?.Invoke(this, new(nameof(Content))); } }
     private ChatDisplayMessage(SyncedChatMessage source) { _source = source; _content = source.Content; }
-    public static ChatDisplayMessage From(SyncedChatMessage source) => new(source) { Sender = source.Role == "user" ? "我" : "GPT-5.6" };
+    public static ChatDisplayMessage From(SyncedChatMessage source, IReadOnlyList<ChatDisplayImage>? images = null) =>
+        new(source) { Sender = source.Role == "user" ? "我" : "GPT-5.6", Images = images ?? [] };
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+}
+
+public sealed record ChatDisplayImage(string FilePath, ImageSource Source)
+{
+    public static ChatDisplayImage? TryCreate(string path)
+    {
+        if (!File.Exists(path)) return null;
+        try
+        {
+            var image = new BitmapImage();
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.UriSource = new Uri(path, UriKind.Absolute);
+            image.EndInit();
+            image.Freeze();
+            return new ChatDisplayImage(path, image);
+        }
+        catch { return null; }
+    }
 }
 
 public sealed record ConversationListItem(LocalConversation Conversation)

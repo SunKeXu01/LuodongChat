@@ -1,6 +1,6 @@
 # 泺栋chat 发布构建
 
-当前版本为 `1.2`，Windows 目标平台为 Windows 10/11 x64，采用 .NET 10 自包含单文件发布；Android 目标为 Android 10 及以上。
+当前版本为 `1.3`，Windows 目标平台为 Windows 10/11 x64，采用 .NET 10 自包含单文件发布；Android 目标为 Android 10 及以上。
 
 ## 限制
 
@@ -26,8 +26,8 @@
 Release 内同时包含带版本号的安装 EXE、便携 ZIP、APK 及各自的 `.sha256` 文件。安装程序允许选择目录，并在该目录中创建 `Uninstall.exe`；便携版的所有运行数据保存在解压目录内。可在 PowerShell 中验证 Windows ZIP：
 
 ```powershell
-$expected = (Get-Content .\LuodongChat-1.2-win-x64-portable.zip.sha256).Trim()
+$expected = (Get-Content .\LuodongChat-1.3-win-x64-portable.zip.sha256).Trim()
 .\deploy\Test-PreviewBuild.ps1 `
-  -ZipPath .\LuodongChat-1.2-win-x64-portable.zip `
+  -ZipPath .\LuodongChat-1.3-win-x64-portable.zip `
   -ExpectedSha256 $expected
 ```

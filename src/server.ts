@@ -78,6 +78,47 @@ function requestsWebSearch(body: Buffer): boolean {
   } catch { return false; }
 }
 
+function requestsImageGeneration(body: Buffer): boolean {
+  try {
+    const value: unknown = JSON.parse(body.toString("utf8"));
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const tools = (value as Record<string, unknown>).tools;
+    return Array.isArray(tools) && tools.some((tool) =>
+      tool && typeof tool === "object" && (tool as Record<string, unknown>).type === "image_generation");
+  } catch { return false; }
+}
+
+function latestUserPrompt(body: Buffer): string {
+  const value: unknown = JSON.parse(body.toString("utf8"));
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_image_request");
+  const input = (value as Record<string, unknown>).input;
+  if (typeof input === "string" && input.trim()) return input.trim();
+  if (!Array.isArray(input)) throw new Error("invalid_image_request");
+  for (let index = input.length - 1; index >= 0; index -= 1) {
+    const item = input[index];
+    if (!item || typeof item !== "object" || (item as Record<string, unknown>).role !== "user") continue;
+    const content = (item as Record<string, unknown>).content;
+    if (typeof content === "string" && content.trim()) return content.trim();
+  }
+  throw new Error("invalid_image_request");
+}
+
+async function generateImage(
+  config: NonNullable<GatewayConfig["imageGeneration"]>, prompt: string, timeoutMs: number,
+): Promise<string> {
+  const response = await fetch(`${config.baseUrl}/images/generations`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${config.apiKey}`, "content-type": "application/json" },
+    body: JSON.stringify({ model: config.model, prompt, size: "1024x1024" }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!response.ok) { await response.body?.cancel(); throw new Error(`image_api_http_${response.status}`); }
+  const payload = await response.json() as { data?: { b64_json?: string }[] };
+  const item = payload.data?.[0];
+  if (item?.b64_json) return item.b64_json;
+  throw new Error("image_api_empty_result");
+}
+
 function positiveAdminInteger(value: unknown, maximum = 1_000_000): number | null {
   return Number.isSafeInteger(value) && Number(value) > 0 && Number(value) <= maximum ? Number(value) : null;
 }
@@ -100,10 +141,11 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
   const limiter = options.limiter ?? new InMemoryLimiter(config.requestsPerMinute, config.maxConcurrentRequests);
   const configuredUpstreams = config.upstreams ?? config.upstreamApiKeys;
   const webSearchUpstreamIndex = config.webSearchUpstreamIndex ?? Math.max(0, configuredUpstreams.length - 1);
+  const imageGenerationUpstreamIndex = config.imageGenerationUpstreamIndex ?? Math.max(0, configuredUpstreams.length - 1);
   const upstreamPool = new UpstreamPool(configuredUpstreams.map((item, index) =>
     typeof item === "string"
-      ? { apiKey: item, supportsWebSearch: index === webSearchUpstreamIndex }
-      : { ...item, supportsWebSearch: index === webSearchUpstreamIndex }));
+      ? { apiKey: item, supportsWebSearch: index === webSearchUpstreamIndex, supportsImageGeneration: index === imageGenerationUpstreamIndex }
+      : { ...item, supportsWebSearch: index === webSearchUpstreamIndex, supportsImageGeneration: index === imageGenerationUpstreamIndex }));
   const ledger = options.ledger ?? new InMemoryRequestLedger();
   const keyVerifier = options.keyVerifier ?? new StaticGatewayKeyVerifier(config.gatewayKeyHashes);
   const adminLoginGuard = options.adminLoginProtector ?? new AdminLoginGuard();
@@ -471,18 +513,32 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
       ledgerStarted = true;
       const body = await readBody(req);
       const requiresWebSearch = requestsWebSearch(body);
+      const requiresImageGeneration = requestsImageGeneration(body);
+      if (requiresImageGeneration && config.imageGeneration) {
+        attempts = 1;
+        const image = await generateImage(config.imageGeneration, latestUserPrompt(body), config.upstreamTimeoutMs);
+        const event = JSON.stringify({
+          type: "response.completed",
+          response: { output: [{ type: "image_generation_call", result: image }] },
+        });
+        res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" });
+        res.end(`data: ${event}\n\ndata: [DONE]\n\n`);
+        await ledger.finishRequest({ requestId, status: "completed", endedAt: new Date(), statusCode: 200, attempts });
+        return;
+      }
       let upstream: Response | undefined;
       let selectedCredentialId: string | undefined;
       const attemptedCredentialIds = new Set<string>();
       for (let attempt = 1; attempt <= 2; attempt += 1) {
-        let credential = upstreamPool.acquire(attemptedCredentialIds, Date.now(), requiresWebSearch);
-        if (!credential && attemptedCredentialIds.size > 0) credential = upstreamPool.acquire(new Set(), Date.now(), requiresWebSearch);
+        let credential = upstreamPool.acquire(attemptedCredentialIds, Date.now(), requiresWebSearch, requiresImageGeneration);
+        if (!credential && attemptedCredentialIds.size > 0) credential = upstreamPool.acquire(new Set(), Date.now(), requiresWebSearch, requiresImageGeneration);
         if (!credential)
         {
-          if (requiresWebSearch && attempts === 0)
+          if ((requiresWebSearch || requiresImageGeneration) && attempts === 0)
           {
-            await ledger.finishRequest({ requestId, status: "failed", endedAt: new Date(), attempts: 0, errorClass: "web_search_unavailable" });
-            return json(res, 422, { error: { code: "web_search_unavailable", message: "Web search is temporarily unavailable" } });
+            const code = requiresImageGeneration ? "image_generation_unavailable" : "web_search_unavailable";
+            await ledger.finishRequest({ requestId, status: "failed", endedAt: new Date(), attempts: 0, errorClass: code });
+            return json(res, 422, { error: { code, message: requiresImageGeneration ? "Image generation is temporarily unavailable" : "Web search is temporarily unavailable" } });
           }
           break;
         }

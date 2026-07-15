@@ -6,6 +6,8 @@ export interface GatewayConfig {
   upstreamResponsesPath: string;
   upstreams?: readonly UpstreamEndpoint[];
   webSearchUpstreamIndex?: number;
+  imageGenerationUpstreamIndex?: number;
+  imageGeneration?: { baseUrl: string; apiKey: string; model: string };
   gatewayKeyHashes: ReadonlySet<string>;
   adminKeyHashes?: ReadonlySet<string>;
   requestsPerMinute: number;
@@ -85,6 +87,13 @@ export function loadConfig(): GatewayConfig {
   if (!Number.isSafeInteger(webSearchUpstreamIndex) || webSearchUpstreamIndex < 0 || webSearchUpstreamIndex >= upstreams.length) {
     throw new Error("WEB_SEARCH_UPSTREAM_INDEX must identify a configured upstream");
   }
+  const configuredImageIndex = process.env.IMAGE_GENERATION_UPSTREAM_INDEX;
+  const imageGenerationUpstreamIndex = configuredImageIndex === undefined
+    ? Math.max(0, upstreams.length - 1)
+    : Number(configuredImageIndex);
+  if (!Number.isSafeInteger(imageGenerationUpstreamIndex) || imageGenerationUpstreamIndex < 0 || imageGenerationUpstreamIndex >= upstreams.length) {
+    throw new Error("IMAGE_GENERATION_UPSTREAM_INDEX must identify a configured upstream");
+  }
 
   const gatewayKeyHashes = new Set(
     (process.env.GATEWAY_KEY_HASHES ?? "")
@@ -119,6 +128,12 @@ export function loadConfig(): GatewayConfig {
     upstreamResponsesPath,
     upstreams,
     webSearchUpstreamIndex,
+    imageGenerationUpstreamIndex,
+    imageGeneration: process.env.IMAGE_API_BASE_URL?.trim() && process.env.IMAGE_API_KEY?.trim() ? {
+      baseUrl: process.env.IMAGE_API_BASE_URL.trim().replace(/\/$/, ""),
+      apiKey: process.env.IMAGE_API_KEY.trim(),
+      model: process.env.IMAGE_API_MODEL?.trim() || "gpt-image-2",
+    } : undefined,
     gatewayKeyHashes,
     adminKeyHashes,
     requestsPerMinute: positiveInteger("REQUESTS_PER_MINUTE", 30),

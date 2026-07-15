@@ -1,12 +1,12 @@
 <Window x:Class="ChatGPTConnector.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="泺栋chat" Width="960" Height="700" MinWidth="760" MinHeight="560"
+        Title="泺栋chat" Width="1180" Height="780" MinWidth="760" MinHeight="560"
         Icon="/LuodongChat;component/Assets/AppIcon.png"
         WindowStartupLocation="CenterScreen" ResizeMode="CanResizeWithGrip"
         UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
   <Grid Background="#F4F7FB">
-    <Grid.ColumnDefinitions><ColumnDefinition Width="250"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="230"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
 
     <Border Grid.Column="0" Background="#111827">
       <Grid Margin="28,30,24,24">
@@ -147,15 +147,31 @@
             <Grid Grid.Column="1">
               <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
               <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="GPT-5.6" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"/><Button x:Name="CopyCurrentChatButton" Grid.Column="1" Content="复制当前对话" Style="{StaticResource SecondaryButton}" Click="CopyCurrentChatButton_OnClick"/></Grid>
-              <ListBox x:Name="ChatMessagesList" Grid.Row="1" Margin="0,16" BorderThickness="0" Background="#F8FAFC" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Focusable" Value="False"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/></Style></ListBox.ItemContainerStyle>
-                <ListBox.ItemTemplate>
+              <ScrollViewer x:Name="ChatMessagesScroll" Grid.Row="1" Margin="0,16" Background="#F8FAFC"
+                            VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                            CanContentScroll="False" Focusable="False">
+                <ItemsControl x:Name="ChatMessagesItems">
+                <ItemsControl.ItemTemplate>
                   <DataTemplate>
                     <Grid Margin="10,5">
-                      <Border x:Name="MessageBubble" Background="White" BorderBrush="#D0D5DD" BorderThickness="1" CornerRadius="14" Padding="13,10" MaxWidth="620" HorizontalAlignment="Left">
+                      <Border x:Name="MessageBubble" Background="White" BorderBrush="#D0D5DD" BorderThickness="1" CornerRadius="16" Padding="15,12" MaxWidth="760" HorizontalAlignment="Left">
                         <StackPanel>
                           <TextBlock x:Name="MessageSender" Text="{Binding Sender}" FontWeight="SemiBold" Foreground="#1D4ED8"/>
-                          <TextBox x:Name="MessageContent" Text="{Binding Content}" IsReadOnly="True" IsReadOnlyCaretVisible="True" TextWrapping="Wrap" AcceptsReturn="True" BorderThickness="0" Background="Transparent" Padding="0" Margin="0,6,0,0" Cursor="IBeam" ToolTip="可拖动选择文字并复制"/>
+                          <TextBox x:Name="MessageContent" Text="{Binding Content}" IsReadOnly="True" IsReadOnlyCaretVisible="True"
+                                   TextWrapping="Wrap" AcceptsReturn="True" BorderThickness="0" Background="Transparent"
+                                   Padding="0" Margin="0,7,0,0" Cursor="IBeam" ToolTip="可拖动选择文字并复制"
+                                   HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Disabled"/>
+                          <ItemsControl ItemsSource="{Binding Images}" Margin="0,10,0,0">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate>
+                                <Border CornerRadius="12" ClipToBounds="True" Background="#EEF2F6" Margin="0,0,0,8">
+                                  <Image Source="{Binding Source}" Tag="{Binding FilePath}" MaxWidth="560" MaxHeight="560"
+                                         Stretch="Uniform" Cursor="Hand" ToolTip="点击使用系统图片查看器打开"
+                                         MouseLeftButtonUp="GeneratedImage_OnMouseLeftButtonUp"/>
+                                </Border>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
                           <ItemsControl ItemsSource="{Binding Sources}" Margin="0,8,0,0">
                             <ItemsControl.ItemTemplate><DataTemplate><Button Content="{Binding Title}" Tag="{Binding Url}" ToolTip="{Binding Url}" HorizontalAlignment="Left" Padding="0,3" Background="Transparent" Foreground="#155EEF" BorderThickness="0" Cursor="Hand" Click="CitationButton_OnClick"/></DataTemplate></ItemsControl.ItemTemplate>
                           </ItemsControl>
@@ -171,8 +187,9 @@
                       </DataTrigger>
                     </DataTemplate.Triggers>
                   </DataTemplate>
-                </ListBox.ItemTemplate>
-              </ListBox>
+                </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
               <TextBlock x:Name="ChatNotice" Grid.Row="2" Foreground="#B42318" TextWrapping="Wrap" Margin="2,0,2,7"/>
               <Grid Grid.Row="3"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="90"/></Grid.ColumnDefinitions><TextBox x:Name="ChatInput" MinHeight="46" MaxHeight="120" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/><Button x:Name="StopGenerationButton" Grid.Column="1" Content="停止" Visibility="Collapsed" Margin="10,0,0,0" Style="{StaticResource SecondaryButton}" Click="StopGenerationButton_OnClick"/><Button x:Name="ChatSendButton" Grid.Column="2" Content="发送" Margin="10,0,0,0" Click="ChatSendButton_OnClick"/></Grid>
             </Grid>

@@ -8,33 +8,38 @@ namespace ChatGPTConnector.Core;
 
 public sealed record SyncedChatMessage(
     string Id, string ConversationId, string Role, string Content, DateTimeOffset ClientCreatedAt,
-    DateTimeOffset? UpdatedAt = null, IReadOnlyList<ChatCitation>? Citations = null);
+    DateTimeOffset? UpdatedAt = null, IReadOnlyList<ChatCitation>? Citations = null,
+    IReadOnlyList<GeneratedChatImage>? Images = null);
 public sealed record ChatCitation(string Title, string Url);
-public sealed record ChatStreamResult(string Text, IReadOnlyList<ChatCitation> Citations, bool WebSearchUnavailable = false);
+public sealed record GeneratedChatImage(string RelativePath, string MediaType);
+public sealed record GeneratedImageData(string Base64, string MediaType);
+public sealed record ChatStreamResult(
+    string Text, IReadOnlyList<ChatCitation> Citations, IReadOnlyList<GeneratedImageData> Images,
+    bool WebSearchUnavailable = false);
 
 public sealed class ChatSyncClient(HttpClient http)
 {
     public async Task<ChatStreamResult> StreamResponseAsync(
         Uri gateway, string token, IReadOnlyList<SyncedChatMessage> messages,
         IProgress<string>? progress = null, CancellationToken cancellationToken = default,
-        bool enableWebSearch = false)
+        bool enableWebSearch = false, bool enableImageGeneration = false)
     {
         try
         {
-            return await StreamOnceAsync(gateway, token, messages, progress, cancellationToken, enableWebSearch);
+            return await StreamOnceAsync(gateway, token, messages, progress, cancellationToken, enableWebSearch, enableImageGeneration);
         }
         catch (ResponseRequestException error) when (enableWebSearch && error.StatusCode is
             HttpStatusCode.BadRequest or HttpStatusCode.NotFound or HttpStatusCode.UnprocessableEntity or
             HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout)
         {
-            var fallback = await StreamOnceAsync(gateway, token, messages, progress, cancellationToken, false);
+            var fallback = await StreamOnceAsync(gateway, token, messages, progress, cancellationToken, false, enableImageGeneration);
             return fallback with { WebSearchUnavailable = true };
         }
     }
 
     private async Task<ChatStreamResult> StreamOnceAsync(
         Uri gateway, string token, IReadOnlyList<SyncedChatMessage> messages,
-        IProgress<string>? progress, CancellationToken cancellationToken, bool enableWebSearch)
+        IProgress<string>? progress, CancellationToken cancellationToken, bool enableWebSearch, bool enableImageGeneration)
     {
         using var request = Authorized(HttpMethod.Post, new Uri(gateway, "/v1/responses"), token);
         request.Headers.Accept.ParseAdd("text/event-stream");
@@ -44,9 +49,14 @@ public sealed class ChatSyncClient(HttpClient http)
             ["stream"] = true,
             ["input"] = messages.Select(message => new { role = message.Role, content = message.Content }),
         };
+        var tools = new List<object>();
         if (enableWebSearch)
+            tools.Add(new { type = "web_search", search_context_size = "low" });
+        if (enableImageGeneration)
+            tools.Add(new { type = "image_generation", action = "generate", size = "auto", quality = "auto" });
+        if (tools.Count > 0)
         {
-            payload["tools"] = new[] { new { type = "web_search", search_context_size = "low" } };
+            payload["tools"] = tools;
             payload["tool_choice"] = "auto";
         }
         request.Content = JsonContent.Create(payload);
@@ -56,6 +66,7 @@ public sealed class ChatSyncClient(HttpClient http)
         using var reader = new StreamReader(stream, Encoding.UTF8);
         var result = new StringBuilder();
         var citations = new Dictionary<string, ChatCitation>(StringComparer.OrdinalIgnoreCase);
+        var images = new List<GeneratedImageData>();
         while (await reader.ReadLineAsync(cancellationToken) is { } line)
         {
             if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
@@ -71,19 +82,27 @@ public sealed class ChatSyncClient(HttpClient http)
                     result.Append(delta);
                     progress?.Report(delta);
                 }
-                if (type.GetString() == "response.completed") ExtractCitations(root, citations);
+                if (type.GetString() == "response.completed") ExtractCompletedOutput(root, citations, images);
             }
             catch (JsonException) { }
         }
-        return new ChatStreamResult(result.ToString(), citations.Values.ToArray());
+        return new ChatStreamResult(result.ToString(), citations.Values.ToArray(), images);
     }
 
-    private static void ExtractCitations(JsonElement root, IDictionary<string, ChatCitation> citations)
+    private static void ExtractCompletedOutput(
+        JsonElement root, IDictionary<string, ChatCitation> citations, ICollection<GeneratedImageData> images)
     {
         if (!root.TryGetProperty("response", out var response)
             || !response.TryGetProperty("output", out var output) || output.ValueKind != JsonValueKind.Array) return;
         foreach (var item in output.EnumerateArray())
         {
+            if (item.TryGetProperty("type", out var itemType) && itemType.GetString() == "image_generation_call"
+                && item.TryGetProperty("result", out var imageResult)
+                && imageResult.GetString() is { Length: > 0 } base64)
+            {
+                images.Add(new GeneratedImageData(base64, "image/png"));
+                continue;
+            }
             if (!item.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array) continue;
             foreach (var part in content.EnumerateArray())
             {

@@ -8,6 +8,7 @@ export interface UpstreamCredential {
   baseUrl?: string;
   responsesPath?: string;
   supportsWebSearch?: boolean;
+  supportsImageGeneration?: boolean;
 }
 
 interface CredentialState extends UpstreamCredential {
@@ -35,8 +36,8 @@ export class UpstreamPool {
   ) {
     if (credentials.length === 0) throw new Error("At least one upstream credential is required");
     this.credentials = credentials.map((credential) => {
-      const { apiKey, baseUrl, responsesPath, supportsWebSearch } = typeof credential === "string"
-        ? { apiKey: credential, baseUrl: undefined, responsesPath: undefined, supportsWebSearch: false }
+      const { apiKey, baseUrl, responsesPath, supportsWebSearch, supportsImageGeneration } = typeof credential === "string"
+        ? { apiKey: credential, baseUrl: undefined, responsesPath: undefined, supportsWebSearch: false, supportsImageGeneration: false }
         : credential;
       return {
       id: createHash("sha256").update(apiKey).digest("hex"),
@@ -44,6 +45,7 @@ export class UpstreamPool {
       baseUrl,
       responsesPath,
       supportsWebSearch: supportsWebSearch ?? false,
+      supportsImageGeneration: supportsImageGeneration ?? false,
       health: "healthy",
       consecutiveFailures: 0,
       openUntil: 0,
@@ -52,13 +54,18 @@ export class UpstreamPool {
     });
   }
 
-  acquire(excludedIds: ReadonlySet<string> = new Set(), now = Date.now(), requireWebSearch = false): UpstreamCredential | null {
+  acquire(
+    excludedIds: ReadonlySet<string> = new Set(), now = Date.now(),
+    requireWebSearch = false, requireImageGeneration = false,
+  ): UpstreamCredential | null {
     for (const credential of this.credentials) {
       if (credential.health === "open" && now >= credential.openUntil) credential.health = "half_open";
     }
 
     const eligible = this.credentials.filter(
-      (item) => item.health !== "open" && !excludedIds.has(item.id) && (!requireWebSearch || item.supportsWebSearch),
+      (item) => item.health !== "open" && !excludedIds.has(item.id)
+        && (!requireWebSearch || item.supportsWebSearch)
+        && (!requireImageGeneration || item.supportsImageGeneration),
     );
     if (eligible.length === 0) return null;
     eligible.sort((a, b) => a.inFlight - b.inFlight);
@@ -74,6 +81,7 @@ export class UpstreamPool {
       baseUrl: selected.baseUrl,
       responsesPath: selected.responsesPath,
       supportsWebSearch: selected.supportsWebSearch,
+      supportsImageGeneration: selected.supportsImageGeneration,
     };
   }
 

@@ -50,6 +50,24 @@ public sealed class ChatSyncClientTests
         Assert.False(second.RootElement.TryGetProperty("tools", out _));
     }
 
+    [Fact]
+    public async Task RequestsAndParsesImageGenerationInsideTheNormalConversation()
+    {
+        var events = """
+            data: {"type":"response.completed","response":{"output":[{"type":"image_generation_call","result":"aGVsbG8="}]}}
+
+            data: [DONE]
+
+            """;
+        var handler = new CapturingHandler(events);
+        var result = await new ChatSyncClient(new HttpClient(handler)).StreamResponseAsync(
+            new Uri("https://gateway.example"), "usr_test", [], enableImageGeneration: true);
+
+        Assert.Equal("aGVsbG8=", Assert.Single(result.Images).Base64);
+        using var body = JsonDocument.Parse(handler.Body!);
+        Assert.Equal("image_generation", body.RootElement.GetProperty("tools")[0].GetProperty("type").GetString());
+    }
+
     private sealed class InlineProgress(Action<string> report) : IProgress<string> { public void Report(string value) => report(value); }
     private sealed class StubHandler(string responseBody, string mediaType) : HttpMessageHandler
     {
@@ -75,6 +93,16 @@ public sealed class ChatSyncClientTests
             return new HttpResponseMessage(HttpStatusCode.OK) {
                 Content = new StringContent("data: {\"type\":\"response.output_text.delta\",\"delta\":\"普通回答\"}\n\ndata: [DONE]\n\n", Encoding.UTF8, "text/event-stream"),
             };
+        }
+    }
+
+    private sealed class CapturingHandler(string events) : HttpMessageHandler
+    {
+        public string? Body { get; private set; }
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Body = await request.Content!.ReadAsStringAsync(cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(events, Encoding.UTF8, "text/event-stream") };
         }
     }
 }

@@ -429,3 +429,55 @@ test("routes web search requests to the verified capable upstream", async (t) =>
   assert.equal(ordinaryCalls, 0);
   assert.equal((await response.json() as { output: { type: string }[] }).output[0]?.type, "web_search_call");
 });
+
+test("routes image generation requests to the verified capable upstream", async (t) => {
+  let ordinaryCalls = 0;
+  const ordinary = createServer(async (req, res) => {
+    ordinaryCalls += 1;
+    for await (const _chunk of req) { /* consume request */ }
+    res.writeHead(200).end();
+  });
+  const images = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString()) as { model?: string; prompt?: string };
+    assert.equal(req.url, "/v1/images/generations");
+    assert.equal(body.model, "gpt-image-2");
+    assert.equal(body.prompt, "draw");
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ data: [{ b64_json: "aGVsbG8=" }] }));
+  });
+  const ordinaryPort = await listen(ordinary);
+  const imagePort = await listen(images);
+  t.after(() => { ordinary.close(); images.close(); });
+
+  const config: GatewayConfig = {
+    port: 0,
+    upstreamBaseUrl: `http://127.0.0.1:${ordinaryPort}`,
+    upstreamApiKey: "ordinary-key",
+    upstreamApiKeys: ["ordinary-key"],
+    upstreamResponsesPath: "/responses",
+    upstreams: [
+      { baseUrl: `http://127.0.0.1:${ordinaryPort}`, responsesPath: "/responses", apiKey: "ordinary-key" },
+      { baseUrl: `http://127.0.0.1:${imagePort}`, responsesPath: "/responses", apiKey: "image-key" },
+    ],
+    imageGenerationUpstreamIndex: 1,
+    imageGeneration: { baseUrl: `http://127.0.0.1:${imagePort}/v1`, apiKey: "image-key", model: "gpt-image-2" },
+    gatewayKeyHashes: new Set([hashGatewayKey("gw_images")]),
+    requestsPerMinute: 10,
+    maxConcurrentRequests: 2,
+    upstreamTimeoutMs: 5_000,
+  };
+  const gateway = createGatewayServer(config);
+  const gatewayPort = await listen(gateway);
+  t.after(() => gateway.close());
+
+  const response = await fetch(`http://127.0.0.1:${gatewayPort}/responses`, {
+    method: "POST",
+    headers: { authorization: "Bearer gw_images", "content-type": "application/json" },
+    body: JSON.stringify({ model: "gpt-5.6-sol", tools: [{ type: "image_generation" }], input: "draw" }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal(ordinaryCalls, 0);
+  assert.match(await response.text(), /image_generation_call.*aGVsbG8=/);
+});

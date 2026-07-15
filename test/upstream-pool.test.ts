@@ -60,3 +60,14 @@ test("routes web search only to a capable upstream", () => {
   assert.equal(selected.apiKey, "search");
   pool.recordSuccess(selected.id);
 });
+
+test("routes image generation only to a capable upstream", () => {
+  const pool = new UpstreamPool([
+    { apiKey: "ordinary", supportsImageGeneration: false },
+    { apiKey: "images", supportsImageGeneration: true },
+  ]);
+  const selected = pool.acquire(new Set(), Date.now(), false, true);
+  assert.ok(selected);
+  assert.equal(selected.apiKey, "images");
+  pool.recordSuccess(selected.id);
+});

@@ -52,11 +52,46 @@ public sealed class LocalConversationStore(string root)
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 
+    public async Task<GeneratedChatImage> SaveGeneratedImageAsync(
+        string accountId, string conversationId, string messageId, GeneratedImageData image,
+        CancellationToken cancellationToken = default)
+    {
+        if (!Guid.TryParse(conversationId, out _) || !Guid.TryParse(messageId, out _))
+            throw new ArgumentException("Conversation and message IDs must be UUIDs.");
+        if (image.Base64.Length > 48 * 1024 * 1024) throw new InvalidDataException("生成的图片数据过大。");
+        byte[] bytes;
+        try { bytes = Convert.FromBase64String(image.Base64); }
+        catch (FormatException error) { throw new InvalidDataException("生成的图片数据无效。", error); }
+        var extension = image.MediaType == "image/webp" ? ".webp" : image.MediaType == "image/jpeg" ? ".jpg" : ".png";
+        var relativePath = Path.Combine("images", conversationId, messageId + extension);
+        var path = GetImagePath(accountId, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temporary = path + $".{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await File.WriteAllBytesAsync(temporary, bytes, cancellationToken);
+            File.Move(temporary, path, true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        return new GeneratedChatImage(relativePath.Replace(Path.DirectorySeparatorChar, '/'), image.MediaType);
+    }
+
+    public string GetImagePath(string accountId, string relativePath)
+    {
+        var accountDirectory = Path.GetFullPath(AccountDirectory(accountId));
+        var path = Path.GetFullPath(Path.Combine(accountDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        if (!path.StartsWith(accountDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("图片路径无效。");
+        return path;
+    }
+
     public Task DeleteAsync(string accountId, string conversationId)
     {
         if (!Guid.TryParse(conversationId, out _)) return Task.CompletedTask;
         var path = Path.Combine(AccountDirectory(accountId), $"{conversationId}.json");
         if (File.Exists(path)) File.Delete(path);
+        var imageDirectory = Path.Combine(AccountDirectory(accountId), "images", conversationId);
+        if (Directory.Exists(imageDirectory)) Directory.Delete(imageDirectory, true);
         return Task.CompletedTask;
     }
 
