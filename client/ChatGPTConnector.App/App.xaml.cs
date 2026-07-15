@@ -1,9 +1,7 @@
 using System.IO;
 using System.Text;
-using System.Diagnostics;
 using System.Windows;
 using System.Windows.Threading;
-using ChatGPTConnector.Core;
 using Application = System.Windows.Application;
 using MessageBox = System.Windows.MessageBox;
 
@@ -16,18 +14,10 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        if (e.Args.Length == 2 && e.Args[0].Equals("--restore-watchdog", StringComparison.OrdinalIgnoreCase)
-            && int.TryParse(e.Args[1], out var parentProcessId))
-        {
-            try { Process.GetProcessById(parentProcessId).WaitForExit(); } catch { }
-            new ManagedCodexEnvironment().Restore();
-            Shutdown(0);
-            return;
-        }
-        _singleInstanceMutex = new Mutex(true, @"Local\ChatGPTConnector.WindowsClient", out var isFirstInstance);
+        _singleInstanceMutex = new Mutex(true, @"Local\LuodongChat.WindowsClient", out var isFirstInstance);
         if (!isFirstInstance)
         {
-            MessageBox.Show("ChatGPT 连接器已经在运行，请在任务栏托盘中打开主界面。", "ChatGPT 连接器",
+            MessageBox.Show("泺栋chat 已经在运行，请在任务栏托盘中打开主界面。", "泺栋chat",
                 MessageBoxButton.OK, MessageBoxImage.Information);
             _singleInstanceMutex.Dispose();
             _singleInstanceMutex = null;
@@ -84,7 +74,7 @@ public partial class App : Application
         var logPath = WriteCrashLog(error);
         MessageBox.Show(
             $"客户端启动失败。错误记录已保存到：\n{logPath}\n\n请联系客服 QQ：2554798585。",
-            "ChatGPT 连接器",
+            "泺栋chat",
             MessageBoxButton.OK,
             MessageBoxImage.Error);
     }
@@ -95,11 +85,11 @@ public partial class App : Application
         {
             var directory = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "ChatGPTConnector",
+                "LuodongChat",
                 "logs");
             Directory.CreateDirectory(directory);
             var path = Path.Combine(directory, $"crash-{DateTime.Now:yyyyMMdd-HHmmss}.log");
-            File.WriteAllText(path, $"ChatGPT Connector {DateTimeOffset.Now:O}{Environment.NewLine}{error}", new UTF8Encoding(false));
+            File.WriteAllText(path, $"泺栋chat {DateTimeOffset.Now:O}{Environment.NewLine}{error}", new UTF8Encoding(false));
             return path;
         }
         catch

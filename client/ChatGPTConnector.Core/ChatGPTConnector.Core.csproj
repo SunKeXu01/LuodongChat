@@ -3,9 +3,6 @@
     <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Tomlyn" Version="2.10.1" />
-  </ItemGroup>
-  <ItemGroup>
     <InternalsVisibleTo Include="ChatGPTConnector.Core.Tests" />
   </ItemGroup>
 </Project>

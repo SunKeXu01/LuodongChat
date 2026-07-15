@@ -2,8 +2,6 @@ using System.ComponentModel;
 using System.IO;
 using System.Reflection;
 using System.Net.Http;
-using System.Diagnostics;
-using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -23,19 +21,17 @@ public partial class MainWindow : Window
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(90) };
     private readonly AccountClient _accounts = new(Http);
     private readonly SecureSessionStore _sessionStore = SecureSessionStore.ForCurrentUser();
-    private readonly ManagedCodexEnvironment _codexEnvironment = new();
     private readonly ClientUpdateService _updates = new(Http);
     private readonly ChatSyncClient _chat = new(Http);
     private readonly ObservableCollection<ChatDisplayMessage> _chatMessages = [];
     private AccountSession? _session;
-    private LocalGatewayProxy? _proxy;
     private ClientUpdate? _availableUpdate;
     private TrayIconService? _trayIcon;
-    private Process? _restoreWatchdog;
     private bool _allowExit;
     private readonly SemaphoreSlim _operationGate = new(1, 1);
     private readonly DispatcherTimer _sessionTimer = new() { Interval = TimeSpan.FromMinutes(5) };
     private string? _conversationId;
+    private CancellationTokenSource? _chatCancellation;
 
     public MainWindow() : this(false) { }
 
@@ -46,7 +42,7 @@ public partial class MainWindow : Window
         FitToWorkingArea();
         InitializeTrayIcon();
         Closing += MainWindow_OnClosing;
-        Application.Current.SessionEnding += (_, _) => { _allowExit = true; StopConnection(); };
+        Application.Current.SessionEnding += (_, _) => _allowExit = true;
         _sessionTimer.Tick += async (_, _) => await RunExclusiveAsync(ValidateSessionAsync);
         if (skipStartupChecks) return;
         Loaded += async (_, _) => await RunExclusiveAsync(InitializeAsync);
@@ -64,7 +60,7 @@ public partial class MainWindow : Window
                 _session = _session with { Profile = profile };
                 _sessionStore.Save(_session);
                 ShowAccount(profile);
-                await StartConnectionAsync();
+                ShowReadyStatus();
                 await LoadChatAsync();
                 _sessionTimer.Start();
                 return;
@@ -72,7 +68,6 @@ public partial class MainWindow : Window
             _sessionStore.Clear();
             _session = null;
         }
-        await StopConnectionAsync();
         ShowLogin();
     }
 
@@ -171,36 +166,19 @@ public partial class MainWindow : Window
         RegisterConfirmPasswordInput.Clear();
         AuthNotice.Text = "";
         ShowAccount(session.Profile);
-        await StartConnectionAsync();
+        ShowReadyStatus();
         await LoadChatAsync();
         _sessionTimer.Start();
     }
 
-    private async Task StartConnectionAsync()
+    private void ShowReadyStatus()
     {
-        if (_session is null) return;
-        await StopConnectionAsync();
-        try
-        {
-            var localAccessKey = $"local_{Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant()}";
-            _proxy = new LocalGatewayProxy(Http, GatewayUri, _session.AccessToken, localAccessKey);
-            _proxy.Start();
-            await _codexEnvironment.ActivateAsync(_proxy.BaseUri, localAccessKey);
-            StartRestoreWatchdog();
-            StatusDot.Fill = Brushes.MediumSeaGreen;
-            StatusText.Text = "已登录，本地连接正在运行";
-        }
-        catch (Exception error)
-        {
-            await StopConnectionAsync();
-            StatusDot.Fill = Brushes.IndianRed;
-            StatusText.Text = "连接建立失败";
-            MessageBox.Show(error.Message, "连接失败", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
+        StatusDot.Fill = Brushes.MediumSeaGreen;
+        StatusText.Text = "已登录，可以直接开始对话";
     }
 
-    private async void ReconnectButton_OnClick(object sender, RoutedEventArgs e) =>
-        await RunExclusiveAsync(StartConnectionAsync);
+    private async void RefreshButton_OnClick(object sender, RoutedEventArgs e) =>
+        await RunExclusiveAsync(async () => { await ValidateSessionAsync(); if (_session is null) return; await LoadChatAsync(); ShowReadyStatus(); });
 
     private async void SaveProfileButton_OnClick(object sender, RoutedEventArgs e)
     {
@@ -230,7 +208,6 @@ public partial class MainWindow : Window
     {
         await RunExclusiveAsync(async () => {
             if (_session is not null) await _accounts.LogoutAsync(GatewayUri, _session.AccessToken).ContinueWith(_ => { });
-            await StopConnectionAsync();
             _sessionStore.Clear();
             _session = null;
             _sessionTimer.Stop();
@@ -247,7 +224,6 @@ public partial class MainWindow : Window
             if (profile is not null) { UpdateProfile(profile); return; }
         }
         catch { return; }
-        await StopConnectionAsync();
         _sessionStore.Clear();
         _session = null;
         _sessionTimer.Stop();
@@ -274,29 +250,42 @@ public partial class MainWindow : Window
 
     private void NewChatButton_OnClick(object sender, RoutedEventArgs e)
     {
-        if (_operationGate.CurrentCount == 0) return;
+        if (_chatCancellation is not null) return;
         _conversationId = null;
         _chatMessages.Clear();
         ChatNotice.Text = "已新建会话";
         ChatInput.Focus();
     }
 
+    private void CopyCurrentChatButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_chatMessages.Count == 0) return;
+        var text = string.Join(Environment.NewLine + Environment.NewLine, _chatMessages.Select(message => $"{message.Sender}：{message.Content}"));
+        Clipboard.SetText(text);
+        ChatNotice.Text = "当前对话已复制到剪贴板";
+    }
+
     private async void ChatSendButton_OnClick(object sender, RoutedEventArgs e)
     {
-        if (_session is null) return;
+        if (_session is null || _chatCancellation is not null) return;
         var text = ChatInput.Text.Trim();
         if (text.Length == 0) return;
-        await RunExclusiveAsync(async () => {
+        _chatCancellation = new CancellationTokenSource();
+        var cancellationToken = _chatCancellation.Token;
+        ChatSendButton.IsEnabled = false;
+        StopGenerationButton.Visibility = Visibility.Visible;
+        try
+        {
             var conversationId = _conversationId ?? Guid.NewGuid().ToString();
             if (_conversationId is null)
             {
-                await _chat.SaveConversationAsync(GatewayUri, _session.AccessToken, conversationId, text[..Math.Min(text.Length, 40)]);
+                await _chat.SaveConversationAsync(GatewayUri, _session.AccessToken, conversationId, text[..Math.Min(text.Length, 40)], cancellationToken);
                 _conversationId = conversationId;
             }
             var user = new SyncedChatMessage(Guid.NewGuid().ToString(), conversationId, "user", text, DateTimeOffset.UtcNow);
             ChatInput.Clear();
             _chatMessages.Add(ChatDisplayMessage.From(user));
-            await _chat.SaveMessageAsync(GatewayUri, _session.AccessToken, user);
+            await _chat.SaveMessageAsync(GatewayUri, _session.AccessToken, user, cancellationToken);
             var context = _chatMessages.Select(item => item.Source).ToArray();
             var assistant = new SyncedChatMessage(Guid.NewGuid().ToString(), conversationId, "assistant", "", DateTimeOffset.UtcNow);
             var display = ChatDisplayMessage.From(assistant);
@@ -308,22 +297,43 @@ public partial class MainWindow : Window
                     display.Content += delta;
                     ChatMessagesList.ScrollIntoView(display);
                 });
-                var answer = await _chat.StreamResponseAsync(GatewayUri, _session.AccessToken, context, progress);
+                var answer = await _chat.StreamResponseAsync(GatewayUri, _session.AccessToken, context, progress, cancellationToken);
                 assistant = assistant with { Content = string.IsNullOrWhiteSpace(answer) ? "暂时没有收到模型输出。" : answer };
                 display.Content = assistant.Content;
                 display.Source = assistant;
-                await _chat.SaveMessageAsync(GatewayUri, _session.AccessToken, assistant);
+                await _chat.SaveMessageAsync(GatewayUri, _session.AccessToken, assistant, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                if (display.Content.Length == 0) _chatMessages.Remove(display);
+                else
+                {
+                    assistant = assistant with { Content = display.Content };
+                    display.Source = assistant;
+                    await _chat.SaveMessageAsync(GatewayUri, _session.AccessToken, assistant);
+                }
+                ChatNotice.Text = "已停止生成";
             }
             catch (Exception error)
             {
                 _chatMessages.Remove(display);
                 ChatNotice.Text = $"发送失败：{error.Message}";
             }
-        });
+        }
+        finally
+        {
+            _chatCancellation.Dispose();
+            _chatCancellation = null;
+            ChatSendButton.IsEnabled = true;
+            StopGenerationButton.Visibility = Visibility.Collapsed;
+            ChatInput.Focus();
+        }
     }
 
+    private void StopGenerationButton_OnClick(object sender, RoutedEventArgs e) => _chatCancellation?.Cancel();
+
     private void ShowLogin() { AccountPanel.Visibility = Visibility.Collapsed; LoginPanel.Visibility = Visibility.Visible; AuthNotice.Text = ""; }
-    private void ShowAccount(AccountProfile profile) { LoginPanel.Visibility = Visibility.Collapsed; AccountPanel.Visibility = Visibility.Visible; UpdateProfile(profile); }
+    private void ShowAccount(AccountProfile profile) { LoginPanel.Visibility = Visibility.Collapsed; AccountPanel.Visibility = Visibility.Visible; AccountPanel.SelectedIndex = 1; UpdateProfile(profile); }
     private void UpdateProfile(AccountProfile profile)
     {
         if (_session is not null) { _session = _session with { Profile = profile }; _sessionStore.Save(_session); }
@@ -344,31 +354,6 @@ public partial class MainWindow : Window
             return image;
         }
         catch { return null; }
-    }
-
-    private void StopConnection()
-    {
-        if (_proxy is not null) { _proxy.DisposeAsync().AsTask().GetAwaiter().GetResult(); _proxy = null; }
-        _codexEnvironment.Restore();
-    }
-
-    private async Task StopConnectionAsync()
-    {
-        var proxy = _proxy;
-        _proxy = null;
-        if (proxy is not null) await proxy.DisposeAsync();
-        await _codexEnvironment.RestoreAsync();
-    }
-
-    private void StartRestoreWatchdog()
-    {
-        if (_restoreWatchdog is { HasExited: false } || string.IsNullOrWhiteSpace(Environment.ProcessPath)) return;
-        _restoreWatchdog = Process.Start(new ProcessStartInfo(Environment.ProcessPath, $"--restore-watchdog {Environment.ProcessId}")
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WindowStyle = ProcessWindowStyle.Hidden
-        });
     }
 
     private async void UpdateButton_OnClick(object sender, RoutedEventArgs e) => await RunUpdateAsync();
@@ -415,11 +400,11 @@ public partial class MainWindow : Window
         finally { SetBusy(false); _operationGate.Release(); }
     }
     private void FitToWorkingArea() { var area = SystemParameters.WorkArea; MaxWidth = Math.Max(MinWidth, area.Width - 24); MaxHeight = Math.Max(MinHeight, area.Height - 24); Width = Math.Min(Width, MaxWidth); Height = Math.Min(Height, MaxHeight); }
-    private void InitializeTrayIcon() => _trayIcon = new TrayIconService("ChatGPT 连接器", ShowMainWindow, ExitApplication);
+    private void InitializeTrayIcon() => _trayIcon = new TrayIconService("泺栋chat", ShowMainWindow, ExitApplication);
     private void MainWindow_OnClosing(object? sender, CancelEventArgs e) { if (_allowExit) return; e.Cancel = true; Hide(); ShowInTaskbar = false; }
     private void ShowMainWindow() { ShowInTaskbar = true; Show(); if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal; Activate(); }
     private void ExitApplication() { PrepareForExit(); Application.Current.Shutdown(); }
-    internal void PrepareForExit() { _allowExit = true; _sessionTimer.Stop(); StopConnection(); _trayIcon?.Dispose(); _trayIcon = null; }
+    internal void PrepareForExit() { _allowExit = true; _chatCancellation?.Cancel(); _sessionTimer.Stop(); _trayIcon?.Dispose(); _trayIcon = null; }
 }
 
 public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyChanged

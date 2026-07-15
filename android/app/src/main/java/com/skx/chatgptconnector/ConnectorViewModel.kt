@@ -25,6 +25,7 @@ data class ConnectorUiState(
     val messages: List<ChatMessage> = emptyList(),
     val conversationId: String? = null,
     val loading: Boolean = false,
+    val availableUpdate: AndroidUpdate? = null,
     val notice: String = "",
     val error: String? = null,
 )
@@ -32,11 +33,13 @@ data class ConnectorUiState(
 class ConnectorViewModel(application: Application) : AndroidViewModel(application) {
     private val api = ConnectorApi()
     private val sessionStore = SecureSessionStore(application)
+    private val updates = AndroidUpdateService()
     private val mainHandler = Handler(Looper.getMainLooper())
     var state by mutableStateOf(ConnectorUiState())
         private set
 
     init {
+        checkForUpdates()
         sessionStore.load()?.let { saved ->
             state = state.copy(session = saved, loading = true)
             viewModelScope.launch {
@@ -83,6 +86,21 @@ class ConnectorViewModel(application: Application) : AndroidViewModel(applicatio
         finishLogin(withContext(Dispatchers.IO) { api.register(email, state.password, state.code) })
     }
 
+    fun resetPassword() = runBusy {
+        val email = normalizedEmail()
+        require(validPassword(state.password)) { "密码应为 8 至 128 个字符，并同时包含字母和数字" }
+        require(state.password == state.confirmPassword) { "两次输入的密码不一致" }
+        require(state.code.length == 6) { "请输入邮件中的 6 位验证码" }
+        finishLogin(withContext(Dispatchers.IO) { api.resetPassword(email, state.password, state.code) })
+    }
+
+    fun installUpdate() = runBusy {
+        val update = state.availableUpdate ?: return@runBusy
+        val apk = withContext(Dispatchers.IO) { updates.download(getApplication(), update) }
+        updates.openInstaller(getApplication(), apk)
+        state = state.copy(notice = "安装程序已打开，请确认覆盖安装；旧版本会由 Android 自动替换")
+    }
+
     fun codeLogin() = runBusy {
         val email = normalizedEmail()
         require(state.code.length == 6) { "请输入邮件中的 6 位验证码" }
@@ -108,6 +126,13 @@ class ConnectorViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun validPassword(value: String) = value.length in 8..128 && value.any(Char::isLetter) && value.any(Char::isDigit)
+
+    private fun checkForUpdates() {
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { updates.check(BuildConfig.VERSION_NAME) } }
+                .onSuccess { update -> state = state.copy(availableUpdate = update) }
+        }
+    }
 
     fun logout() = runBusy {
         state.session?.let { session -> runCatching { withContext(Dispatchers.IO) { api.logout(session.accessToken) } } }

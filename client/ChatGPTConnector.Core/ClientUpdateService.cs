@@ -31,7 +31,7 @@ public sealed class ClientUpdateService(HttpClient http)
     {
         var directory = Path.Combine(Path.GetTempPath(), $"ChatGPTConnector-update-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
-        var downloaded = Path.Combine(directory, "ChatGPTConnector.exe");
+        var downloaded = Path.Combine(directory, "LuodongChat.exe");
         var bytes = await http.GetByteArrayAsync(update.ExecutableUri, cancellationToken);
         await File.WriteAllBytesAsync(downloaded, bytes, cancellationToken);
         var expectedText = await http.GetStringAsync(update.ChecksumUri, cancellationToken);

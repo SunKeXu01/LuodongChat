@@ -23,6 +23,9 @@ test("serves the public client update manifest and fixed release assets", async 
   process.env.CLIENT_RELEASE_ROOT = directory;
   await writeFile(join(directory, "update.json"), '{"version":"0.1.0-preview.2"}');
   await writeFile(join(directory, "ChatGPTConnector.exe.sha256"), "abc123\n");
+  await writeFile(join(directory, "ChatGPTConnector.apk"), "apk-bytes");
+  await writeFile(join(directory, "LuodongChat.exe.sha256"), "def456\n");
+  await writeFile(join(directory, "LuodongChat.apk"), "luodong-apk");
   t.after(async () => {
     if (previous === undefined) delete process.env.CLIENT_RELEASE_ROOT; else process.env.CLIENT_RELEASE_ROOT = previous;
     await rm(directory, { recursive: true, force: true });
@@ -41,6 +44,12 @@ test("serves the public client update manifest and fixed release assets", async 
   assert.deepEqual(await manifest.json(), { version: "0.1.0-preview.2" });
   const checksum = await fetch(`http://127.0.0.1:${port}/client/download/ChatGPTConnector.exe.sha256`);
   assert.equal(await checksum.text(), "abc123\n");
+  const apk = await fetch(`http://127.0.0.1:${port}/client/download/ChatGPTConnector.apk`);
+  assert.equal(apk.headers.get("content-type"), "application/vnd.android.package-archive");
+  assert.equal(await apk.text(), "apk-bytes");
+  const currentApk = await fetch(`http://127.0.0.1:${port}/client/download/LuodongChat.apk`);
+  assert.equal(currentApk.headers.get("content-type"), "application/vnd.android.package-archive");
+  assert.equal(await currentApk.text(), "luodong-apk");
 });
 
 test("rejects malformed account email before requesting delivery", async (t) => {
@@ -211,7 +220,7 @@ test("serves a safe public landing page", async (t) => {
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html/);
   assert.equal(response.headers.get("x-frame-options"), "DENY");
-  assert.match(await response.text(), /ChatGPT 连接器/);
+  assert.match(await response.text(), /泺栋chat/);
 });
 
 test("does not expose the legacy user gateway-key enrollment API", async (t) => {

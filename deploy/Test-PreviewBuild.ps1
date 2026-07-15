@@ -15,8 +15,8 @@ if ($actual -ne $ExpectedSha256.ToLowerInvariant()) {
 $destination = Join-Path $env:TEMP "ChatGPTConnector-preview"
 if (Test-Path $destination) { Remove-Item -Recurse -Force $destination }
 Expand-Archive -Path $ZipPath -DestinationPath $destination
-$executable = Join-Path $destination "ChatGPTConnector.exe"
-if (-not (Test-Path $executable)) { throw "ChatGPTConnector.exe is missing from the archive." }
+$executable = Join-Path $destination "LuodongChat.exe"
+if (-not (Test-Path $executable)) { throw "LuodongChat.exe is missing from the archive." }
 
 Write-Host "Integrity check passed." -ForegroundColor Green
 Write-Host "Preview executable: $executable"

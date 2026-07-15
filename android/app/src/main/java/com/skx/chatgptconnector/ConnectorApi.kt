@@ -23,6 +23,10 @@ class ConnectorApi(private val baseUrl: String = "https://520skx.com") {
         request("POST", "/account/register", body = JSONObject().put("email", email).put("password", password).put("code", code)),
     )
 
+    fun resetPassword(email: String, password: String, code: String): AccountSession = session(
+        request("POST", "/account/password/reset", body = JSONObject().put("email", email).put("password", password).put("code", code)),
+    )
+
     fun profile(token: String): AccountProfile = request("GET", "/account/profile", token).toProfile()
 
     fun logout(token: String) { request("POST", "/account/logout", token) }
@@ -101,13 +105,17 @@ class ConnectorApi(private val baseUrl: String = "https://520skx.com") {
         val status = connection.responseCode
         if (status in 200..299) return
         val text = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-        val message = runCatching { JSONObject(text).getJSONObject("error").optString("message") }.getOrNull()
+        val error = runCatching { JSONObject(text).getJSONObject("error") }.getOrNull()
+        val message = error?.optString("message")
+        val code = error?.optString("code")
         connection.disconnect()
-        throw IllegalStateException(message?.takeIf { it.isNotBlank() } ?: "服务器返回错误 $status")
+        throw ConnectorApiException(code?.takeIf { it.isNotBlank() } ?: "server_error", message?.takeIf { it.isNotBlank() } ?: "服务器返回错误 $status")
     }
 
     private fun session(root: JSONObject) = AccountSession(root.getString("accessToken"), root.getJSONObject("profile").toProfile())
 }
+
+class ConnectorApiException(val code: String, message: String) : IllegalStateException(message)
 
 private fun JSONArray.objects() = (0 until length()).map { getJSONObject(it) }
 private fun JSONObject.toMessage() = ChatMessage(

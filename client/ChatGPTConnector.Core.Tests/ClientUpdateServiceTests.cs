@@ -10,7 +10,7 @@ public sealed class ClientUpdateServiceTests
     [Fact]
     public async Task SelectsANewerReleaseWithVerifiedAssets()
     {
-        const string json = """{"version":"0.1.0-preview.4","executableUrl":"https://520skx.com/client/download/ChatGPTConnector.exe","checksumUrl":"https://520skx.com/client/download/ChatGPTConnector.exe.sha256"}""";
+        const string json = """{"version":"0.1.0-preview.4","executableUrl":"https://520skx.com/client/download/LuodongChat.exe","checksumUrl":"https://520skx.com/client/download/LuodongChat.exe.sha256"}""";
         var update = await new ClientUpdateService(new HttpClient(new StubHandler(json))).CheckAsync("0.1.0-preview.3");
         Assert.NotNull(update);
         Assert.Equal("0.1.0-preview.4", update.Version);
@@ -19,14 +19,14 @@ public sealed class ClientUpdateServiceTests
     [Fact]
     public async Task IgnoresTheCurrentRelease()
     {
-        const string json = """{"version":"0.1.0-preview.2","executableUrl":"https://520skx.com/client/download/ChatGPTConnector.exe","checksumUrl":"https://520skx.com/client/download/ChatGPTConnector.exe.sha256"}""";
+        const string json = """{"version":"0.1.0-preview.2","executableUrl":"https://520skx.com/client/download/LuodongChat.exe","checksumUrl":"https://520skx.com/client/download/LuodongChat.exe.sha256"}""";
         Assert.Null(await new ClientUpdateService(new HttpClient(new StubHandler(json))).CheckAsync("0.1.0-preview.2"));
     }
 
     [Fact]
     public void InstallerWaitsForExitAndDeletesThePreviousExecutable()
     {
-        var script = ClientUpdateService.BuildInstallScript(@"C:\Temp\new.exe", @"C:\Apps\ChatGPTConnector.exe", 4321);
+        var script = ClientUpdateService.BuildInstallScript(@"C:\Temp\new.exe", @"C:\Apps\LuodongChat.exe", 4321);
         Assert.Contains("tasklist /FI \"PID eq 4321\"", script);
         Assert.Contains("move /y \"%target%\" \"%backup%\"", script);
         Assert.Contains("del /f /q \"%backup%\"", script);

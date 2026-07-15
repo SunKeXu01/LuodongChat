@@ -232,7 +232,7 @@ export class SmtpEnrollmentMailer implements EnrollmentMailer {
   }
   async sendCode(email: string, code: string): Promise<void> {
     await this.transport.sendMail({
-      from: this.from, to: email, subject: "ChatGPT 连接器验证码",
+      from: this.from, to: email, subject: "泺栋chat 验证码",
       text: `你的验证码是：${code}\n\n验证码 10 分钟内有效。若非本人操作，请忽略本邮件。`,
     });
   }

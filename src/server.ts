@@ -32,7 +32,7 @@ const LANDING_PAGE = `<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>ChatGPT 连接器</title>
+  <title>泺栋chat</title>
   <style>
     :root{color-scheme:light dark;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
     body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f7fb;color:#111827}
@@ -42,7 +42,7 @@ const LANDING_PAGE = `<!doctype html>
     @media(prefers-color-scheme:dark){body{background:#0b1020;color:#f9fafb}main{background:#111827;border-color:#263244}p,.meta{color:#9ca3af}.meta{border-color:#263244}}
   </style>
 </head>
-<body><main><h1>ChatGPT 连接器</h1><div class="status"><span class="dot"></span>服务运行正常</div><p>面向 Codex 的一键模型连接工具。Windows 客户端正在开发中，将提供安全配置、自动备份和离线恢复能力。</p><div class="meta">网关：520skx.com · Responses API</div></main></body>
+<body><main><h1>泺栋chat</h1><div class="status"><span class="dot"></span>服务运行正常</div><p>独立的 GPT-5.6 对话客户端。使用邮箱账号登录，无需安装官方 ChatGPT，也无需配置 API 密钥。</p><div class="meta">Windows · Android · 跨端同步</div></main></body>
 </html>`;
 
 function json(res: ServerResponse, status: number, body: unknown): void {
@@ -124,14 +124,21 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
         return res.end(manifest);
       } catch { return json(res, 404, { error: { code: "client_release_unavailable" } }); }
     }
-    const clientAsset = req.method === "GET" && req.url === "/client/download/ChatGPTConnector.exe" ? "ChatGPTConnector.exe"
-      : req.method === "GET" && req.url === "/client/download/ChatGPTConnector.exe.sha256" ? "ChatGPTConnector.exe.sha256" : null;
+    const clientAsset = req.method === "GET" && req.url === "/client/download/LuodongChat.exe" ? "LuodongChat.exe"
+      : req.method === "GET" && req.url === "/client/download/LuodongChat.exe.sha256" ? "LuodongChat.exe.sha256"
+      : req.method === "GET" && req.url === "/client/download/LuodongChat.apk" ? "LuodongChat.apk"
+      : req.method === "GET" && req.url === "/client/download/LuodongChat.apk.sha256" ? "LuodongChat.apk.sha256"
+      : req.method === "GET" && req.url === "/client/download/ChatGPTConnector.exe" ? "ChatGPTConnector.exe"
+      : req.method === "GET" && req.url === "/client/download/ChatGPTConnector.exe.sha256" ? "ChatGPTConnector.exe.sha256"
+      : req.method === "GET" && req.url === "/client/download/ChatGPTConnector.apk" ? "ChatGPTConnector.apk"
+      : req.method === "GET" && req.url === "/client/download/ChatGPTConnector.apk.sha256" ? "ChatGPTConnector.apk.sha256" : null;
     if (clientAsset && releaseRoot) {
       try {
         const path = join(releaseRoot, clientAsset);
         const metadata = await stat(path);
         res.writeHead(200, {
-          "content-type": clientAsset.endsWith(".exe") ? "application/vnd.microsoft.portable-executable" : "text/plain; charset=utf-8",
+          "content-type": clientAsset.endsWith(".exe") ? "application/vnd.microsoft.portable-executable"
+            : clientAsset.endsWith(".apk") ? "application/vnd.android.package-archive" : "text/plain; charset=utf-8",
           "content-length": metadata.size,
           "cache-control": "public, max-age=300",
           "content-disposition": `attachment; filename="${clientAsset}"`,

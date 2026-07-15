@@ -1,58 +1,54 @@
-# ChatGPT 连接器
+# 泺栋chat
 
-面向 Windows 10/11 x64 与 Android 10+ 的 GPT-5.6 客户端。用户通过邮箱注册后可直接使用密码登录，也可使用邮箱验证码作为备用方式，无需领取、查看或填写网关密钥。
+泺栋chat 是面向 Windows 10/11 x64 与 Android 10+ 的独立 GPT-5.6 对话客户端。用户只需安装泺栋chat并使用邮箱账号登录，无需安装官方 ChatGPT、配置 API 密钥或修改本机 Codex 文件。
 
 ## 主要功能
 
-- 邮箱格式校验，无效地址不会请求发送邮件
-- 邮箱验证码注册、密码登录和验证码备用登录
-- 连续密码错误会触发 15 分钟临时锁定
-- 每个账号在服务端自动绑定唯一的内部网关凭据，凭据不会下发给用户
-- 未登录时无法使用连接功能
-- 登录凭证使用 Windows DPAPI 在本机加密保存
-- 首页显示本地连接状态和 GPT-5.6
-- 个人页面支持完整邮箱、网名和头像
-- 消费页面预留余额与流水功能；正式启用前不会扣费
-- 客户端运行并保持登录时，本地代理才会工作
-- 退出登录、退出软件或异常终止后自动恢复原始 Codex 环境
-- Windows 使用受管配置目录和目录联接，不覆盖用户原来的 `.codex/config.toml` 和 `auth.json`
-- Windows 与 Android 使用同一账号同步聊天会话和消息
-- 系统托盘、自动更新、版本校验和中文客服入口
+- 邮箱注册、密码登录、验证码登录与密码重置
+- 已注册邮箱再次注册时明确提醒用户直接登录
+- 无效邮箱不会请求发送验证码
+- GPT-5.6 流式回复，可停止生成、新建和复制当前对话
+- Windows 与 Android 使用同一账号同步当前会话数据
+- 账号在服务端绑定独立内部凭据，密钥不会展示或下发给用户
+- 个人资料支持网名、完整邮箱和头像
+- Windows 系统托盘与客户端自动更新
+- Android 新版检测、哈希校验和系统覆盖安装
+- 不读取、不修改、不映射 `.codex/config.toml`、`auth.json` 或 `CODEX_HOME`
 
 ## 下载
 
 - [GitHub Releases](https://github.com/SunKeXu01/ChatGPTConnector/releases)
-- [直接下载最新 EXE](https://520skx.com/client/download/ChatGPTConnector.exe)
+- [直接下载最新 Windows EXE](https://520skx.com/client/download/LuodongChat.exe)
+- [直接下载最新 Android APK](https://520skx.com/client/download/LuodongChat.apk)
 
-Release 中的 Windows EXE、ZIP、Android APK 和各自校验文件均包含版本号，例如 `ChatGPTConnector-0.1.0-preview.18-win-x64.exe` 与 `ChatGPTConnector-0.1.0-preview.18-android.apk`。
+Release 文件均包含版本号，例如 `LuodongChat-0.1.0-preview.18-win-x64.exe` 与 `LuodongChat-0.1.0-preview.18-android.apk`，并同时提供 SHA-256 校验文件。
 
-当前预览版尚未进行代码签名。如果 Windows 显示“Windows 已保护你的电脑”，请确认文件来自本仓库或上述下载地址，然后点击“更多信息”→“仍要运行”。
+当前 Windows 预览版尚未进行代码签名。如果系统显示“Windows 已保护你的电脑”，请确认安装包来自本仓库或上述下载地址，然后点击“更多信息”→“仍要运行”。Android 版使用固定发布证书签名，更新时会覆盖旧版本并保留账号数据。
 
-## 使用方式
+## Windows 使用方式
 
-1. 完全退出正在运行的 ChatGPT 或 Codex。
-2. 首次使用时进入“注册 / 重置密码”，输入有效邮箱、密码并获取 6 位验证码。邮箱已注册时客户端会明确提醒，可直接登录或重置密码。
-3. 完成注册后可直接使用邮箱和密码登录；忘记密码时重新验证邮箱即可设置新密码。
-4. 登录成功后，连接器自动创建独立的托管 Codex 环境、将默认 `.codex` 目录联接到该环境并启动本地代理。
-5. 若 ChatGPT 或 Codex 已经运行，请重新启动一次。
-6. 使用期间保持连接器运行并处于登录状态，可以最小化到系统托盘。
+1. 下载并运行 `LuodongChat` Windows 客户端。
+2. 首次使用时选择“注册 / 重置密码”，输入邮箱、密码和邮件中的 6 位验证码。
+3. 注册成功后可直接使用邮箱和密码登录。
+4. 进入“聊天”页面即可与 GPT-5.6 对话，无需安装其他聊天软件。
+5. 生成过程中可以点击“停止”，也可以复制当前对话或新建会话。
 
-关闭窗口右上角叉号只会隐藏到系统托盘。需要完全退出时，右键托盘图标并选择“退出”。完全退出或退出登录后，连接器会拆除受管目录联接、恢复原来的 `.codex` 目录和此前的 `CODEX_HOME`；如果用户原来没有 `.codex` 目录，退出后仍保持不存在。
+关闭窗口右上角叉号会隐藏到系统托盘。需要完全退出时，右键托盘图标并选择“退出”。退出泺栋chat不会更改用户电脑上的 Codex 或其他 AI 软件配置。
 
-## Android 预览版
+## Android 使用方式
 
-Android 客户端采用 Kotlin 与 Jetpack Compose，支持 Android 10 及以上版本，包括密码登录、验证码注册与备用登录、GPT-5.6 流式聊天、安全保存登录会话和跨端聊天同步。Android 版是独立聊天客户端，不会修改其他 Android 应用的配置。请从 Releases 下载带版本号的签名 APK；首次安装时需允许浏览器或文件管理器安装来自该来源的应用。
-
-## 个人资料
-
-“个人”页面可以修改 2～20 个字符的网名，并上传不超过 512 KB 的 JPG、PNG 或 WebP 头像。邮箱完整显示，不做脱敏。
+Android 版采用 Kotlin 与 Jetpack Compose，登录账号后可直接流式对话。顶部提供“复制当前对话”按钮；当前阶段不提供历史记录列表。发现新版时，登录页和聊天页都会显示更新提醒，下载并校验 APK 后交由 Android 系统覆盖安装。
 
 ## 自动更新
 
-客户端启动时会在登录首页检查并提示新版本。更新文件仅从 `https://520skx.com` 下载并校验 SHA-256；客户端退出后，更新程序会替换并删除旧版本，再启动新版本。
+Windows 与 Android 客户端启动时都会检查新版本。更新文件只从 `https://520skx.com` 下载并校验 SHA-256。Windows 会在退出旧进程后替换并删除旧程序；Android 由系统安装器覆盖旧版本。
 
 ## 服务信息
 
-- 网关：`https://520skx.com`
+- 服务地址：`https://520skx.com`
 - 客服：`2554798585（QQ）`
 - 项目主页：<https://github.com/SunKeXu01/ChatGPTConnector>
+
+## 开源参考
+
+聊天交互设计参考了 [NextChat](https://github.com/ChatGPTNextWeb/NextChat) 与 [Chatbox](https://github.com/chatboxai/chatbox) 的产品思路。NextChat 使用 MIT 许可证；Chatbox 社区版使用 GPL-3.0。本项目不复制 Chatbox GPL 代码，只独立实现所需功能。

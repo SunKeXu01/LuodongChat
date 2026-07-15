@@ -1,20 +1,28 @@
 package com.skx.chatgptconnector
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -41,9 +49,10 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun LoginScreen(model: ConnectorViewModel) {
     val state = model.state
-    Column(Modifier.fillMaxSize().background(Color(0xFFF4F7FB)).padding(22.dp), verticalArrangement = Arrangement.Center) {
-        Text("ChatGPT 连接器", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+    Column(Modifier.fillMaxSize().background(Color(0xFFF4F7FB)).verticalScroll(rememberScrollState()).padding(22.dp), verticalArrangement = Arrangement.Center) {
+        Text("泺栋chat", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
         Text("安全登录并同步 Windows 与 Android 数据", color = Color.Gray, modifier = Modifier.padding(top = 6.dp, bottom = 20.dp))
+        UpdateNotice(state, model::installUpdate)
         Card(colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(2.dp)) {
             Column(Modifier.padding(20.dp)) {
                 PrimaryTabRow(selectedTabIndex = state.authMode) {
@@ -82,6 +91,11 @@ private fun LoginScreen(model: ConnectorViewModel) {
                     onClick = when (state.authMode) { 0 -> model::passwordLogin; 1 -> model::register; else -> model::codeLogin },
                     modifier = Modifier.fillMaxWidth().padding(top = 16.dp), enabled = !state.loading,
                 ) { Text(when (state.authMode) { 0 -> "登录"; 1 -> "注册账号"; else -> "使用验证码登录" }) }
+                if (state.authMode == 1) {
+                    OutlinedButton(model::resetPassword, Modifier.fillMaxWidth().padding(top = 10.dp), enabled = !state.loading) {
+                        Text("已有账号，重置密码")
+                    }
+                }
             }
         }
         StatusText(state)
@@ -92,15 +106,27 @@ private fun LoginScreen(model: ConnectorViewModel) {
 @Composable
 private fun ChatScreen(model: ConnectorViewModel) {
     val state = model.state
+    val context = LocalContext.current
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Column { Text("GPT-5.6", fontWeight = FontWeight.SemiBold); Text(state.session?.profile?.email.orEmpty(), style = MaterialTheme.typography.labelSmall, color = Color.Gray) } },
-                actions = {
-                    IconButton(model::newConversation, enabled = !state.loading) { Icon(Icons.Default.Add, "新建会话") }
-                    TextButton(model::logout, enabled = !state.loading) { Text("退出") }
-                },
-            )
+            Column {
+                UpdateNotice(state, model::installUpdate)
+                TopAppBar(
+                    title = { Column { Text("GPT-5.6", fontWeight = FontWeight.SemiBold); Text(state.session?.profile?.email.orEmpty(), style = MaterialTheme.typography.labelSmall, color = Color.Gray) } },
+                    actions = {
+                        IconButton(onClick = {
+                            val text = state.messages.joinToString("\n\n") { message ->
+                                "${if (message.role == "user") "我" else "GPT-5.6"}：${message.content}"
+                            }
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("当前对话", text))
+                            Toast.makeText(context, "已复制当前对话", Toast.LENGTH_SHORT).show()
+                        }, enabled = state.messages.isNotEmpty()) { Icon(Icons.Default.ContentCopy, "复制当前对话") }
+                        IconButton(model::newConversation, enabled = !state.loading) { Icon(Icons.Default.Add, "新建会话") }
+                        TextButton(model::logout, enabled = !state.loading) { Text("退出") }
+                    },
+                )
+            }
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
@@ -122,6 +148,23 @@ private fun ChatScreen(model: ConnectorViewModel) {
                     Icon(Icons.AutoMirrored.Filled.Send, "发送")
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun UpdateNotice(state: ConnectorUiState, onUpdate: () -> Unit) {
+    val update = state.availableUpdate ?: return
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF4E5)),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("发现新版本 ${update.version}", fontWeight = FontWeight.SemiBold, color = Color(0xFF7A2E0E))
+                Text("安装后 Android 会自动替换旧版本", style = MaterialTheme.typography.bodySmall, color = Color(0xFF9A3412))
+            }
+            Button(onUpdate, enabled = !state.loading) { Text("立即更新") }
         }
     }
 }
