@@ -76,7 +76,7 @@ function landingPage(userAgent = ""): string {
 </head>
 <body><main>
   <header class="topbar"><div class="brand"><div class="brand-mark" aria-hidden="true">›_</div><div class="brand-name">泺栋 Chat</div></div><div class="status"><span class="dot"></span><span class="status-text">服务正常</span></div></header>
-  <section class="hero"><h1>更轻量的独立<br>GPT 对话客户端</h1><p class="lead">使用邮箱账号直接登录，<strong>无需安装官方客户端，也无需配置 API Key</strong>。打开软件，只需开始对话。</p></section>
+  <section class="hero"><h1>更轻量的独立<br>GPT 对话客户端</h1><p class="lead">使用邮箱账号直接登录，<strong>无需安装官方客户端，也无需配置 API Key</strong>。打开软件，即可开始对话。</p></section>
   <section class="primary-area" aria-label="推荐下载"><a class="primary-download" href="${recommended.href}"><span>${recommended.label}</span><span class="arrow" aria-hidden="true">→</span></a><div class="release-meta"><strong>${recommended.meta}</strong><span>${recommendation}</span></div></section>
   <div class="trust" aria-label="产品特性"><div class="trust-item"><span class="trust-icon">✓</span>对话仅存本机</div><div class="trust-item"><span class="trust-icon">✓</span>SHA-256 安全校验</div><div class="trust-item"><span class="trust-icon">↻</span>支持自动更新</div></div>
   <details id="downloads"><summary>其他平台与便携版</summary><div class="download-list"><a class="download-option" href="https://oss.520skx.com/latest/LuodongChat-Setup.exe"><strong>Windows 安装版 →</strong><span>适合大多数用户，含桌面快捷方式与自动更新 · 约 58 MB</span></a><a class="download-option" href="https://oss.520skx.com/latest/LuodongChat-portable.zip"><strong>Windows 便携版 →</strong><span>无需安装，解压即用，数据保存在软件目录 · 约 59 MB</span></a><a class="download-option" href="https://oss.520skx.com/latest/LuodongChat.apk"><strong>Android APK →</strong><span>适用于 Android 10 及以上设备 · 约 2.4 MB</span></a></div></details>
