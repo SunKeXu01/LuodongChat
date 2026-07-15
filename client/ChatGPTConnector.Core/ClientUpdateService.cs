@@ -27,7 +27,7 @@ public sealed class ClientUpdateService(HttpClient http)
         return new(version.TrimStart('v'), executable, checksum);
     }
 
-    public async Task DownloadAndScheduleAsync(ClientUpdate update, string currentExecutable, CancellationToken cancellationToken = default)
+    public async Task DownloadAndScheduleAsync(ClientUpdate update, string currentExecutable, int currentProcessId, CancellationToken cancellationToken = default)
     {
         var directory = Path.Combine(Path.GetTempPath(), $"ChatGPTConnector-update-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
@@ -43,17 +43,37 @@ public sealed class ClientUpdateService(HttpClient http)
             throw new InvalidDataException("更新文件完整性校验失败，已取消安装。");
         }
         var script = Path.Combine(directory, "install-update.cmd");
+        await File.WriteAllTextAsync(script, BuildInstallScript(downloaded, currentExecutable, currentProcessId), new UTF8Encoding(false), cancellationToken);
+        Process.Start(new ProcessStartInfo(script) { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden });
+    }
+
+    internal static string BuildInstallScript(string downloaded, string currentExecutable, int currentProcessId)
+    {
         var escapedSource = downloaded.Replace("%", "%%");
         var escapedTarget = currentExecutable.Replace("%", "%%");
-        await File.WriteAllTextAsync(script, $"""
+        return $"""
             @echo off
-            timeout /t 2 /nobreak >nul
-            copy /y "{escapedSource}" "{escapedTarget}" >nul
-            if errorlevel 1 exit /b 1
-            start "" "{escapedTarget}"
+            setlocal
+            :wait_for_exit
+            tasklist /FI "PID eq {currentProcessId}" /NH 2>nul | findstr /R /C:"[ ]{currentProcessId}[ ]" >nul
+            if not errorlevel 1 (
+              timeout /t 1 /nobreak >nul
+              goto wait_for_exit
+            )
+            set "source={escapedSource}"
+            set "target={escapedTarget}"
+            set "backup={escapedTarget}.previous"
+            del /f /q "%backup%" >nul 2>&1
+            if exist "%target%" move /y "%target%" "%backup%" >nul
+            move /y "%source%" "%target%" >nul
+            if errorlevel 1 (
+              if exist "%backup%" move /y "%backup%" "%target%" >nul
+              exit /b 1
+            )
+            start "" "%target%"
+            del /f /q "%backup%" >nul 2>&1
             del "%~f0"
-            """, new UTF8Encoding(false), cancellationToken);
-        Process.Start(new ProcessStartInfo(script) { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden });
+            """;
     }
 
     internal static Version NormalizeVersion(string value)

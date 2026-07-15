@@ -54,6 +54,7 @@ public partial class MainWindow : Window
 
     private async Task InitializeAsync()
     {
+        await CheckForUpdatesAsync(true);
         _session = _sessionStore.Load();
         if (_session is not null)
         {
@@ -66,7 +67,6 @@ public partial class MainWindow : Window
                 await StartConnectionAsync();
                 await LoadChatAsync();
                 _sessionTimer.Start();
-                await CheckForUpdatesAsync(true);
                 return;
             }
             _sessionStore.Clear();
@@ -104,16 +104,39 @@ public partial class MainWindow : Window
 
     private async void RegisterButton_OnClick(object sender, RoutedEventArgs e)
     {
-        if (!TryNormalizeEmail(RegisterEmailInput, out var email)) return;
-        var password = RegisterPasswordInput.Password;
-        if (!PasswordPolicy.IsValid(password)) { MessageBox.Show(PasswordPolicy.Requirement, "密码格式不正确", MessageBoxButton.OK, MessageBoxImage.Information); return; }
-        if (!string.Equals(password, RegisterConfirmPasswordInput.Password, StringComparison.Ordinal)) { MessageBox.Show("两次输入的密码不一致。", "请检查密码"); return; }
-        var code = RegisterCodeInput.Text.Trim();
-        if (code.Length != 6 || !code.All(char.IsDigit)) { MessageBox.Show("请输入邮件中的 6 位验证码。", "验证码不正确"); return; }
+        if (!TryGetRegistrationInput(out var email, out var password, out var code)) return;
         await RunExclusiveAsync(async () => {
             try { await CompleteLoginAsync(await _accounts.RegisterAsync(GatewayUri, email, password, code)); RegisterCodeInput.Clear(); }
+            catch (AccountApiException error) when (error.Code == "account_already_registered")
+            {
+                MessageBox.Show("该邮箱已经注册，请返回密码登录；如果忘记密码，可点击“已有账号，重置密码”。", "账号已存在", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
             catch (Exception error) { MessageBox.Show(error.Message, "注册失败", MessageBoxButton.OK, MessageBoxImage.Warning); }
         });
+    }
+
+    private async void ResetPasswordButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetRegistrationInput(out var email, out var password, out var code)) return;
+        await RunExclusiveAsync(async () => {
+            try
+            {
+                await CompleteLoginAsync(await _accounts.ResetPasswordAsync(GatewayUri, email, password, code));
+                RegisterCodeInput.Clear();
+                MessageBox.Show("密码已重置并完成登录。", "重置成功", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception error) { MessageBox.Show(error.Message, "重置失败", MessageBoxButton.OK, MessageBoxImage.Warning); }
+        });
+    }
+
+    private bool TryGetRegistrationInput(out string email, out string password, out string code)
+    {
+        email = ""; password = RegisterPasswordInput.Password; code = RegisterCodeInput.Text.Trim();
+        if (!TryNormalizeEmail(RegisterEmailInput, out email)) return false;
+        if (!PasswordPolicy.IsValid(password)) { MessageBox.Show(PasswordPolicy.Requirement, "密码格式不正确", MessageBoxButton.OK, MessageBoxImage.Information); return false; }
+        if (!string.Equals(password, RegisterConfirmPasswordInput.Password, StringComparison.Ordinal)) { MessageBox.Show("两次输入的密码不一致。", "请检查密码"); return false; }
+        if (code.Length != 6 || !code.All(char.IsDigit)) { MessageBox.Show("请输入邮件中的 6 位验证码。", "验证码不正确"); return false; }
+        return true;
     }
 
     private async void CodeLoginButton_OnClick(object sender, RoutedEventArgs e)
@@ -348,12 +371,17 @@ public partial class MainWindow : Window
         });
     }
 
-    private async void UpdateButton_OnClick(object sender, RoutedEventArgs e)
+    private async void UpdateButton_OnClick(object sender, RoutedEventArgs e) => await RunUpdateAsync();
+
+    private async void GlobalUpdateButton_OnClick(object sender, RoutedEventArgs e) => await RunUpdateAsync();
+
+    private async Task RunUpdateAsync()
     {
         await RunExclusiveAsync(async () => {
             if (_availableUpdate is null) { await CheckForUpdatesAsync(false); return; }
-            if (MessageBox.Show($"发现新版本 {_availableUpdate.Version}，立即更新？", "客户端更新", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
-            await _updates.DownloadAndScheduleAsync(_availableUpdate, Environment.ProcessPath!);
+            if (MessageBox.Show($"发现新版本 {_availableUpdate.Version}，更新时会替换并删除当前旧版本，是否继续？", "客户端更新", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+            GlobalUpdateButton.Content = "正在下载…";
+            await _updates.DownloadAndScheduleAsync(_availableUpdate, Environment.ProcessPath!, Environment.ProcessId);
             ExitApplication();
         });
     }
@@ -366,6 +394,8 @@ public partial class MainWindow : Window
             _availableUpdate = await _updates.CheckAsync(version);
             UpdateButton.Content = _availableUpdate is null ? "检查客户端更新" : "立即更新";
             UpdateText.Text = _availableUpdate is null ? (silent ? "" : "当前已是最新版本") : $"发现新版本：{_availableUpdate.Version}";
+            UpdateBanner.Visibility = _availableUpdate is null ? Visibility.Collapsed : Visibility.Visible;
+            GlobalUpdateText.Text = _availableUpdate is null ? "" : $"版本 {_availableUpdate.Version} 已发布，更新后旧版本将自动删除。";
         }
         catch (Exception error) { if (!silent) MessageBox.Show(error.Message, "检查更新失败"); }
     }

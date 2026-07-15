@@ -61,6 +61,26 @@ test("rejects malformed account email before requesting delivery", async (t) => 
   assert.equal(deliveries, 0);
 });
 
+test("returns a clear conflict when registering an existing account", async (t) => {
+  const config: GatewayConfig = {
+    port: 0, upstreamBaseUrl: "https://upstream.invalid", upstreamApiKey: "unused", upstreamApiKeys: ["unused"],
+    upstreamResponsesPath: "/responses", gatewayKeyHashes: new Set(), requestsPerMinute: 10,
+    maxConcurrentRequests: 2, upstreamTimeoutMs: 5_000,
+  };
+  const enrollmentService = {
+    registerWithPassword: async () => ({ status: "already_registered" }),
+  } as unknown as EnrollmentService;
+  const gateway = createGatewayServer(config, { enrollmentService });
+  const port = await listen(gateway);
+  t.after(() => gateway.close());
+  const response = await fetch(`http://127.0.0.1:${port}/account/register`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "user@example.com", password: "Secure123", code: "123456" }),
+  });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json() as { error: { code: string } }).error.code, "account_already_registered");
+});
+
 test("authenticates and proxies a Responses request", async (t) => {
   const upstream = createServer(async (req, res) => {
     assert.equal(req.url, "/responses");

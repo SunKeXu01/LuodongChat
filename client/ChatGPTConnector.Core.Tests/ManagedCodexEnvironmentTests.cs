@@ -6,6 +6,15 @@ namespace ChatGPTConnector.Core.Tests;
 public sealed class ManagedCodexEnvironmentTests
 {
     [Fact]
+    public void ManagedCodexPathStoresConfigurationAtTheLinkedDirectoryRoot()
+    {
+        var managed = Path.Combine(Path.GetTempPath(), $"connector-managed-{Guid.NewGuid():N}");
+        var paths = new CodexPaths(managed, HomeIsCodexDirectory: true);
+        Assert.Equal(Path.Combine(managed, "config.toml"), paths.ConfigPath);
+        Assert.Equal(Path.Combine(managed, "auth.json"), paths.AuthPath);
+    }
+
+    [Fact]
     public void CreatesAndRemovesAConfigurationLinkWithoutDeletingItsTarget()
     {
         var root = Path.Combine(Path.GetTempPath(), $"connector-link-{Guid.NewGuid():N}");

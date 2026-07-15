@@ -6,6 +6,10 @@ namespace ChatGPTConnector.Core;
 
 public sealed record AccountProfile(string Id, string Email, string Nickname, string? AvatarMediaType, string? AvatarBase64, long BalanceMicrounits);
 public sealed record AccountSession(string AccessToken, AccountProfile Profile);
+public sealed class AccountApiException(string code, string message) : InvalidOperationException(message)
+{
+    public string Code { get; } = code;
+}
 
 public sealed class AccountClient(HttpClient http)
 {
@@ -30,6 +34,12 @@ public sealed class AccountClient(HttpClient http)
     public async Task<AccountSession> RegisterAsync(Uri gateway, string email, string password, string code, CancellationToken cancellationToken = default)
     {
         using var response = await http.PostAsJsonAsync(new Uri(gateway, "/account/register"), new { email, password, code }, cancellationToken);
+        return await ParseSessionAsync(response, cancellationToken);
+    }
+
+    public async Task<AccountSession> ResetPasswordAsync(Uri gateway, string email, string password, string code, CancellationToken cancellationToken = default)
+    {
+        using var response = await http.PostAsJsonAsync(new Uri(gateway, "/account/password/reset"), new { email, password, code }, cancellationToken);
         return await ParseSessionAsync(response, cancellationToken);
     }
 
@@ -86,8 +96,10 @@ public sealed class AccountClient(HttpClient http)
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         try
         {
-            var message = JsonDocument.Parse(body).RootElement.GetProperty("error").GetProperty("message").GetString();
-            throw new InvalidOperationException(message ?? $"服务器返回错误 {(int)response.StatusCode}");
+            var error = JsonDocument.Parse(body).RootElement.GetProperty("error");
+            var code = error.TryGetProperty("code", out var codeValue) ? codeValue.GetString() : null;
+            var message = error.TryGetProperty("message", out var messageValue) ? messageValue.GetString() : null;
+            throw new AccountApiException(code ?? "server_error", message ?? $"服务器返回错误 {(int)response.StatusCode}");
         }
         catch (JsonException) { throw new InvalidOperationException($"服务器返回错误 {(int)response.StatusCode}"); }
     }

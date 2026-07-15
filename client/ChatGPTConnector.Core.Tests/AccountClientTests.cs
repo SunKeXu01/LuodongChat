@@ -30,13 +30,32 @@ public sealed class AccountClientTests
         Assert.Equal("/account/login", handler.RequestUri?.AbsolutePath);
     }
 
-    private sealed class StubHandler(string responseBody) : HttpMessageHandler
+    [Fact]
+    public async Task RegistrationConflictPreservesTheServerErrorCode()
+    {
+        var handler = new StubHandler("""{"error":{"code":"account_already_registered","message":"该邮箱已注册"}}""", HttpStatusCode.Conflict);
+        var error = await Assert.ThrowsAsync<AccountApiException>(() => new AccountClient(new HttpClient(handler)).RegisterAsync(
+            new Uri("https://gateway.example"), "user@example.com", "Secure123", "123456"));
+        Assert.Equal("account_already_registered", error.Code);
+    }
+
+    [Fact]
+    public async Task PasswordResetPostsToDedicatedEndpoint()
+    {
+        var handler = new StubHandler("""
+            {"accessToken":"usr_test","profile":{"id":"user-id","email":"user@example.com","nickname":"用户","avatarMediaType":null,"avatarBase64":null,"balanceMicrounits":0}}
+            """);
+        await new AccountClient(new HttpClient(handler)).ResetPasswordAsync(new Uri("https://gateway.example"), "user@example.com", "Secure123", "123456");
+        Assert.Equal("/account/password/reset", handler.RequestUri?.AbsolutePath);
+    }
+
+    private sealed class StubHandler(string responseBody, HttpStatusCode statusCode = HttpStatusCode.OK) : HttpMessageHandler
     {
         public Uri? RequestUri { get; private set; }
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             RequestUri = request.RequestUri;
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(responseBody, Encoding.UTF8, "application/json") });
+            return Task.FromResult(new HttpResponseMessage(statusCode) { Content = new StringContent(responseBody, Encoding.UTF8, "application/json") });
         }
     }
 }

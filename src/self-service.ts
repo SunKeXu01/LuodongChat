@@ -287,6 +287,22 @@ export class EnrollmentService {
     const passwordHash = password ? await PasswordHasher.hash(password) : undefined;
     return this.issueSession(email, passwordHash);
   }
+  async registerWithPassword(email: string, code: string, password: string): Promise<
+    { status: "authenticated"; accessToken: string; profile: AccountProfile }
+    | { status: "already_registered" | "invalid" | "expired" | "locked" | "disabled" }
+  > {
+    const identityHash = EnrollmentService.digest(email);
+    if (await this.repository.getPasswordCredential(identityHash)) return { status: "already_registered" };
+    return this.verifyAndLogin(email, code, password);
+  }
+  async resetPassword(email: string, code: string, password: string): Promise<
+    { status: "authenticated"; accessToken: string; profile: AccountProfile }
+    | { status: "not_registered" | "invalid" | "expired" | "locked" | "disabled" }
+  > {
+    const identityHash = EnrollmentService.digest(email);
+    if (!await this.repository.getPasswordCredential(identityHash)) return { status: "not_registered" };
+    return this.verifyAndLogin(email, code, password);
+  }
   async loginWithPassword(email: string, password: string): Promise<
     { status: "authenticated"; accessToken: string; profile: AccountProfile }
     | { status: "invalid" | "locked" | "disabled" }

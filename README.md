@@ -24,14 +24,14 @@
 - [GitHub Releases](https://github.com/SunKeXu01/ChatGPTConnector/releases)
 - [直接下载最新 EXE](https://520skx.com/client/download/ChatGPTConnector.exe)
 
-Release 中的 Windows EXE、ZIP、Android APK 和各自校验文件均包含版本号，例如 `ChatGPTConnector-0.1.0-preview.17-win-x64.exe` 与 `ChatGPTConnector-0.1.0-preview.17-android.apk`。
+Release 中的 Windows EXE、ZIP、Android APK 和各自校验文件均包含版本号，例如 `ChatGPTConnector-0.1.0-preview.18-win-x64.exe` 与 `ChatGPTConnector-0.1.0-preview.18-android.apk`。
 
 当前预览版尚未进行代码签名。如果 Windows 显示“Windows 已保护你的电脑”，请确认文件来自本仓库或上述下载地址，然后点击“更多信息”→“仍要运行”。
 
 ## 使用方式
 
 1. 完全退出正在运行的 ChatGPT 或 Codex。
-2. 首次使用时进入“注册 / 设置密码”，输入有效邮箱、密码并获取 6 位验证码。
+2. 首次使用时进入“注册 / 重置密码”，输入有效邮箱、密码并获取 6 位验证码。邮箱已注册时客户端会明确提醒，可直接登录或重置密码。
 3. 完成注册后可直接使用邮箱和密码登录；忘记密码时重新验证邮箱即可设置新密码。
 4. 登录成功后，连接器自动创建独立的托管 Codex 环境、将默认 `.codex` 目录联接到该环境并启动本地代理。
 5. 若 ChatGPT 或 Codex 已经运行，请重新启动一次。
@@ -49,7 +49,7 @@ Android 客户端采用 Kotlin 与 Jetpack Compose，支持 Android 10 及以上
 
 ## 自动更新
 
-客户端启动时自动检查新版本。更新文件仅从 `https://520skx.com` 下载，并在替换程序前校验 SHA-256。
+客户端启动时会在登录首页检查并提示新版本。更新文件仅从 `https://520skx.com` 下载并校验 SHA-256；客户端退出后，更新程序会替换并删除旧版本，再启动新版本。
 
 ## 服务信息
 

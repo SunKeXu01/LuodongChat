@@ -37,7 +37,7 @@
     </Border>
 
     <Grid Grid.Column="1" Margin="36,26,36,28">
-      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
       <DockPanel LastChildFill="False">
         <StackPanel DockPanel.Dock="Left">
           <TextBlock Text="账户中心" FontSize="24" FontWeight="SemiBold"/>
@@ -48,7 +48,19 @@
         </Border>
       </DockPanel>
 
-      <Border x:Name="LoginPanel" Grid.Row="1" Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+      <Border x:Name="UpdateBanner" Grid.Row="1" Visibility="Collapsed" Background="#FFF7E8" BorderBrush="#F7B955"
+              BorderThickness="1" CornerRadius="10" Padding="14,11" Margin="0,18,0,0">
+        <DockPanel LastChildFill="True">
+          <Button x:Name="GlobalUpdateButton" DockPanel.Dock="Right" Content="立即更新" MinWidth="96" Height="36"
+                  Margin="16,0,0,0" Click="GlobalUpdateButton_OnClick"/>
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="发现客户端新版本" FontWeight="SemiBold" Foreground="#7A2E0E"/>
+            <TextBlock x:Name="GlobalUpdateText" Foreground="#9A3412" Margin="0,3,0,0" TextWrapping="Wrap"/>
+          </StackPanel>
+        </DockPanel>
+      </Border>
+
+      <Border x:Name="LoginPanel" Grid.Row="2" Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
               CornerRadius="14" Padding="30" MaxWidth="500" VerticalAlignment="Center" HorizontalAlignment="Center">
         <StackPanel>
           <TextBlock Text="欢迎使用" FontSize="25" FontWeight="SemiBold" HorizontalAlignment="Center"/>
@@ -61,10 +73,10 @@
                 <TextBlock Text="密码" Style="{StaticResource FieldLabel}"/>
                 <PasswordBox x:Name="LoginPasswordInput" MaxLength="128"/>
                 <Button x:Name="PasswordLoginButton" Content="登录" Height="44" Margin="0,18,0,0" Click="PasswordLoginButton_OnClick"/>
-                <TextBlock Text="忘记密码？切换到“注册 / 设置密码”，验证邮箱后重新设置。" Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,12,0,0"/>
+                <TextBlock Text="忘记密码？切换到“注册 / 重置密码”，验证邮箱后重新设置。" Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,12,0,0"/>
               </StackPanel>
             </TabItem>
-            <TabItem Header="注册 / 设置密码">
+            <TabItem Header="注册 / 重置密码">
               <StackPanel Margin="4,12,4,2">
                 <TextBlock Text="邮箱" Style="{StaticResource FieldLabel}"/>
                 <TextBox x:Name="RegisterEmailInput" MaxLength="254"/>
@@ -78,7 +90,8 @@
                   <TextBox x:Name="RegisterCodeInput" MaxLength="6"/>
                   <Button x:Name="RegisterCodeButton" Grid.Column="1" Content="获取验证码" Style="{StaticResource SecondaryButton}" Margin="10,0,0,0" Click="RegisterCodeButton_OnClick"/>
                 </Grid>
-                <Button x:Name="RegisterButton" Content="注册 / 保存新密码" Height="44" Margin="0,18,0,0" Click="RegisterButton_OnClick"/>
+                <Button x:Name="RegisterButton" Content="注册新账号" Height="44" Margin="0,18,0,0" Click="RegisterButton_OnClick"/>
+                <Button x:Name="ResetPasswordButton" Content="已有账号，重置密码" Height="40" Margin="0,10,0,0" Style="{StaticResource SecondaryButton}" Click="ResetPasswordButton_OnClick"/>
               </StackPanel>
             </TabItem>
             <TabItem Header="验证码登录">
@@ -99,7 +112,7 @@
         </StackPanel>
       </Border>
 
-      <TabControl x:Name="AccountPanel" Grid.Row="1" Margin="0,20,0,0" Visibility="Collapsed" Background="White" BorderBrush="{StaticResource BorderBrush}">
+      <TabControl x:Name="AccountPanel" Grid.Row="2" Margin="0,20,0,0" Visibility="Collapsed" Background="White" BorderBrush="{StaticResource BorderBrush}">
         <TabItem Header="首页">
           <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="34,34" MaxWidth="560" HorizontalAlignment="Center">

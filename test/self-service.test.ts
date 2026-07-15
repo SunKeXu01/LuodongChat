@@ -6,15 +6,17 @@ class MemoryEnrollmentRepository implements EnrollmentRepository {
   codeHash = "";
   identityHash = "";
   passwordHash: string | null = null;
+  registered = false;
   failures = 0;
   async createChallenge(identityHash: string, codeHash: string): Promise<"created"> { this.identityHash = identityHash; this.codeHash = codeHash; return "created"; }
   async cancelLatestChallenge(): Promise<void> { this.codeHash = ""; }
   async verifyChallenge(identityHash: string, codeHash: string): Promise<"verified" | "invalid"> { return identityHash === this.identityHash && codeHash === this.codeHash ? "verified" : "invalid"; }
   async login(_identityHash: string, email: string, _sessionHash?: string, _keyHash?: string, _keyPrefix?: string, _defaults?: unknown, passwordHash?: string): Promise<import("../src/self-service.js").AccountProfile | null> {
+    this.registered = true;
     if (passwordHash) this.passwordHash = passwordHash;
     return { id: "user", email, nickname: "user", avatarMediaType: null, avatarBase64: null, balanceMicrounits: 0 };
   }
-  async getPasswordCredential(): Promise<{ passwordHash: string | null; lockedUntil: Date | null }> { return { passwordHash: this.passwordHash, lockedUntil: null }; }
+  async getPasswordCredential(): Promise<{ passwordHash: string | null; lockedUntil: Date | null } | null> { return this.registered ? { passwordHash: this.passwordHash, lockedUntil: null } : null; }
   async recordPasswordFailure(): Promise<void> { this.failures += 1; }
   async clearPasswordFailures(): Promise<void> { this.failures = 0; }
   async authenticate(): Promise<null> { return null; }
@@ -87,11 +89,27 @@ test("registers a password verifier and supports password login without another 
   const mailer = new MemoryMailer();
   const service = new EnrollmentService(repository, mailer, defaults);
   await service.requestCode("user@example.com", "ip");
-  const registered = await service.verifyAndLogin("user@example.com", mailer.code, "Secure123");
+  const registered = await service.registerWithPassword("user@example.com", mailer.code, "Secure123");
   assert.equal(registered.status, "authenticated");
   assert.match(repository.passwordHash ?? "", /^v1\$16384\$8\$1\$/);
   assert.equal((repository.passwordHash ?? "").includes("Secure123"), false);
   assert.equal((await service.loginWithPassword("user@example.com", "Secure123")).status, "authenticated");
   assert.equal((await service.loginWithPassword("user@example.com", "Wrong123")).status, "invalid");
   assert.equal(repository.failures, 1);
+});
+
+test("does not overwrite an existing account during registration", async () => {
+  const repository = new MemoryEnrollmentRepository();
+  repository.registered = true;
+  repository.passwordHash = "existing-verifier";
+  const service = new EnrollmentService(repository, new MemoryMailer(), defaults);
+  assert.deepEqual(await service.registerWithPassword("user@example.com", "123456", "Replacement123"), { status: "already_registered" });
+  assert.equal(repository.passwordHash, "existing-verifier");
+});
+
+test("does not create an account through the password reset flow", async () => {
+  const repository = new MemoryEnrollmentRepository();
+  const service = new EnrollmentService(repository, new MemoryMailer(), defaults);
+  assert.deepEqual(await service.resetPassword("user@example.com", "123456", "Secure123"), { status: "not_registered" });
+  assert.equal(repository.registered, false);
 });

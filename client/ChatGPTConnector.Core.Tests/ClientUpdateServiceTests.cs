@@ -23,6 +23,16 @@ public sealed class ClientUpdateServiceTests
         Assert.Null(await new ClientUpdateService(new HttpClient(new StubHandler(json))).CheckAsync("0.1.0-preview.2"));
     }
 
+    [Fact]
+    public void InstallerWaitsForExitAndDeletesThePreviousExecutable()
+    {
+        var script = ClientUpdateService.BuildInstallScript(@"C:\Temp\new.exe", @"C:\Apps\ChatGPTConnector.exe", 4321);
+        Assert.Contains("tasklist /FI \"PID eq 4321\"", script);
+        Assert.Contains("move /y \"%target%\" \"%backup%\"", script);
+        Assert.Contains("del /f /q \"%backup%\"", script);
+        Assert.Contains("start \"\" \"%target%\"", script);
+    }
+
     private sealed class StubHandler(string json) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>

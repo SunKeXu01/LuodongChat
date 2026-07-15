@@ -81,7 +81,7 @@ private fun LoginScreen(model: ConnectorViewModel) {
                 Button(
                     onClick = when (state.authMode) { 0 -> model::passwordLogin; 1 -> model::register; else -> model::codeLogin },
                     modifier = Modifier.fillMaxWidth().padding(top = 16.dp), enabled = !state.loading,
-                ) { Text(when (state.authMode) { 0 -> "登录"; 1 -> "注册 / 设置密码"; else -> "使用验证码登录" }) }
+                ) { Text(when (state.authMode) { 0 -> "登录"; 1 -> "注册账号"; else -> "使用验证码登录" }) }
             }
         }
         StatusText(state)

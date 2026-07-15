@@ -1,8 +1,8 @@
 namespace ChatGPTConnector.Core;
 
-public sealed record CodexPaths(string HomeDirectory)
+public sealed record CodexPaths(string HomeDirectory, bool HomeIsCodexDirectory = false)
 {
-    public string CodexDirectory => Path.Combine(HomeDirectory, ".codex");
+    public string CodexDirectory => HomeIsCodexDirectory ? HomeDirectory : Path.Combine(HomeDirectory, ".codex");
     public string ConfigPath => Path.Combine(CodexDirectory, "config.toml");
     public string AuthPath => Path.Combine(CodexDirectory, "auth.json");
 

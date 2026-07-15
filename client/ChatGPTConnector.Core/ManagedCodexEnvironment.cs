@@ -28,7 +28,7 @@ public sealed class ManagedCodexEnvironment
         var config = File.Exists(sourceConfig) ? await File.ReadAllTextAsync(sourceConfig) : string.Empty;
         var auth = File.Exists(sourceAuth) ? await File.ReadAllTextAsync(sourceAuth) : "{}";
         var plan = new CodexConfigPlanner().CreatePlan(config, auth, new ConnectorSettings(localGateway, localAccessKey));
-        await new CodexConfigInstaller("managed-home").ApplyAsync(new CodexPaths(ManagedHome), plan);
+        await new CodexConfigInstaller("managed-home").ApplyAsync(new CodexPaths(ManagedHome, HomeIsCodexDirectory: true), plan);
 
         var backupPath = PathExists(defaultHome) ? FindAvailableBackupPath(defaultHome) : null;
         var state = new CodexEnvironmentState(previous, ManagedHome, defaultHome, backupPath);
@@ -37,6 +37,9 @@ public sealed class ManagedCodexEnvironment
         {
             if (backupPath is not null) Directory.Move(defaultHome, backupPath);
             CreateManagedLink(defaultHome, ManagedHome);
+            if (!IsLinkTo(defaultHome, ManagedHome) || !File.Exists(Path.Combine(defaultHome, "config.toml"))
+                || !File.Exists(Path.Combine(defaultHome, "auth.json")))
+                throw new InvalidOperationException("Codex 受管配置映射校验失败，原配置将自动恢复。");
             await Task.Run(() => {
                 Environment.SetEnvironmentVariable("CODEX_HOME", ManagedHome, EnvironmentVariableTarget.User);
                 Environment.SetEnvironmentVariable("CODEX_HOME", ManagedHome, EnvironmentVariableTarget.Process);
