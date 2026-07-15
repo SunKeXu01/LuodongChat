@@ -248,7 +248,8 @@ test("serves a safe public landing page", async (t) => {
   assert.equal(response.headers.get("x-frame-options"), "DENY");
   const page = await response.text();
   assert.match(page, /泺栋chat/);
-  assert.match(page, /luodongchat-app\.oss-cn-beijing\.aliyuncs\.com\/latest\/LuodongChat-Setup\.exe/);
+  assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat-Setup\.exe/);
+  assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat-portable\.zip/);
   assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat\.apk/);
   assert.match(page, /github\.com\/SunKeXu01\/LuodongChat\/releases\/latest/);
 });
