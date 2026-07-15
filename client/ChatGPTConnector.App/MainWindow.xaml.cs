@@ -76,34 +76,81 @@ public partial class MainWindow : Window
         ShowLogin();
     }
 
-    private async void LoginCodeButton_OnClick(object sender, RoutedEventArgs e)
+    private async void PasswordLoginButton_OnClick(object sender, RoutedEventArgs e)
     {
-        var email = LoginEmailInput.Text.Trim();
-        if (string.IsNullOrWhiteSpace(email)) { MessageBox.Show("请输入邮箱地址。"); return; }
+        if (!TryNormalizeEmail(LoginEmailInput, out var email)) return;
+        var password = LoginPasswordInput.Password;
+        if (!PasswordPolicy.IsValid(password)) { MessageBox.Show(PasswordPolicy.Requirement, "密码格式不正确", MessageBoxButton.OK, MessageBoxImage.Information); return; }
         await RunExclusiveAsync(async () => {
-            try { await _accounts.RequestCodeAsync(GatewayUri, email); LoginNotice.Text = "验证码已发送，请检查邮箱。"; }
+            try { await CompleteLoginAsync(await _accounts.LoginAsync(GatewayUri, email, password)); }
+            catch (Exception error) { MessageBox.Show(error.Message, "登录失败", MessageBoxButton.OK, MessageBoxImage.Warning); }
+        });
+    }
+
+    private async void RegisterCodeButton_OnClick(object sender, RoutedEventArgs e) =>
+        await SendCodeAsync(RegisterEmailInput);
+
+    private async void CodeLoginSendButton_OnClick(object sender, RoutedEventArgs e) =>
+        await SendCodeAsync(CodeLoginEmailInput);
+
+    private async Task SendCodeAsync(System.Windows.Controls.TextBox emailInput)
+    {
+        if (!TryNormalizeEmail(emailInput, out var email)) return;
+        await RunExclusiveAsync(async () => {
+            try { await _accounts.RequestCodeAsync(GatewayUri, email); AuthNotice.Text = "验证码已发送，请检查邮箱。"; }
             catch (Exception error) { MessageBox.Show(error.Message, "发送失败", MessageBoxButton.OK, MessageBoxImage.Warning); }
         });
     }
 
-    private async void LoginButton_OnClick(object sender, RoutedEventArgs e)
+    private async void RegisterButton_OnClick(object sender, RoutedEventArgs e)
     {
-        var email = LoginEmailInput.Text.Trim();
-        var code = LoginCodeInput.Text.Trim();
-        if (string.IsNullOrWhiteSpace(email) || code.Length != 6) { MessageBox.Show("请输入邮箱和 6 位验证码。"); return; }
+        if (!TryNormalizeEmail(RegisterEmailInput, out var email)) return;
+        var password = RegisterPasswordInput.Password;
+        if (!PasswordPolicy.IsValid(password)) { MessageBox.Show(PasswordPolicy.Requirement, "密码格式不正确", MessageBoxButton.OK, MessageBoxImage.Information); return; }
+        if (!string.Equals(password, RegisterConfirmPasswordInput.Password, StringComparison.Ordinal)) { MessageBox.Show("两次输入的密码不一致。", "请检查密码"); return; }
+        var code = RegisterCodeInput.Text.Trim();
+        if (code.Length != 6 || !code.All(char.IsDigit)) { MessageBox.Show("请输入邮件中的 6 位验证码。", "验证码不正确"); return; }
         await RunExclusiveAsync(async () => {
-            try
-            {
-                _session = await _accounts.VerifyAsync(GatewayUri, email, code);
-                _sessionStore.Save(_session);
-                LoginCodeInput.Clear();
-                ShowAccount(_session.Profile);
-                await StartConnectionAsync();
-                await LoadChatAsync();
-                _sessionTimer.Start();
-            }
+            try { await CompleteLoginAsync(await _accounts.RegisterAsync(GatewayUri, email, password, code)); RegisterCodeInput.Clear(); }
+            catch (Exception error) { MessageBox.Show(error.Message, "注册失败", MessageBoxButton.OK, MessageBoxImage.Warning); }
+        });
+    }
+
+    private async void CodeLoginButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!TryNormalizeEmail(CodeLoginEmailInput, out var email)) return;
+        var code = CodeLoginCodeInput.Text.Trim();
+        if (code.Length != 6 || !code.All(char.IsDigit)) { MessageBox.Show("请输入邮件中的 6 位验证码。", "验证码不正确"); return; }
+        await RunExclusiveAsync(async () => {
+            try { await CompleteLoginAsync(await _accounts.VerifyAsync(GatewayUri, email, code)); CodeLoginCodeInput.Clear(); }
             catch (Exception error) { MessageBox.Show(error.Message, "登录失败", MessageBoxButton.OK, MessageBoxImage.Warning); }
         });
+    }
+
+    private static bool TryNormalizeEmail(System.Windows.Controls.TextBox input, out string email)
+    {
+        if (!EmailAddressValidator.TryNormalize(input.Text, out email))
+        {
+            MessageBox.Show("请输入完整、有效的邮箱地址，例如 name@example.com。不会向无效地址发送邮件。", "邮箱格式不正确", MessageBoxButton.OK, MessageBoxImage.Information);
+            input.Focus();
+            return false;
+        }
+        input.Text = email;
+        return true;
+    }
+
+    private async Task CompleteLoginAsync(AccountSession session)
+    {
+        _session = session;
+        _sessionStore.Save(session);
+        LoginPasswordInput.Clear();
+        RegisterPasswordInput.Clear();
+        RegisterConfirmPasswordInput.Clear();
+        AuthNotice.Text = "";
+        ShowAccount(session.Profile);
+        await StartConnectionAsync();
+        await LoadChatAsync();
+        _sessionTimer.Start();
     }
 
     private async Task StartConnectionAsync()
@@ -252,7 +299,7 @@ public partial class MainWindow : Window
         });
     }
 
-    private void ShowLogin() { AccountPanel.Visibility = Visibility.Collapsed; LoginPanel.Visibility = Visibility.Visible; }
+    private void ShowLogin() { AccountPanel.Visibility = Visibility.Collapsed; LoginPanel.Visibility = Visibility.Visible; AuthNotice.Text = ""; }
     private void ShowAccount(AccountProfile profile) { LoginPanel.Visibility = Visibility.Collapsed; AccountPanel.Visibility = Visibility.Visible; UpdateProfile(profile); }
     private void UpdateProfile(AccountProfile profile)
     {

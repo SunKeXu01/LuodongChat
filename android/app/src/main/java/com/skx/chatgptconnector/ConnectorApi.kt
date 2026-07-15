@@ -15,6 +15,14 @@ class ConnectorApi(private val baseUrl: String = "https://520skx.com") {
         return AccountSession(root.getString("accessToken"), root.getJSONObject("profile").toProfile())
     }
 
+    fun login(email: String, password: String): AccountSession = session(
+        request("POST", "/account/login", body = JSONObject().put("email", email).put("password", password)),
+    )
+
+    fun register(email: String, password: String, code: String): AccountSession = session(
+        request("POST", "/account/register", body = JSONObject().put("email", email).put("password", password).put("code", code)),
+    )
+
     fun profile(token: String): AccountProfile = request("GET", "/account/profile", token).toProfile()
 
     fun logout(token: String) { request("POST", "/account/logout", token) }
@@ -97,6 +105,8 @@ class ConnectorApi(private val baseUrl: String = "https://520skx.com") {
         connection.disconnect()
         throw IllegalStateException(message?.takeIf { it.isNotBlank() } ?: "服务器返回错误 $status")
     }
+
+    private fun session(root: JSONObject) = AccountSession(root.getString("accessToken"), root.getJSONObject("profile").toProfile())
 }
 
 private fun JSONArray.objects() = (0 until length()).map { getJSONObject(it) }

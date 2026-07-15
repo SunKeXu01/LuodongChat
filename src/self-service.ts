@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomInt, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import nodemailer from "nodemailer";
 import { hashGatewayKey } from "./auth.js";
 
@@ -22,7 +22,10 @@ export interface EnrollmentRepository {
   createChallenge(identityHash: string, codeHash: string, ipFingerprint: string): Promise<"created" | "rate_limited">;
   cancelLatestChallenge(identityHash: string): Promise<void>;
   verifyChallenge(identityHash: string, codeHash: string, consume: boolean): Promise<"verified" | "invalid" | "expired" | "locked">;
-  login(identityHash: string, email: string, sessionHash: string, keyHash: string, keyPrefix: string, defaults: SelfServiceKeyDefaults): Promise<AccountProfile | null>;
+  login(identityHash: string, email: string, sessionHash: string, keyHash: string, keyPrefix: string, defaults: SelfServiceKeyDefaults, passwordHash?: string): Promise<AccountProfile | null>;
+  getPasswordCredential(identityHash: string): Promise<{ passwordHash: string | null; lockedUntil: Date | null } | null>;
+  recordPasswordFailure(identityHash: string): Promise<void>;
+  clearPasswordFailures(identityHash: string): Promise<void>;
   authenticate(sessionHash: string): Promise<AccountProfile | null>;
   updateProfile(sessionHash: string, nickname: string): Promise<AccountProfile | null>;
   updateAvatar(sessionHash: string, mediaType: string, dataBase64: string): Promise<AccountProfile | null>;
@@ -98,16 +101,17 @@ export class PostgresEnrollmentRepository implements EnrollmentRepository {
     } finally { client.release(); }
   }
 
-  async login(identityHash: string, email: string, sessionHash: string, keyHash: string, keyPrefix: string, defaults: SelfServiceKeyDefaults): Promise<AccountProfile | null> {
+  async login(identityHash: string, email: string, sessionHash: string, keyHash: string, keyPrefix: string, defaults: SelfServiceKeyDefaults, passwordHash?: string): Promise<AccountProfile | null> {
     const client = await this.db.connect();
     try {
       await client.query("BEGIN");
       const user = await client.query(
-        `INSERT INTO users (identity_hash, email, nickname) VALUES (decode($1, 'hex'), $2, $3)
+        `INSERT INTO users (identity_hash, email, nickname, password_hash) VALUES (decode($1, 'hex'), $2, $3, $4)
          ON CONFLICT (identity_hash) WHERE identity_hash IS NOT NULL
-         DO UPDATE SET email = EXCLUDED.email, nickname = COALESCE(users.nickname, EXCLUDED.nickname), updated_at = now()
+         DO UPDATE SET email = EXCLUDED.email, nickname = COALESCE(users.nickname, EXCLUDED.nickname),
+           password_hash = COALESCE(EXCLUDED.password_hash, users.password_hash), updated_at = now()
          WHERE users.status = 'active'
-         RETURNING id`, [identityHash, email, email.split("@")[0]!.slice(0, 20) || "GPT 用户"],
+         RETURNING id`, [identityHash, email, email.split("@")[0]!.slice(0, 20) || "GPT 用户", passwordHash ?? null],
       );
       if (!user.rows[0]) { await client.query("ROLLBACK"); return null; }
       const userId = String(user.rows[0]!.id);
@@ -133,6 +137,36 @@ export class PostgresEnrollmentRepository implements EnrollmentRepository {
       await client.query("ROLLBACK").catch(() => undefined);
       throw error;
     } finally { client.release(); }
+  }
+
+  async getPasswordCredential(identityHash: string): Promise<{ passwordHash: string | null; lockedUntil: Date | null } | null> {
+    const result = await this.db.query(
+      `SELECT password_hash, password_locked_until FROM users
+       WHERE identity_hash = decode($1, 'hex') AND status = 'active'`, [identityHash],
+    );
+    const row = result.rows[0];
+    return row ? {
+      passwordHash: row.password_hash ? String(row.password_hash) : null,
+      lockedUntil: row.password_locked_until ? new Date(String(row.password_locked_until)) : null,
+    } : null;
+  }
+
+  async recordPasswordFailure(identityHash: string): Promise<void> {
+    await this.db.query(
+      `UPDATE users SET
+         password_failed_attempts = LEAST(5, password_failed_attempts + 1),
+         password_locked_until = CASE WHEN password_failed_attempts + 1 >= 5
+           THEN now() + interval '15 minutes' ELSE password_locked_until END,
+         updated_at = now()
+       WHERE identity_hash = decode($1, 'hex') AND status = 'active'`, [identityHash],
+    );
+  }
+
+  async clearPasswordFailures(identityHash: string): Promise<void> {
+    await this.db.query(
+      `UPDATE users SET password_failed_attempts = 0, password_locked_until = NULL, updated_at = now()
+       WHERE identity_hash = decode($1, 'hex')`, [identityHash],
+    );
   }
 
   async authenticate(sessionHash: string): Promise<AccountProfile | null> {
@@ -208,7 +242,15 @@ export class EnrollmentService {
   constructor(private readonly repository: EnrollmentRepository, private readonly mailer: EnrollmentMailer, private readonly defaults: SelfServiceKeyDefaults) {}
   static normalizeEmail(value: string): string | null {
     const normalized = value.trim().toLowerCase();
-    return /^[^\s@]{1,64}@[^\s@]{1,190}$/.test(normalized) && normalized.length <= 254 ? normalized : null;
+    if (normalized.length > 254 || !/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[a-z0-9.-]{3,189}$/.test(normalized)) return null;
+    const [local, domain] = normalized.split("@");
+    if (!local || !domain || local.startsWith(".") || local.endsWith(".") || local.includes("..") || !domain.includes(".")) return null;
+    const labels = domain.split(".");
+    return labels.every(label => label.length > 0 && label.length <= 63 && !label.startsWith("-") && !label.endsWith("-")) ? normalized : null;
+  }
+  static validatePassword(value: string): string | null {
+    if (value.length < 8 || value.length > 128 || !/[\p{L}]/u.test(value) || !/\d/.test(value)) return null;
+    return value;
   }
   private static digest(value: string): string { return createHash("sha256").update(value).digest("hex"); }
   async requestCode(email: string, ipFingerprint: string): Promise<"sent" | "rate_limited"> {
@@ -223,20 +265,42 @@ export class EnrollmentService {
     }
     return "sent";
   }
-  async verifyAndLogin(email: string, code: string): Promise<
+  private async issueSession(email: string, passwordHash?: string): Promise<
+    { status: "authenticated"; accessToken: string; profile: AccountProfile }
+    | { status: "disabled" }
+  > {
+    const identityHash = EnrollmentService.digest(email);
+    const accessToken = `usr_${randomBytes(32).toString("hex")}`;
+    const internalKey = `gw_${randomBytes(24).toString("hex")}`;
+    const profile = await this.repository.login(
+      identityHash, email, hashGatewayKey(accessToken), hashGatewayKey(internalKey), internalKey.slice(0, 11), this.defaults, passwordHash,
+    );
+    return profile ? { status: "authenticated", accessToken, profile } : { status: "disabled" };
+  }
+  async verifyAndLogin(email: string, code: string, password?: string): Promise<
     { status: "authenticated"; accessToken: string; profile: AccountProfile }
     | { status: "invalid" | "expired" | "locked" | "disabled" }
   > {
     const identityHash = EnrollmentService.digest(email);
     const verified = await this.repository.verifyChallenge(identityHash, EnrollmentService.digest(code), true);
     if (verified !== "verified") return { status: verified };
-    const accessToken = `usr_${randomBytes(32).toString("hex")}`;
-    const internalKey = `gw_${randomBytes(24).toString("hex")}`;
-    const profile = await this.repository.login(
-      identityHash, email, hashGatewayKey(accessToken), hashGatewayKey(internalKey), internalKey.slice(0, 11), this.defaults,
-    );
-    if (!profile) return { status: "disabled" };
-    return { status: "authenticated", accessToken, profile };
+    const passwordHash = password ? await PasswordHasher.hash(password) : undefined;
+    return this.issueSession(email, passwordHash);
+  }
+  async loginWithPassword(email: string, password: string): Promise<
+    { status: "authenticated"; accessToken: string; profile: AccountProfile }
+    | { status: "invalid" | "locked" | "disabled" }
+  > {
+    const identityHash = EnrollmentService.digest(email);
+    const credential = await this.repository.getPasswordCredential(identityHash);
+    if (credential?.lockedUntil && credential.lockedUntil.getTime() > Date.now()) return { status: "locked" };
+    const valid = await PasswordHasher.verify(password, credential?.passwordHash ?? PasswordHasher.dummyHash);
+    if (!credential?.passwordHash || !valid) {
+      if (credential) await this.repository.recordPasswordFailure(identityHash);
+      return { status: "invalid" };
+    }
+    await this.repository.clearPasswordFailures(identityHash);
+    return this.issueSession(email);
   }
 
   authenticate(accessToken: string): Promise<AccountProfile | null> { return this.repository.authenticate(hashGatewayKey(accessToken)); }
@@ -244,4 +308,29 @@ export class EnrollmentService {
   updateProfile(accessToken: string, nickname: string): Promise<AccountProfile | null> { return this.repository.updateProfile(hashGatewayKey(accessToken), nickname); }
   updateAvatar(accessToken: string, mediaType: string, dataBase64: string): Promise<AccountProfile | null> { return this.repository.updateAvatar(hashGatewayKey(accessToken), mediaType, dataBase64); }
   logout(accessToken: string): Promise<void> { return this.repository.logout(hashGatewayKey(accessToken)); }
+}
+
+class PasswordHasher {
+  static readonly dummyHash = "v1$16384$8$1$00000000000000000000000000000000$ca6f114b7866cc8b40b7a4e7e56d67eb8ef1df3d584a39a4fa78aa7652ebd96a";
+  static async hash(password: string): Promise<string> {
+    const salt = randomBytes(16);
+    const derived = await PasswordHasher.derive(password, salt);
+    return `v1$16384$8$1$${salt.toString("hex")}$${derived.toString("hex")}`;
+  }
+  static async verify(password: string, encoded: string): Promise<boolean> {
+    const [version, n, r, p, saltHex, expectedHex] = encoded.split("$");
+    if (version !== "v1" || n !== "16384" || r !== "8" || p !== "1" || !saltHex || !expectedHex) return false;
+    try {
+      const expected = Buffer.from(expectedHex, "hex");
+      const derived = await PasswordHasher.derive(password, Buffer.from(saltHex, "hex"));
+      return expected.length === derived.length && timingSafeEqual(expected, derived);
+    } catch { return false; }
+  }
+  private static async derive(password: string, salt: Buffer): Promise<Buffer> {
+    return await new Promise<Buffer>((resolve, reject) => {
+      scryptCallback(password, salt, 32, { N: 16384, r: 8, p: 1, maxmem: 32 * 1024 * 1024 }, (error, derived) => {
+        if (error) reject(error); else resolve(derived);
+      });
+    });
+  }
 }

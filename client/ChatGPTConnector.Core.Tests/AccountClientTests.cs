@@ -20,9 +20,23 @@ public sealed class AccountClientTests
         Assert.DoesNotContain("GatewayKey", session.GetType().GetProperties().Select(property => property.Name));
     }
 
+    [Fact]
+    public async Task PasswordLoginPostsToDedicatedEndpoint()
+    {
+        var handler = new StubHandler("""
+            {"accessToken":"usr_test","profile":{"id":"user-id","email":"user@example.com","nickname":"用户","avatarMediaType":null,"avatarBase64":null,"balanceMicrounits":0}}
+            """);
+        await new AccountClient(new HttpClient(handler)).LoginAsync(new Uri("https://gateway.example"), "user@example.com", "Secure123");
+        Assert.Equal("/account/login", handler.RequestUri?.AbsolutePath);
+    }
+
     private sealed class StubHandler(string responseBody) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(responseBody, Encoding.UTF8, "application/json") });
+        public Uri? RequestUri { get; private set; }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestUri = request.RequestUri;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(responseBody, Encoding.UTF8, "application/json") });
+        }
     }
 }

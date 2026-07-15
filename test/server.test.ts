@@ -43,6 +43,24 @@ test("serves the public client update manifest and fixed release assets", async 
   assert.equal(await checksum.text(), "abc123\n");
 });
 
+test("rejects malformed account email before requesting delivery", async (t) => {
+  const config: GatewayConfig = {
+    port: 0, upstreamBaseUrl: "https://upstream.invalid", upstreamApiKey: "unused", upstreamApiKeys: ["unused"],
+    upstreamResponsesPath: "/responses", gatewayKeyHashes: new Set(), requestsPerMinute: 10,
+    maxConcurrentRequests: 2, upstreamTimeoutMs: 5_000,
+  };
+  let deliveries = 0;
+  const enrollmentService = { requestCode: async () => { deliveries += 1; return "sent"; } } as unknown as EnrollmentService;
+  const gateway = createGatewayServer(config, { enrollmentService });
+  const port = await listen(gateway);
+  t.after(() => gateway.close());
+  const response = await fetch(`http://127.0.0.1:${port}/account/code`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "user@example" }),
+  });
+  assert.equal(response.status, 400);
+  assert.equal(deliveries, 0);
+});
+
 test("authenticates and proxies a Responses request", async (t) => {
   const upstream = createServer(async (req, res) => {
     assert.equal(req.url, "/responses");

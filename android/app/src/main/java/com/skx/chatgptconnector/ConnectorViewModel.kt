@@ -18,6 +18,9 @@ data class ConnectorUiState(
     val session: AccountSession? = null,
     val email: String = "",
     val code: String = "",
+    val password: String = "",
+    val confirmPassword: String = "",
+    val authMode: Int = 0,
     val input: String = "",
     val messages: List<ChatMessage> = emptyList(),
     val conversationId: String? = null,
@@ -55,21 +58,56 @@ class ConnectorViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun setEmail(value: String) { state = state.copy(email = value, error = null) }
     fun setCode(value: String) { state = state.copy(code = value.filter(Char::isDigit).take(6), error = null) }
+    fun setPassword(value: String) { state = state.copy(password = value.take(128), error = null) }
+    fun setConfirmPassword(value: String) { state = state.copy(confirmPassword = value.take(128), error = null) }
+    fun setAuthMode(value: Int) { state = state.copy(authMode = value, error = null, notice = "") }
     fun setInput(value: String) { state = state.copy(input = value) }
 
     fun requestCode() = runBusy {
-        require(state.email.isNotBlank()) { "请输入邮箱地址" }
-        withContext(Dispatchers.IO) { api.requestCode(state.email.trim()) }
+        val email = normalizedEmail()
+        withContext(Dispatchers.IO) { api.requestCode(email) }
         state = state.copy(notice = "验证码已发送，请检查邮箱")
     }
 
-    fun login() = runBusy {
-        require(state.email.isNotBlank() && state.code.length == 6) { "请输入邮箱和 6 位验证码" }
-        val session = withContext(Dispatchers.IO) { api.verify(state.email.trim(), state.code) }
+    fun passwordLogin() = runBusy {
+        val email = normalizedEmail()
+        require(validPassword(state.password)) { "密码应为 8 至 128 个字符，并同时包含字母和数字" }
+        finishLogin(withContext(Dispatchers.IO) { api.login(email, state.password) })
+    }
+
+    fun register() = runBusy {
+        val email = normalizedEmail()
+        require(validPassword(state.password)) { "密码应为 8 至 128 个字符，并同时包含字母和数字" }
+        require(state.password == state.confirmPassword) { "两次输入的密码不一致" }
+        require(state.code.length == 6) { "请输入邮件中的 6 位验证码" }
+        finishLogin(withContext(Dispatchers.IO) { api.register(email, state.password, state.code) })
+    }
+
+    fun codeLogin() = runBusy {
+        val email = normalizedEmail()
+        require(state.code.length == 6) { "请输入邮件中的 6 位验证码" }
+        finishLogin(withContext(Dispatchers.IO) { api.verify(email, state.code) })
+    }
+
+    private suspend fun finishLogin(session: AccountSession) {
         sessionStore.save(session)
         val sync = withContext(Dispatchers.IO) { api.sync(session.accessToken) }
         applySync(session, sync)
     }
+
+    private fun normalizedEmail(): String {
+        val email = state.email.trim().lowercase()
+        val format = Regex("""^[a-z0-9.!#${'$'}%&'*+/=?^_`{|}~-]{1,64}@[a-z0-9.-]{3,189}${'$'}""")
+        val local = email.substringBeforeLast('@', "")
+        val labels = email.substringAfterLast('@', "").split('.')
+        require(email.length <= 254 && format.matches(email) && !local.startsWith('.') && !local.endsWith('.') && ".." !in local
+            && labels.size > 1 && labels.all { it.isNotEmpty() && it.length <= 63 && !it.startsWith('-') && !it.endsWith('-') }) {
+            "请输入完整、有效的邮箱地址，例如 name@example.com"
+        }
+        return email
+    }
+
+    private fun validPassword(value: String) = value.length in 8..128 && value.any(Char::isLetter) && value.any(Char::isDigit)
 
     fun logout() = runBusy {
         state.session?.let { session -> runCatching { withContext(Dispatchers.IO) { api.logout(session.accessToken) } } }

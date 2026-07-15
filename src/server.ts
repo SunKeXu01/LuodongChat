@@ -173,6 +173,35 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
       if (result.status === "disabled") return json(res, 403, { error: { code: "account_disabled", message: "账号已停用" } });
       return json(res, 401, { error: { code: `verification_${result.status}`, message: "验证码无效或已过期" } });
     }
+    if (req.method === "POST" && req.url === "/account/register" && options.enrollmentService) {
+      const input = await readJsonObject(req);
+      const email = typeof input.email === "string" ? EnrollmentService.normalizeEmail(input.email) : null;
+      const code = typeof input.code === "string" && /^\d{6}$/.test(input.code) ? input.code : null;
+      const password = typeof input.password === "string" ? EnrollmentService.validatePassword(input.password) : null;
+      if (!email) return json(res, 400, { error: { code: "invalid_email", message: "请输入有效的邮箱地址" } });
+      if (!password) return json(res, 400, { error: { code: "invalid_password", message: "密码应为 8 至 128 个字符，并同时包含字母和数字" } });
+      if (!code) return json(res, 400, { error: { code: "invalid_verification_input", message: "请输入 6 位验证码" } });
+      const result = await options.enrollmentService.verifyAndLogin(email, code, password);
+      res.setHeader("cache-control", "no-store");
+      if (result.status === "authenticated") return json(res, 200, result);
+      if (result.status === "disabled") return json(res, 403, { error: { code: "account_disabled", message: "账号已停用" } });
+      return json(res, 401, { error: { code: `verification_${result.status}`, message: "验证码无效或已过期" } });
+    }
+    if (req.method === "POST" && req.url === "/account/login" && options.enrollmentService) {
+      const input = await readJsonObject(req);
+      const email = typeof input.email === "string" ? EnrollmentService.normalizeEmail(input.email) : null;
+      const password = typeof input.password === "string" ? EnrollmentService.validatePassword(input.password) : null;
+      if (!email || !password) return json(res, 400, { error: { code: "invalid_login", message: "邮箱或密码不正确" } });
+      const result = await options.enrollmentService.loginWithPassword(email, password);
+      res.setHeader("cache-control", "no-store");
+      if (result.status === "authenticated") return json(res, 200, result);
+      if (result.status === "disabled") return json(res, 403, { error: { code: "account_disabled", message: "账号已停用" } });
+      if (result.status === "locked") {
+        res.setHeader("retry-after", "900");
+        return json(res, 429, { error: { code: "password_temporarily_locked", message: "密码错误次数过多，请 15 分钟后再试或使用验证码登录" } });
+      }
+      return json(res, 401, { error: { code: "invalid_credentials", message: "邮箱或密码不正确" } });
+    }
     if (req.url?.startsWith("/account/") && options.enrollmentService) {
       const accessToken = extractBearerKey(req.headers.authorization);
       if (!accessToken?.startsWith("usr_")) return json(res, 401, { error: { code: "login_required", message: "请先登录" } });

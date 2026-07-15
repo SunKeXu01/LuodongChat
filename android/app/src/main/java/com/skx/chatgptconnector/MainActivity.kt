@@ -17,6 +17,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 
@@ -34,20 +37,52 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LoginScreen(model: ConnectorViewModel) {
     val state = model.state
-    Column(
-        Modifier.fillMaxSize().padding(horizontal = 28.dp),
-        verticalArrangement = Arrangement.Center,
-    ) {
+    Column(Modifier.fillMaxSize().background(Color(0xFFF4F7FB)).padding(22.dp), verticalArrangement = Arrangement.Center) {
         Text("ChatGPT 连接器", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Text("登录后即可在 Android 与 Windows 设备间同步数据。", color = Color.Gray, modifier = Modifier.padding(top = 8.dp, bottom = 28.dp))
-        OutlinedTextField(state.email, model::setEmail, Modifier.fillMaxWidth(), label = { Text("邮箱") }, enabled = !state.loading, singleLine = true)
-        OutlinedTextField(state.code, model::setCode, Modifier.fillMaxWidth().padding(top = 12.dp), label = { Text("6 位验证码") }, enabled = !state.loading, singleLine = true)
-        Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(model::requestCode, Modifier.weight(1f), enabled = !state.loading) { Text("获取验证码") }
-            Button(model::login, Modifier.weight(1f), enabled = !state.loading) { Text("登录 / 注册") }
+        Text("安全登录并同步 Windows 与 Android 数据", color = Color.Gray, modifier = Modifier.padding(top = 6.dp, bottom = 20.dp))
+        Card(colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(2.dp)) {
+            Column(Modifier.padding(20.dp)) {
+                PrimaryTabRow(selectedTabIndex = state.authMode) {
+                    listOf("密码登录", "注册", "验证码").forEachIndexed { index, title ->
+                        Tab(selected = state.authMode == index, onClick = { model.setAuthMode(index) }, text = { Text(title) })
+                    }
+                }
+                OutlinedTextField(
+                    state.email, model::setEmail, Modifier.fillMaxWidth().padding(top = 18.dp),
+                    label = { Text("邮箱") }, enabled = !state.loading, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                )
+                if (state.authMode != 2) {
+                    OutlinedTextField(
+                        state.password, model::setPassword, Modifier.fillMaxWidth().padding(top = 12.dp),
+                        label = { Text("密码") }, enabled = !state.loading, singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    )
+                }
+                if (state.authMode == 1) {
+                    OutlinedTextField(
+                        state.confirmPassword, model::setConfirmPassword, Modifier.fillMaxWidth().padding(top = 12.dp),
+                        label = { Text("确认密码") }, enabled = !state.loading, singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    )
+                }
+                if (state.authMode != 0) {
+                    OutlinedTextField(
+                        state.code, model::setCode, Modifier.fillMaxWidth().padding(top = 12.dp),
+                        label = { Text("6 位邮箱验证码") }, enabled = !state.loading, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                    OutlinedButton(model::requestCode, Modifier.fillMaxWidth().padding(top = 12.dp), enabled = !state.loading) { Text("获取验证码") }
+                }
+                Button(
+                    onClick = when (state.authMode) { 0 -> model::passwordLogin; 1 -> model::register; else -> model::codeLogin },
+                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp), enabled = !state.loading,
+                ) { Text(when (state.authMode) { 0 -> "登录"; 1 -> "注册 / 设置密码"; else -> "使用验证码登录" }) }
+            }
         }
         StatusText(state)
     }

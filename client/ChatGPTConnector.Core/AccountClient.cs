@@ -18,10 +18,19 @@ public sealed class AccountClient(HttpClient http)
     public async Task<AccountSession> VerifyAsync(Uri gateway, string email, string code, CancellationToken cancellationToken = default)
     {
         using var response = await http.PostAsJsonAsync(new Uri(gateway, "/account/verify"), new { email, code }, cancellationToken);
-        await EnsureSuccessAsync(response, cancellationToken);
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
-        var root = document.RootElement;
-        return new AccountSession(root.GetProperty("accessToken").GetString()!, ParseProfile(root.GetProperty("profile")));
+        return await ParseSessionAsync(response, cancellationToken);
+    }
+
+    public async Task<AccountSession> LoginAsync(Uri gateway, string email, string password, CancellationToken cancellationToken = default)
+    {
+        using var response = await http.PostAsJsonAsync(new Uri(gateway, "/account/login"), new { email, password }, cancellationToken);
+        return await ParseSessionAsync(response, cancellationToken);
+    }
+
+    public async Task<AccountSession> RegisterAsync(Uri gateway, string email, string password, string code, CancellationToken cancellationToken = default)
+    {
+        using var response = await http.PostAsJsonAsync(new Uri(gateway, "/account/register"), new { email, password, code }, cancellationToken);
+        return await ParseSessionAsync(response, cancellationToken);
     }
 
     public async Task<AccountProfile?> GetProfileAsync(Uri gateway, string accessToken, CancellationToken cancellationToken = default)
@@ -62,6 +71,14 @@ public sealed class AccountClient(HttpClient http)
         value.TryGetProperty("avatarMediaType", out var media) && media.ValueKind == JsonValueKind.String ? media.GetString() : null,
         value.TryGetProperty("avatarBase64", out var avatar) && avatar.ValueKind == JsonValueKind.String ? avatar.GetString() : null,
         value.GetProperty("balanceMicrounits").GetInt64());
+
+    private static async Task<AccountSession> ParseSessionAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        await EnsureSuccessAsync(response, cancellationToken);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+        var root = document.RootElement;
+        return new AccountSession(root.GetProperty("accessToken").GetString()!, ParseProfile(root.GetProperty("profile")));
+    }
 
     private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
