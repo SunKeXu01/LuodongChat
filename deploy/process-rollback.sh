@@ -47,7 +47,7 @@ for _ in $(seq 1 30); do
   sleep 2
 done
 [[ "$healthy" == true ]]
-curl --fail --silent --show-error --max-time 15 https://520skx.com/healthz >/dev/null
+curl --fail --silent --show-error --max-time 15 https://luodongchat.com/healthz >/dev/null
 
 psql_command -v request_id="$request_id" -v deployed_image="$rollback_image" -v previous_image="$current_image" >/dev/null <<'SQL'
 UPDATE deployment_control_requests SET status = 'completed', processed_at = now() WHERE id = :'request_id'::uuid;

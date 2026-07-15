@@ -285,10 +285,10 @@ jobs:
       - name: Back up, migrate, and deploy
         run: ssh connector-deploy@8.140.211.162 sudo /usr/bin/env APP_VERSION=${{ github.sha }} /app/chatgpt_connector/deploy/remote-deploy.sh
       - name: Verify public health
-        run: curl --fail --silent --show-error --max-time 15 https://520skx.com/healthz
+        run: curl --fail --silent --show-error --max-time 15 https://luodongchat.com/healthz
 
   publish-client-update:
-    name: Publish client update channel
+    name: Publish latest client packages to OSS
     if: startsWith(github.ref, 'refs/tags/')
     needs: [windows-preview, android-preview]
     runs-on: ubuntu-latest
@@ -301,6 +301,23 @@ jobs:
         with:
           name: LuodongChat-android-preview
           path: release/android
+      - name: Install pinned Alibaba Cloud ossutil
+        run: |
+          curl --fail --silent --show-error --location \
+            https://gosspublic.alicdn.com/ossutil/v2/2.3.0/ossutil-2.3.0-linux-amd64.zip \
+            --output "$RUNNER_TEMP/ossutil.zip"
+          unzip -q "$RUNNER_TEMP/ossutil.zip" -d "$RUNNER_TEMP/ossutil"
+          install -m 755 "$RUNNER_TEMP/ossutil/ossutil-2.3.0-linux-amd64/ossutil" "$RUNNER_TEMP/ossutil-bin"
+      - name: Configure OSS credentials
+        env:
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+        run: |
+          test -n "$OSS_ACCESS_KEY_ID"
+          test -n "$OSS_ACCESS_KEY_SECRET"
+          umask 077
+          printf '[default]\naccessKeyID=%s\naccessKeySecret=%s\nregion=cn-beijing\nendpoint=https://oss-cn-beijing.aliyuncs.com\n' \
+            "$OSS_ACCESS_KEY_ID" "$OSS_ACCESS_KEY_SECRET" > "$RUNNER_TEMP/ossutil.conf"
       - name: Configure pinned SSH identity
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -312,7 +329,7 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
-      - name: Publish verified executable and update manifest
+      - name: Publish verified latest packages and update manifest
         env:
           VERSION: ${{ github.ref_name }}
         run: |
@@ -320,20 +337,37 @@ jobs:
           checksum="$(find release -type f -name 'LuodongChat-*-win-x64.exe.sha256' -print -quit)"
           installer="$(find release -type f -name 'LuodongChat-*-win-x64-setup.exe' -print -quit)"
           installer_checksum="$(find release -type f -name 'LuodongChat-*-win-x64-setup.exe.sha256' -print -quit)"
+          portable="$(find release -type f -name 'LuodongChat-*-win-x64-portable.zip' -print -quit)"
+          portable_checksum="$(find release -type f -name 'LuodongChat-*-win-x64-portable.zip.sha256' -print -quit)"
           android_apk="$(find release/android -type f -name 'LuodongChat-*-android.apk' ! -name '*-debug.apk' -print -quit)"
           android_checksum="$(find release/android -type f -name 'LuodongChat-*-android.apk.sha256' -print -quit)"
           test -s "$executable"
           test -s "$checksum"
           test -s "$installer"
           test -s "$installer_checksum"
+          test -s "$portable"
+          test -s "$portable_checksum"
           test -s "$android_apk"
           test -s "$android_checksum"
-          printf '{"version":"%s","executableUrl":"https://520skx.com/client/download/LuodongChat.exe","checksumUrl":"https://520skx.com/client/download/LuodongChat.exe.sha256","installerUrl":"https://520skx.com/client/download/LuodongChat-Setup.exe","installerChecksumUrl":"https://520skx.com/client/download/LuodongChat-Setup.exe.sha256","androidApkUrl":"https://520skx.com/client/download/LuodongChat.apk","androidChecksumUrl":"https://520skx.com/client/download/LuodongChat.apk.sha256"}\n' "${VERSION#v}" > update.json
-          rsync -rz "$executable" connector-deploy@8.140.211.162:/app/module/client-releases/LuodongChat.exe.next
-          rsync -rz "$checksum" connector-deploy@8.140.211.162:/app/module/client-releases/LuodongChat.exe.sha256.next
-          rsync -rz "$installer" connector-deploy@8.140.211.162:/app/module/client-releases/LuodongChat-Setup.exe.next
-          rsync -rz "$installer_checksum" connector-deploy@8.140.211.162:/app/module/client-releases/LuodongChat-Setup.exe.sha256.next
-          rsync -rz "$android_apk" connector-deploy@8.140.211.162:/app/module/client-releases/LuodongChat.apk.next
-          rsync -rz "$android_checksum" connector-deploy@8.140.211.162:/app/module/client-releases/LuodongChat.apk.sha256.next
+          base='https://luodongchat-app.oss-cn-beijing.aliyuncs.com/latest'
+          github_base="https://github.com/${{ github.repository }}/releases/download/$VERSION"
+          printf '{"version":"%s","executableUrl":"%s/LuodongChat.exe","checksumUrl":"%s/LuodongChat.exe.sha256","installerUrl":"%s/LuodongChat-Setup.exe","installerChecksumUrl":"%s/LuodongChat-Setup.exe.sha256","androidApkUrl":"%s/LuodongChat-%s-android.apk","androidChecksumUrl":"%s/LuodongChat-%s-android.apk.sha256"}\n' "${VERSION#v}" "$base" "$base" "$base" "$base" "$github_base" "${VERSION#v}" "$github_base" "${VERSION#v}" > update.json
+          install -d latest
+          cp "$executable" latest/LuodongChat.exe
+          cp "$checksum" latest/LuodongChat.exe.sha256
+          cp "$installer" latest/LuodongChat-Setup.exe
+          cp "$installer_checksum" latest/LuodongChat-Setup.exe.sha256
+          cp "$portable" latest/LuodongChat-portable.zip
+          cp "$portable_checksum" latest/LuodongChat-portable.zip.sha256
+          cp "$android_apk" latest/LuodongChat.apk
+          cp "$android_checksum" latest/LuodongChat.apk.sha256
+          cp update.json latest/update.json
+          OSSUTIL="$RUNNER_TEMP/ossutil-bin"
+          CONFIG="$RUNNER_TEMP/ossutil.conf"
+          "$OSSUTIL" rm oss://luodongchat-app/latest/ --recursive --force --config-file "$CONFIG"
+          "$OSSUTIL" cp latest/ oss://luodongchat-app/latest/ --recursive --force --acl public-read --cache-control 'public, max-age=300' --config-file "$CONFIG"
+          for object in LuodongChat.exe LuodongChat.exe.sha256 LuodongChat-Setup.exe LuodongChat-Setup.exe.sha256 LuodongChat-portable.zip LuodongChat-portable.zip.sha256 LuodongChat.apk LuodongChat.apk.sha256 update.json; do
+            "$OSSUTIL" stat "oss://luodongchat-app/latest/$object" --config-file "$CONFIG" >/dev/null
+          done
           rsync -rz update.json connector-deploy@8.140.211.162:/app/module/client-releases/update.json.next
-          ssh connector-deploy@8.140.211.162 'cd /app/module/client-releases && mv LuodongChat.exe.next LuodongChat.exe && mv LuodongChat.exe.sha256.next LuodongChat.exe.sha256 && mv LuodongChat-Setup.exe.next LuodongChat-Setup.exe && mv LuodongChat-Setup.exe.sha256.next LuodongChat-Setup.exe.sha256 && mv LuodongChat.apk.next LuodongChat.apk && mv LuodongChat.apk.sha256.next LuodongChat.apk.sha256 && mv update.json.next update.json'
+          ssh connector-deploy@8.140.211.162 'cd /app/module/client-releases && mv update.json.next update.json && rm -f -- LuodongChat.exe LuodongChat.exe.sha256 LuodongChat-Setup.exe LuodongChat-Setup.exe.sha256 LuodongChat.apk LuodongChat.apk.sha256 ChatGPTConnector.exe ChatGPTConnector.exe.sha256 ChatGPTConnector.apk ChatGPTConnector.apk.sha256'

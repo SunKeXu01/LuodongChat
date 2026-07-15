@@ -76,7 +76,7 @@ if [[ "$healthy" != true ]]; then
   exit 1
 fi
 
-curl --fail --silent --show-error --max-time 15 https://520skx.com/healthz >/dev/null
+curl --fail --silent --show-error --max-time 15 https://luodongchat.com/healthz >/dev/null
 deployed_image="$(docker image inspect --format '{{.Id}}' deploy-gateway:latest)"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T postgres psql -U connector -d connector \
   -v deployment_id="$deployment_id" -v deployed_image="$deployed_image" >/dev/null <<'SQL'

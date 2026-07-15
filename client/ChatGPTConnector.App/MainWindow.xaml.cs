@@ -12,13 +12,12 @@ using ChatGPTConnector.Core;
 using Microsoft.Win32;
 using Application = System.Windows.Application;
 using MessageBox = System.Windows.MessageBox;
-using Brushes = System.Windows.Media.Brushes;
 
 namespace ChatGPTConnector.App;
 
 public partial class MainWindow : Window
 {
-    private static readonly Uri GatewayUri = new("https://520skx.com");
+    private static readonly Uri GatewayUri = new("https://luodongchat.com");
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(5) };
     private static readonly HttpClient UpdateHttp = new() { Timeout = Timeout.InfiniteTimeSpan };
     private readonly AccountClient _accounts = new(Http);
@@ -66,7 +65,6 @@ public partial class MainWindow : Window
                 _session = _session with { Profile = profile };
                 _sessionStore.Save(_session);
                 ShowAccount(profile);
-                ShowReadyStatus();
                 await LoadLocalConversationsAsync();
                 _sessionTimer.Start();
                 return;
@@ -172,19 +170,9 @@ public partial class MainWindow : Window
         RegisterConfirmPasswordInput.Clear();
         AuthNotice.Text = "";
         ShowAccount(session.Profile);
-        ShowReadyStatus();
         await LoadLocalConversationsAsync();
         _sessionTimer.Start();
     }
-
-    private void ShowReadyStatus()
-    {
-        StatusDot.Fill = Brushes.MediumSeaGreen;
-        StatusText.Text = "已登录，可以直接开始对话";
-    }
-
-    private async void RefreshButton_OnClick(object sender, RoutedEventArgs e) =>
-        await RunExclusiveAsync(async () => { await ValidateSessionAsync(); if (_session is null) return; ShowReadyStatus(); });
 
     private async void SaveProfileButton_OnClick(object sender, RoutedEventArgs e)
     {
@@ -394,6 +382,36 @@ public partial class MainWindow : Window
         catch (Exception error) { ChatNotice.Text = $"无法打开图片：{error.Message}"; }
     }
 
+    private void DownloadGeneratedImage_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button { Tag: string sourcePath } || !File.Exists(sourcePath))
+        {
+            ChatNotice.Text = "图片文件不存在，可能已被移动或删除。";
+            return;
+        }
+        var extension = Path.GetExtension(sourcePath);
+        var filter = extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase) ? "JPEG 图片|*.jpg"
+            : extension.Equals(".webp", StringComparison.OrdinalIgnoreCase) ? "WebP 图片|*.webp"
+            : "PNG 图片|*.png";
+        var dialog = new SaveFileDialog
+        {
+            Title = "保存生成的图片",
+            FileName = $"LuodongChat-{DateTime.Now:yyyyMMdd-HHmmss}{extension}",
+            DefaultExt = extension,
+            Filter = filter,
+            AddExtension = true,
+            OverwritePrompt = true,
+        };
+        if (dialog.ShowDialog() != true) return;
+        try
+        {
+            if (!string.Equals(Path.GetFullPath(sourcePath), Path.GetFullPath(dialog.FileName), StringComparison.OrdinalIgnoreCase))
+                File.Copy(sourcePath, dialog.FileName, true);
+            ChatNotice.Text = $"图片已保存到：{dialog.FileName}";
+        }
+        catch (Exception error) { ChatNotice.Text = $"保存图片失败：{error.Message}"; }
+    }
+
     private ChatDisplayMessage CreateDisplayMessage(SyncedChatMessage message) =>
         ChatDisplayMessage.From(message, ResolveImages(message));
 
@@ -432,13 +450,12 @@ public partial class MainWindow : Window
     private void StopGenerationButton_OnClick(object sender, RoutedEventArgs e) => _chatCancellation?.Cancel();
 
     private void ShowLogin() { AccountPanel.Visibility = Visibility.Collapsed; LoginPanel.Visibility = Visibility.Visible; AuthNotice.Text = ""; }
-    private void ShowAccount(AccountProfile profile) { LoginPanel.Visibility = Visibility.Collapsed; AccountPanel.Visibility = Visibility.Visible; AccountPanel.SelectedIndex = 1; UpdateProfile(profile); }
+    private void ShowAccount(AccountProfile profile) { LoginPanel.Visibility = Visibility.Collapsed; AccountPanel.Visibility = Visibility.Visible; AccountPanel.SelectedIndex = 0; UpdateProfile(profile); }
     private void UpdateProfile(AccountProfile profile)
     {
         if (_session is not null) { _session = _session with { Profile = profile }; _sessionStore.Save(_session); }
         ProfileEmailText.Text = profile.Email;
         NicknameInput.Text = profile.Nickname;
-        BalanceText.Text = $"¥{profile.BalanceMicrounits / 1_000_000m:F2}";
         AvatarImage.Source = DecodeAvatar(profile.AvatarBase64);
     }
 

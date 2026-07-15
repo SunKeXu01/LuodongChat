@@ -10,7 +10,7 @@ public sealed class ClientUpdateServiceTests
     [Fact]
     public async Task SelectsANewerReleaseWithVerifiedAssets()
     {
-        const string json = """{"version":"0.1.0-preview.4","executableUrl":"https://520skx.com/client/download/LuodongChat.exe","checksumUrl":"https://520skx.com/client/download/LuodongChat.exe.sha256"}""";
+        const string json = """{"version":"0.1.0-preview.4","executableUrl":"https://luodongchat-app.oss-cn-beijing.aliyuncs.com/latest/LuodongChat.exe","checksumUrl":"https://luodongchat-app.oss-cn-beijing.aliyuncs.com/latest/LuodongChat.exe.sha256"}""";
         var update = await new ClientUpdateService(new HttpClient(new StubHandler(json))).CheckAsync("0.1.0-preview.3");
         Assert.NotNull(update);
         Assert.Equal("0.1.0-preview.4", update.Version);
@@ -19,14 +19,14 @@ public sealed class ClientUpdateServiceTests
     [Fact]
     public async Task IgnoresTheCurrentRelease()
     {
-        const string json = """{"version":"0.1.0-preview.2","executableUrl":"https://520skx.com/client/download/LuodongChat.exe","checksumUrl":"https://520skx.com/client/download/LuodongChat.exe.sha256"}""";
+        const string json = """{"version":"0.1.0-preview.2","executableUrl":"https://luodongchat-app.oss-cn-beijing.aliyuncs.com/latest/LuodongChat.exe","checksumUrl":"https://luodongchat-app.oss-cn-beijing.aliyuncs.com/latest/LuodongChat.exe.sha256"}""";
         Assert.Null(await new ClientUpdateService(new HttpClient(new StubHandler(json))).CheckAsync("0.1.0-preview.2"));
     }
 
     [Fact]
     public async Task StableV1IsNewerThanPreviewRelease()
     {
-        const string json = """{"version":"1.0","executableUrl":"https://520skx.com/client/download/LuodongChat.exe","checksumUrl":"https://520skx.com/client/download/LuodongChat.exe.sha256","installerUrl":"https://520skx.com/client/download/LuodongChat-Setup.exe","installerChecksumUrl":"https://520skx.com/client/download/LuodongChat-Setup.exe.sha256"}""";
+        const string json = """{"version":"1.0","executableUrl":"https://luodongchat-app.oss-cn-beijing.aliyuncs.com/latest/LuodongChat.exe","checksumUrl":"https://luodongchat-app.oss-cn-beijing.aliyuncs.com/latest/LuodongChat.exe.sha256","installerUrl":"https://luodongchat-app.oss-cn-beijing.aliyuncs.com/latest/LuodongChat-Setup.exe","installerChecksumUrl":"https://luodongchat-app.oss-cn-beijing.aliyuncs.com/latest/LuodongChat-Setup.exe.sha256"}""";
         var update = await new ClientUpdateService(new HttpClient(new StubHandler(json))).CheckAsync("0.1.0-preview.18");
         Assert.NotNull(update);
         Assert.Equal("1.0", update.Version);

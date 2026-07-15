@@ -37,11 +37,11 @@ const LANDING_PAGE = `<!doctype html>
     body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f7fb;color:#111827}
     main{width:min(520px,calc(100% - 48px));padding:48px;border:1px solid #e5e7eb;border-radius:24px;background:white;box-shadow:0 18px 50px #11182712}
     h1{margin:0 0 16px;font-size:32px}.status{display:flex;gap:10px;align-items:center;color:#047857;font-weight:600}.dot{width:10px;height:10px;border-radius:50%;background:#10b981;box-shadow:0 0 0 5px #10b98120}
-    p{line-height:1.7;color:#4b5563}.meta{margin-top:32px;padding-top:24px;border-top:1px solid #e5e7eb;font-size:14px;color:#6b7280}
+    p{line-height:1.7;color:#4b5563}.downloads{display:grid;gap:12px;margin-top:28px}.download{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-radius:12px;background:#111827;color:white;text-decoration:none;font-weight:650}.download.secondary{background:#eef2ff;color:#3730a3}.meta{margin-top:28px;padding-top:22px;border-top:1px solid #e5e7eb;font-size:14px;color:#6b7280}
     @media(prefers-color-scheme:dark){body{background:#0b1020;color:#f9fafb}main{background:#111827;border-color:#263244}p,.meta{color:#9ca3af}.meta{border-color:#263244}}
   </style>
 </head>
-<body><main><h1>泺栋chat</h1><div class="status"><span class="dot"></span>服务运行正常</div><p>独立的 GPT-5.6 对话客户端。使用邮箱账号登录，无需安装官方 ChatGPT，也无需配置 API 密钥。</p><div class="meta">Windows · Android · 对话仅存本机</div></main></body>
+<body><main><h1>泺栋chat</h1><div class="status"><span class="dot"></span>服务运行正常</div><p>独立的 GPT-5.6 对话客户端。使用邮箱账号登录，无需安装官方 ChatGPT，也无需配置 API 密钥。</p><div class="downloads"><a class="download" href="https://luodongchat-app.oss-cn-beijing.aliyuncs.com/latest/LuodongChat-Setup.exe">下载最新版 Windows 安装包 <span>→</span></a><a class="download secondary" href="https://github.com/SunKeXu01/LuodongChat/releases/latest">前往 GitHub Releases <span>→</span></a></div><div class="meta">Windows · Android · 对话仅存本机</div></main></body>
 </html>`;
 
 function json(res: ServerResponse, status: number, body: unknown): void {
@@ -185,10 +185,21 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
       : req.method === "GET" && req.url === "/client/download/LuodongChat.exe.sha256" ? "LuodongChat.exe.sha256"
       : req.method === "GET" && req.url === "/client/download/LuodongChat.apk" ? "LuodongChat.apk"
       : req.method === "GET" && req.url === "/client/download/LuodongChat.apk.sha256" ? "LuodongChat.apk.sha256"
-      : req.method === "GET" && req.url === "/client/download/ChatGPTConnector.exe" ? "ChatGPTConnector.exe"
-      : req.method === "GET" && req.url === "/client/download/ChatGPTConnector.exe.sha256" ? "ChatGPTConnector.exe.sha256"
-      : req.method === "GET" && req.url === "/client/download/ChatGPTConnector.apk" ? "ChatGPTConnector.apk"
-      : req.method === "GET" && req.url === "/client/download/ChatGPTConnector.apk.sha256" ? "ChatGPTConnector.apk.sha256" : null;
+      : req.method === "GET" && req.url === "/client/download/ChatGPTConnector.exe" ? "LuodongChat.exe"
+      : req.method === "GET" && req.url === "/client/download/ChatGPTConnector.exe.sha256" ? "LuodongChat.exe.sha256"
+      : req.method === "GET" && req.url === "/client/download/ChatGPTConnector.apk" ? "LuodongChat.apk"
+      : req.method === "GET" && req.url === "/client/download/ChatGPTConnector.apk.sha256" ? "LuodongChat.apk.sha256" : null;
+    if (clientAsset) {
+      const downloadBaseUrl = process.env.CLIENT_DOWNLOAD_BASE_URL?.trim();
+      if (downloadBaseUrl) {
+        res.writeHead(302, {
+          location: `${downloadBaseUrl.replace(/\/$/, "")}/${clientAsset}`,
+          "cache-control": "public, max-age=300",
+          "x-content-type-options": "nosniff",
+        });
+        return res.end();
+      }
+    }
     if (clientAsset && releaseRoot) {
       try {
         const path = join(releaseRoot, clientAsset);

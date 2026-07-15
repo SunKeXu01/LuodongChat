@@ -28,6 +28,7 @@ services:
       DATABASE_URL: postgresql://connector:${POSTGRES_PASSWORD}@postgres:5432/connector
       REDIS_URL: redis://redis:6379
       CLIENT_RELEASE_ROOT: /app/client-releases
+      CLIENT_DOWNLOAD_BASE_URL: ${CLIENT_DOWNLOAD_BASE_URL:-https://luodongchat-app.oss-cn-beijing.aliyuncs.com/latest}
       SELF_SERVICE_ENABLED: ${SELF_SERVICE_ENABLED:-false}
       SELF_SERVICE_REQUESTS_PER_MINUTE: ${SELF_SERVICE_REQUESTS_PER_MINUTE:-30}
       SELF_SERVICE_MAX_CONCURRENT: ${SELF_SERVICE_MAX_CONCURRENT:-2}

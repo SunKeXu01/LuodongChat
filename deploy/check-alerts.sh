@@ -6,7 +6,7 @@ COMPOSE_FILE="$APP_DIR/deploy/compose.server.yaml"
 ENV_FILE="$APP_DIR/.env"
 issues=()
 
-if ! curl --fail --silent --show-error --max-time 10 https://520skx.com/healthz >/dev/null; then
+if ! curl --fail --silent --show-error --max-time 10 https://luodongchat.com/healthz >/dev/null; then
   issues+=("公网网关健康检查失败")
 fi
 
@@ -15,7 +15,7 @@ if (( disk_used >= 85 )); then
   issues+=("服务器根磁盘使用率已达到 ${disk_used}%")
 fi
 
-if ! openssl x509 -checkend $((14 * 86400)) -noout -in /etc/letsencrypt/live/520skx.com/fullchain.pem >/dev/null 2>&1; then
+if ! openssl x509 -checkend $((14 * 86400)) -noout -in /etc/nginx/ssl/luodongchat.com.pem >/dev/null 2>&1; then
   issues+=("TLS 证书将在 14 天内到期")
 fi
 

@@ -15,7 +15,7 @@ public sealed record PreparedClientUpdate(string Version, string FilePath, bool 
 
 public sealed class ClientUpdateService(HttpClient http)
 {
-    private static readonly Uri UpdateManifest = new("https://520skx.com/client/update.json");
+    private static readonly Uri UpdateManifest = new("https://luodongchat.com/client/update.json");
 
     public async Task<ClientUpdate?> CheckAsync(string currentVersion, CancellationToken cancellationToken = default)
     {
@@ -164,7 +164,7 @@ public sealed class ClientUpdateService(HttpClient http)
 
     private static Uri ValidateTrusted(Uri uri)
     {
-        if (uri.Scheme != Uri.UriSchemeHttps || uri.Host != "520skx.com")
+        if (uri.Scheme != Uri.UriSchemeHttps || (uri.Host != "luodongchat.com" && uri.Host != "luodongchat-app.oss-cn-beijing.aliyuncs.com"))
             throw new InvalidDataException("更新清单包含不受信任的下载地址。");
         return uri;
     }

@@ -20,7 +20,9 @@ async function listen(server: ReturnType<typeof createServer>): Promise<number> 
 test("serves the public client update manifest and fixed release assets", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "connector-release-"));
   const previous = process.env.CLIENT_RELEASE_ROOT;
+  const previousDownloadBase = process.env.CLIENT_DOWNLOAD_BASE_URL;
   process.env.CLIENT_RELEASE_ROOT = directory;
+  delete process.env.CLIENT_DOWNLOAD_BASE_URL;
   await writeFile(join(directory, "update.json"), '{"version":"0.1.0-preview.2"}');
   await writeFile(join(directory, "ChatGPTConnector.exe.sha256"), "abc123\n");
   await writeFile(join(directory, "ChatGPTConnector.apk"), "apk-bytes");
@@ -30,6 +32,7 @@ test("serves the public client update manifest and fixed release assets", async 
   await writeFile(join(directory, "LuodongChat.apk"), "luodong-apk");
   t.after(async () => {
     if (previous === undefined) delete process.env.CLIENT_RELEASE_ROOT; else process.env.CLIENT_RELEASE_ROOT = previous;
+    if (previousDownloadBase === undefined) delete process.env.CLIENT_DOWNLOAD_BASE_URL; else process.env.CLIENT_DOWNLOAD_BASE_URL = previousDownloadBase;
     await rm(directory, { recursive: true, force: true });
   });
   const config: GatewayConfig = {
@@ -45,16 +48,39 @@ test("serves the public client update manifest and fixed release assets", async 
   assert.equal(manifest.headers.get("cache-control"), "no-cache");
   assert.deepEqual(await manifest.json(), { version: "0.1.0-preview.2" });
   const checksum = await fetch(`http://127.0.0.1:${port}/client/download/ChatGPTConnector.exe.sha256`);
-  assert.equal(await checksum.text(), "abc123\n");
+  assert.equal(await checksum.text(), "def456\n");
   const apk = await fetch(`http://127.0.0.1:${port}/client/download/ChatGPTConnector.apk`);
   assert.equal(apk.headers.get("content-type"), "application/vnd.android.package-archive");
-  assert.equal(await apk.text(), "apk-bytes");
+  assert.equal(await apk.text(), "luodong-apk");
   const currentApk = await fetch(`http://127.0.0.1:${port}/client/download/LuodongChat.apk`);
   assert.equal(currentApk.headers.get("content-type"), "application/vnd.android.package-archive");
   assert.equal(await currentApk.text(), "luodong-apk");
   const setup = await fetch(`http://127.0.0.1:${port}/client/download/LuodongChat-Setup.exe`);
   assert.equal(setup.headers.get("content-type"), "application/vnd.microsoft.portable-executable");
   assert.equal(await setup.text(), "setup-bytes");
+});
+
+test("redirects stable and legacy client downloads to OSS when configured", async (t) => {
+  const previous = process.env.CLIENT_DOWNLOAD_BASE_URL;
+  process.env.CLIENT_DOWNLOAD_BASE_URL = "https://downloads.example/latest/";
+  t.after(() => {
+    if (previous === undefined) delete process.env.CLIENT_DOWNLOAD_BASE_URL; else process.env.CLIENT_DOWNLOAD_BASE_URL = previous;
+  });
+  const config: GatewayConfig = {
+    port: 0, upstreamBaseUrl: "https://upstream.invalid", upstreamApiKey: "unused", upstreamApiKeys: ["unused"],
+    upstreamResponsesPath: "/responses", gatewayKeyHashes: new Set(), requestsPerMinute: 10,
+    maxConcurrentRequests: 2, upstreamTimeoutMs: 5_000,
+  };
+  const gateway = createGatewayServer(config);
+  const port = await listen(gateway);
+  t.after(() => gateway.close());
+  for (const path of ["LuodongChat-Setup.exe", "ChatGPTConnector.apk"]) {
+    const response = await fetch(`http://127.0.0.1:${port}/client/download/${path}`, { redirect: "manual" });
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get("location"), path === "ChatGPTConnector.apk"
+      ? "https://downloads.example/latest/LuodongChat.apk"
+      : `https://downloads.example/latest/${path}`);
+  }
 });
 
 test("rejects malformed account email before requesting delivery", async (t) => {
@@ -220,7 +246,10 @@ test("serves a safe public landing page", async (t) => {
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html/);
   assert.equal(response.headers.get("x-frame-options"), "DENY");
-  assert.match(await response.text(), /泺栋chat/);
+  const page = await response.text();
+  assert.match(page, /泺栋chat/);
+  assert.match(page, /luodongchat-app\.oss-cn-beijing\.aliyuncs\.com\/latest\/LuodongChat-Setup\.exe/);
+  assert.match(page, /github\.com\/SunKeXu01\/LuodongChat\/releases\/latest/);
 });
 
 test("does not expose the legacy user gateway-key enrollment API", async (t) => {
