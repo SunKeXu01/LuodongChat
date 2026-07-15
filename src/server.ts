@@ -23,7 +23,6 @@ import type { AdminRepository } from "./admin.js";
 import { ADMIN_HTML, ADMIN_JS } from "./admin-assets.js";
 import { AdminLoginGuard, type AdminLoginProtector } from "./admin-security.js";
 import { EnrollmentService } from "./self-service.js";
-import type { ChatSyncRepository, SyncedMessage } from "./sync.js";
 
 const MAX_REQUEST_BYTES = 10 * 1024 * 1024;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
@@ -42,7 +41,7 @@ const LANDING_PAGE = `<!doctype html>
     @media(prefers-color-scheme:dark){body{background:#0b1020;color:#f9fafb}main{background:#111827;border-color:#263244}p,.meta{color:#9ca3af}.meta{border-color:#263244}}
   </style>
 </head>
-<body><main><h1>泺栋chat</h1><div class="status"><span class="dot"></span>服务运行正常</div><p>独立的 GPT-5.6 对话客户端。使用邮箱账号登录，无需安装官方 ChatGPT，也无需配置 API 密钥。</p><div class="meta">Windows · Android · 跨端同步</div></main></body>
+<body><main><h1>泺栋chat</h1><div class="status"><span class="dot"></span>服务运行正常</div><p>独立的 GPT-5.6 对话客户端。使用邮箱账号登录，无需安装官方 ChatGPT，也无需配置 API 密钥。</p><div class="meta">Windows · Android · 对话仅存本机</div></main></body>
 </html>`;
 
 function json(res: ServerResponse, status: number, body: unknown): void {
@@ -85,7 +84,6 @@ export interface GatewayServerOptions {
   adminRepository?: AdminRepository;
   adminLoginProtector?: AdminLoginProtector;
   enrollmentService?: EnrollmentService;
-  chatSyncRepository?: ChatSyncRepository;
 }
 
 export function createGatewayServer(config: GatewayConfig, options: GatewayServerOptions = {}) {
@@ -263,43 +261,37 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
         return json(res, 200, { status: "logged_out" });
       }
     }
-    if (req.url?.startsWith("/sync/") && options.enrollmentService && options.chatSyncRepository) {
+    if (req.url?.startsWith("/sync/") && options.enrollmentService) {
       const accessToken = extractBearerKey(req.headers.authorization);
       const account = accessToken?.startsWith("usr_") ? await options.enrollmentService.authenticate(accessToken) : null;
       if (!account) return json(res, 401, { error: { code: "login_required", message: "请先登录" } });
       res.setHeader("cache-control", "no-store");
       if (req.method === "GET" && req.url.startsWith("/sync/state")) {
-        const parsed = new URL(req.url, "http://localhost");
-        const sinceValue = parsed.searchParams.get("since");
-        const since = sinceValue ? new Date(sinceValue) : new Date(0);
-        if (Number.isNaN(since.getTime())) return json(res, 400, { error: { code: "invalid_sync_cursor", message: "同步时间无效" } });
-        return json(res, 200, await options.chatSyncRepository.getChanges(account.id, since));
+        return json(res, 200, { conversations: [], messages: [], serverTime: new Date().toISOString(), storage: "local_only" });
       }
       if (req.method === "POST" && req.url === "/sync/conversations") {
         const input = await readJsonObject(req);
         const id = typeof input.id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.id) ? input.id : null;
         const title = typeof input.title === "string" ? input.title.trim() : "";
         if (!id || title.length < 1 || title.length > 120) return json(res, 400, { error: { code: "invalid_conversation" } });
-        const conversation = await options.chatSyncRepository.upsertConversation(account.id, id, title);
-        return conversation ? json(res, 200, conversation) : json(res, 409, { error: { code: "conversation_conflict" } });
+        const now = new Date().toISOString();
+        return json(res, 200, { id, title, createdAt: now, updatedAt: now, deletedAt: null, storage: "local_only" });
       }
       const deleteMatch = /^\/sync\/conversations\/([0-9a-f-]{36})$/.exec(req.url);
       if (req.method === "DELETE" && deleteMatch) {
-        const deleted = await options.chatSyncRepository.deleteConversation(account.id, deleteMatch[1]!);
-        return deleted ? json(res, 200, { status: "deleted" }) : json(res, 404, { error: { code: "conversation_not_found" } });
+        return json(res, 200, { status: "not_stored" });
       }
       if (req.method === "POST" && req.url === "/sync/messages") {
         const input = await readJsonObject(req);
         const uuid = (value: unknown) => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value) ? value : null;
         const id = uuid(input.id); const conversationId = uuid(input.conversationId);
-        const role = typeof input.role === "string" && ["user", "assistant", "system"].includes(input.role) ? input.role as SyncedMessage["role"] : null;
+        const role = typeof input.role === "string" && ["user", "assistant", "system"].includes(input.role) ? input.role : null;
         const content = typeof input.content === "string" ? input.content.trim() : "";
         const clientCreatedAt = typeof input.clientCreatedAt === "string" ? new Date(input.clientCreatedAt) : new Date();
         if (!id || !conversationId || !role || content.length < 1 || content.length > 32_000 || Number.isNaN(clientCreatedAt.getTime())) {
           return json(res, 400, { error: { code: "invalid_message" } });
         }
-        const message = await options.chatSyncRepository.appendMessage(account.id, { id, conversationId, role, content, clientCreatedAt });
-        return message ? json(res, 200, message) : json(res, 404, { error: { code: "conversation_not_found" } });
+        return json(res, 200, { id, conversationId, role, content, clientCreatedAt: clientCreatedAt.toISOString(), storage: "local_only" });
       }
     }
     const adminEnabled = (config.adminKeyHashes?.size ?? 0) > 0 && options.adminRepository;

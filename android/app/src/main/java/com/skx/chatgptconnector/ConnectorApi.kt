@@ -31,28 +31,6 @@ class ConnectorApi(private val baseUrl: String = "https://520skx.com") {
 
     fun logout(token: String) { request("POST", "/account/logout", token) }
 
-    fun sync(token: String, since: String? = null): SyncState {
-        val suffix = since?.let { "?since=${java.net.URLEncoder.encode(it, "UTF-8")}" } ?: ""
-        val root = request("GET", "/sync/state$suffix", token)
-        return SyncState(
-            root.getJSONArray("conversations").objects().map {
-                SyncedConversation(it.getString("id"), it.getString("title"), it.optString("deletedAt").takeIf { value -> value.isNotBlank() && value != "null" })
-            },
-            root.getJSONArray("messages").objects().map { it.toMessage() },
-            root.getString("serverTime"),
-        )
-    }
-
-    fun saveConversation(token: String, id: String, title: String) {
-        request("POST", "/sync/conversations", token, JSONObject().put("id", id).put("title", title))
-    }
-
-    fun saveMessage(token: String, message: ChatMessage) {
-        request("POST", "/sync/messages", token, JSONObject()
-            .put("id", message.id).put("conversationId", message.conversationId)
-            .put("role", message.role).put("content", message.content).put("clientCreatedAt", message.clientCreatedAt))
-    }
-
     fun streamResponse(token: String, messages: List<ChatMessage>, onDelta: (String) -> Unit): String {
         val input = JSONArray()
         messages.forEach { input.put(JSONObject().put("role", it.role).put("content", it.content)) }
@@ -116,8 +94,3 @@ class ConnectorApi(private val baseUrl: String = "https://520skx.com") {
 }
 
 class ConnectorApiException(val code: String, message: String) : IllegalStateException(message)
-
-private fun JSONArray.objects() = (0 until length()).map { getJSONObject(it) }
-private fun JSONObject.toMessage() = ChatMessage(
-    getString("id"), getString("conversationId"), getString("role"), getString("content"), getString("clientCreatedAt"),
-)

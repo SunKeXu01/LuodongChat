@@ -11,6 +11,7 @@ public sealed record ClientUpdate(
     Uri PortableChecksumUri,
     Uri? InstallerUri,
     Uri? InstallerChecksumUri);
+public sealed record PreparedClientUpdate(string Version, string FilePath, bool IsInstaller);
 
 public sealed class ClientUpdateService(HttpClient http)
 {
@@ -33,12 +34,12 @@ public sealed class ClientUpdateService(HttpClient http)
         return new(version.TrimStart('v'), executable, checksum, installer, installerChecksum);
     }
 
-    public async Task DownloadAndScheduleAsync(
+    public async Task<PreparedClientUpdate> PrepareAsync(
         ClientUpdate update,
-        string currentExecutable,
-        int currentProcessId,
+        int bytesPerSecond = 256 * 1024,
         CancellationToken cancellationToken = default)
     {
+        if (bytesPerSecond < 32 * 1024) throw new ArgumentOutOfRangeException(nameof(bytesPerSecond));
         ApplicationDirectories.EnsureWritable();
         var useInstaller = ApplicationDirectories.IsInstalled && update.InstallerUri is not null;
         var sourceUri = useInstaller ? update.InstallerUri! : update.PortableExecutableUri;
@@ -47,23 +48,57 @@ public sealed class ClientUpdateService(HttpClient http)
         var downloaded = Path.Combine(ApplicationDirectories.Updates, useInstaller
             ? $"LuodongChat-{safeVersion}-setup.exe"
             : $"LuodongChat-{safeVersion}-portable.exe");
-        var bytes = await http.GetByteArrayAsync(sourceUri, cancellationToken);
-        await File.WriteAllBytesAsync(downloaded, bytes, cancellationToken);
         var expectedText = await http.GetStringAsync(checksumUri, cancellationToken);
         var expected = expectedText.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)[0].Trim();
-        var actual = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        if (File.Exists(downloaded) && string.Equals(await HashFileAsync(downloaded, cancellationToken), expected, StringComparison.OrdinalIgnoreCase))
+            return new(update.Version, downloaded, useInstaller);
+
+        var partial = downloaded + ".part";
+        if (File.Exists(partial)) File.Delete(partial);
+        using var request = new HttpRequestMessage(HttpMethod.Get, sourceUri);
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using var output = new FileStream(partial, FileMode.CreateNew, FileAccess.Write, FileShare.None, 32 * 1024, true);
+        var buffer = new byte[32 * 1024];
+        var transferred = 0L;
+        var startedAt = Stopwatch.StartNew();
+        while (true)
+        {
+            var count = await input.ReadAsync(buffer, cancellationToken);
+            if (count == 0) break;
+            await output.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
+            transferred += count;
+            var expectedElapsed = TimeSpan.FromSeconds((double)transferred / bytesPerSecond);
+            var delay = expectedElapsed - startedAt.Elapsed;
+            if (delay > TimeSpan.Zero) await Task.Delay(delay, cancellationToken);
+        }
+        await output.FlushAsync(cancellationToken);
+        output.Close();
+        var actual = await HashFileAsync(partial, cancellationToken);
         if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
         {
-            File.Delete(downloaded);
+            File.Delete(partial);
             throw new InvalidDataException("更新文件完整性校验失败，已取消安装。");
         }
+        File.Move(partial, downloaded, true);
+        return new(update.Version, downloaded, useInstaller);
+    }
 
+    public void SchedulePrepared(PreparedClientUpdate prepared, string currentExecutable, int currentProcessId)
+    {
         var script = Path.Combine(ApplicationDirectories.Updates, "install-update.cmd");
-        var contents = useInstaller
-            ? BuildInstallerScript(downloaded, ApplicationDirectories.Root, currentProcessId)
-            : BuildPortableInstallScript(downloaded, currentExecutable, currentProcessId);
-        await File.WriteAllTextAsync(script, contents, new UTF8Encoding(false), cancellationToken);
+        var contents = prepared.IsInstaller
+            ? BuildInstallerScript(prepared.FilePath, ApplicationDirectories.Root, currentProcessId)
+            : BuildPortableInstallScript(prepared.FilePath, currentExecutable, currentProcessId);
+        File.WriteAllText(script, contents, new UTF8Encoding(false));
         Process.Start(new ProcessStartInfo(script) { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden });
+    }
+
+    private static async Task<string> HashFileAsync(string path, CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, true);
+        return Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken)).ToLowerInvariant();
     }
 
     internal static string BuildInstallerScript(string installer, string applicationRoot, int currentProcessId)

@@ -19,19 +19,22 @@ public partial class MainWindow : Window
 {
     private static readonly Uri GatewayUri = new("https://520skx.com");
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(90) };
+    private static readonly HttpClient UpdateHttp = new() { Timeout = Timeout.InfiniteTimeSpan };
     private readonly AccountClient _accounts = new(Http);
     private readonly SecureSessionStore _sessionStore = SecureSessionStore.ForApplicationDirectory();
-    private readonly ClientUpdateService _updates = new(Http);
+    private readonly ClientUpdateService _updates = new(UpdateHttp);
     private readonly ChatSyncClient _chat = new(Http);
+    private readonly LocalConversationStore _conversationStore = LocalConversationStore.ForApplicationDirectory();
     private readonly ObservableCollection<ChatDisplayMessage> _chatMessages = [];
+    private readonly ObservableCollection<ConversationListItem> _conversations = [];
     private AccountSession? _session;
-    private ClientUpdate? _availableUpdate;
+    private LocalConversation? _currentConversation;
     private TrayIconService? _trayIcon;
     private bool _allowExit;
     private readonly SemaphoreSlim _operationGate = new(1, 1);
     private readonly DispatcherTimer _sessionTimer = new() { Interval = TimeSpan.FromMinutes(5) };
-    private string? _conversationId;
     private CancellationTokenSource? _chatCancellation;
+    private readonly CancellationTokenSource _updateCancellation = new();
 
     public MainWindow() : this(false) { }
 
@@ -39,6 +42,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         ChatMessagesList.ItemsSource = _chatMessages;
+        ConversationsList.ItemsSource = _conversations;
         FitToWorkingArea();
         InitializeTrayIcon();
         Closing += MainWindow_OnClosing;
@@ -50,7 +54,7 @@ public partial class MainWindow : Window
 
     private async Task InitializeAsync()
     {
-        await CheckForUpdatesAsync(true);
+        _ = RunAutomaticUpdateAsync(_updateCancellation.Token);
         _session = _sessionStore.Load();
         if (_session is not null)
         {
@@ -61,7 +65,7 @@ public partial class MainWindow : Window
                 _sessionStore.Save(_session);
                 ShowAccount(profile);
                 ShowReadyStatus();
-                await LoadChatAsync();
+                await LoadLocalConversationsAsync();
                 _sessionTimer.Start();
                 return;
             }
@@ -167,7 +171,7 @@ public partial class MainWindow : Window
         AuthNotice.Text = "";
         ShowAccount(session.Profile);
         ShowReadyStatus();
-        await LoadChatAsync();
+        await LoadLocalConversationsAsync();
         _sessionTimer.Start();
     }
 
@@ -178,7 +182,7 @@ public partial class MainWindow : Window
     }
 
     private async void RefreshButton_OnClick(object sender, RoutedEventArgs e) =>
-        await RunExclusiveAsync(async () => { await ValidateSessionAsync(); if (_session is null) return; await LoadChatAsync(); ShowReadyStatus(); });
+        await RunExclusiveAsync(async () => { await ValidateSessionAsync(); if (_session is null) return; ShowReadyStatus(); });
 
     private async void SaveProfileButton_OnClick(object sender, RoutedEventArgs e)
     {
@@ -231,30 +235,53 @@ public partial class MainWindow : Window
         MessageBox.Show("登录已过期，请重新登录。", "需要登录", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
-    private async Task LoadChatAsync()
+    private async Task LoadLocalConversationsAsync()
     {
         if (_session is null) return;
-        try
-        {
-            var state = await _chat.GetStateAsync(GatewayUri, _session.AccessToken);
-            var conversation = state.Conversations.LastOrDefault(item => item.DeletedAt is null);
-            _conversationId = conversation?.Id;
-            _chatMessages.Clear();
-            if (_conversationId is not null)
-                foreach (var message in state.Messages.Where(item => item.ConversationId == _conversationId).OrderBy(item => item.ClientCreatedAt))
-                    _chatMessages.Add(ChatDisplayMessage.From(message));
-            ChatNotice.Text = "";
-        }
-        catch (Exception error) { ChatNotice.Text = $"同步聊天记录失败：{error.Message}"; }
+        var loaded = await _conversationStore.LoadAsync(_session.Profile.Id);
+        _conversations.Clear();
+        foreach (var conversation in loaded) _conversations.Add(ConversationListItem.From(conversation));
+        ConversationsList.SelectedIndex = _conversations.Count > 0 ? 0 : -1;
+        if (_conversations.Count == 0) ShowConversation(null);
+        ChatNotice.Text = "";
     }
 
     private void NewChatButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (_chatCancellation is not null) return;
-        _conversationId = null;
-        _chatMessages.Clear();
-        ChatNotice.Text = "已新建会话";
+        ConversationsList.SelectedIndex = -1;
+        ShowConversation(null);
+        ChatNotice.Text = "已新建本地对话";
         ChatInput.Focus();
+    }
+
+    private void ConversationsList_OnSelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (ConversationsList.SelectedItem is ConversationListItem item) ShowConversation(item.Conversation);
+    }
+
+    private async void DeleteConversationMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_session is null || _chatCancellation is not null || sender is not System.Windows.Controls.MenuItem { CommandParameter: ConversationListItem item }) return;
+        if (MessageBox.Show($"确定删除本机对话“{item.Title}”吗？此操作不会影响服务器，因为聊天内容从未上传。", "删除本地对话", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        await _conversationStore.DeleteAsync(_session.Profile.Id, item.Conversation.Id);
+        var index = _conversations.IndexOf(item);
+        _conversations.Remove(item);
+        if (_currentConversation?.Id == item.Conversation.Id)
+        {
+            if (_conversations.Count == 0) ShowConversation(null);
+            else ConversationsList.SelectedIndex = Math.Min(index, _conversations.Count - 1);
+        }
+        ChatNotice.Text = "本地对话已删除";
+    }
+
+    private void ShowConversation(LocalConversation? conversation)
+    {
+        _currentConversation = conversation;
+        _chatMessages.Clear();
+        if (conversation is not null)
+            foreach (var message in conversation.Messages.OrderBy(item => item.ClientCreatedAt))
+                _chatMessages.Add(ChatDisplayMessage.From(message));
     }
 
     private void CopyCurrentChatButton_OnClick(object sender, RoutedEventArgs e)
@@ -276,16 +303,15 @@ public partial class MainWindow : Window
         StopGenerationButton.Visibility = Visibility.Visible;
         try
         {
-            var conversationId = _conversationId ?? Guid.NewGuid().ToString();
-            if (_conversationId is null)
-            {
-                await _chat.SaveConversationAsync(GatewayUri, _session.AccessToken, conversationId, text[..Math.Min(text.Length, 40)], cancellationToken);
-                _conversationId = conversationId;
-            }
+            var now = DateTimeOffset.UtcNow;
+            var conversationId = _currentConversation?.Id ?? Guid.NewGuid().ToString();
             var user = new SyncedChatMessage(Guid.NewGuid().ToString(), conversationId, "user", text, DateTimeOffset.UtcNow);
             ChatInput.Clear();
             _chatMessages.Add(ChatDisplayMessage.From(user));
-            await _chat.SaveMessageAsync(GatewayUri, _session.AccessToken, user, cancellationToken);
+            _currentConversation = _currentConversation is null
+                ? new LocalConversation(conversationId, text[..Math.Min(text.Length, 40)], now, now, [user])
+                : _currentConversation with { UpdatedAt = now, Messages = _currentConversation.Messages.Append(user).ToArray() };
+            await SaveCurrentConversationAsync(cancellationToken);
             var context = _chatMessages.Select(item => item.Source).ToArray();
             var assistant = new SyncedChatMessage(Guid.NewGuid().ToString(), conversationId, "assistant", "", DateTimeOffset.UtcNow);
             var display = ChatDisplayMessage.From(assistant);
@@ -301,7 +327,8 @@ public partial class MainWindow : Window
                 assistant = assistant with { Content = string.IsNullOrWhiteSpace(answer) ? "暂时没有收到模型输出。" : answer };
                 display.Content = assistant.Content;
                 display.Source = assistant;
-                await _chat.SaveMessageAsync(GatewayUri, _session.AccessToken, assistant, cancellationToken);
+                _currentConversation = _currentConversation with { UpdatedAt = DateTimeOffset.UtcNow, Messages = _currentConversation.Messages.Append(assistant).ToArray() };
+                await SaveCurrentConversationAsync(cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -310,7 +337,8 @@ public partial class MainWindow : Window
                 {
                     assistant = assistant with { Content = display.Content };
                     display.Source = assistant;
-                    await _chat.SaveMessageAsync(GatewayUri, _session.AccessToken, assistant);
+                    _currentConversation = _currentConversation! with { UpdatedAt = DateTimeOffset.UtcNow, Messages = _currentConversation!.Messages.Append(assistant).ToArray() };
+                    await SaveCurrentConversationAsync(CancellationToken.None);
                 }
                 ChatNotice.Text = "已停止生成";
             }
@@ -328,6 +356,17 @@ public partial class MainWindow : Window
             StopGenerationButton.Visibility = Visibility.Collapsed;
             ChatInput.Focus();
         }
+    }
+
+    private async Task SaveCurrentConversationAsync(CancellationToken cancellationToken)
+    {
+        if (_session is null || _currentConversation is null) return;
+        await _conversationStore.SaveAsync(_session.Profile.Id, _currentConversation, cancellationToken);
+        var existing = _conversations.FirstOrDefault(item => item.Conversation.Id == _currentConversation.Id);
+        if (existing is not null) _conversations.Remove(existing);
+        var replacement = ConversationListItem.From(_currentConversation);
+        _conversations.Insert(0, replacement);
+        ConversationsList.SelectedItem = replacement;
     }
 
     private void StopGenerationButton_OnClick(object sender, RoutedEventArgs e) => _chatCancellation?.Cancel();
@@ -356,33 +395,29 @@ public partial class MainWindow : Window
         catch { return null; }
     }
 
-    private async void UpdateButton_OnClick(object sender, RoutedEventArgs e) => await RunUpdateAsync();
-
-    private async void GlobalUpdateButton_OnClick(object sender, RoutedEventArgs e) => await RunUpdateAsync();
-
-    private async Task RunUpdateAsync()
-    {
-        await RunExclusiveAsync(async () => {
-            if (_availableUpdate is null) { await CheckForUpdatesAsync(false); return; }
-            if (MessageBox.Show($"发现新版本 {_availableUpdate.Version}，更新时会替换并删除当前旧版本，是否继续？", "客户端更新", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-            GlobalUpdateButton.Content = "正在下载…";
-            await _updates.DownloadAndScheduleAsync(_availableUpdate, Environment.ProcessPath!, Environment.ProcessId);
-            ExitApplication();
-        });
-    }
-
-    private async Task CheckForUpdatesAsync(bool silent)
+    private async Task RunAutomaticUpdateAsync(CancellationToken cancellationToken)
     {
         try
         {
             var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
-            _availableUpdate = await _updates.CheckAsync(version);
-            UpdateButton.Content = _availableUpdate is null ? "检查客户端更新" : "立即更新";
-            UpdateText.Text = _availableUpdate is null ? (silent ? "" : "当前已是最新版本") : $"发现新版本：{_availableUpdate.Version}";
-            UpdateBanner.Visibility = _availableUpdate is null ? Visibility.Collapsed : Visibility.Visible;
-            GlobalUpdateText.Text = _availableUpdate is null ? "" : $"版本 {_availableUpdate.Version} 已发布，更新后旧版本将自动删除。";
+            var update = await _updates.CheckAsync(version, cancellationToken);
+            if (update is null) { UpdateBanner.Visibility = Visibility.Collapsed; return; }
+            UpdateBanner.Visibility = Visibility.Visible;
+            GlobalUpdateText.Text = $"正在低速下载版本 {update.Version}，不会阻塞登录和对话。";
+            var prepared = await _updates.PrepareAsync(update, cancellationToken: cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            UpdateBanner.Visibility = Visibility.Collapsed;
+            var answer = MessageBox.Show(
+                $"版本 {prepared.Version} 已在后台下载并通过完整性校验。是否现在更新？\n\n选择“否”后，本次不再提醒；下次启动软件时会再次询问。",
+                "泺栋chat 更新已准备好",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Information);
+            if (answer != MessageBoxResult.Yes) return;
+            _updates.SchedulePrepared(prepared, Environment.ProcessPath!, Environment.ProcessId);
+            ExitApplication();
         }
-        catch (Exception error) { if (!silent) MessageBox.Show(error.Message, "检查更新失败"); }
+        catch (OperationCanceledException) { }
+        catch { UpdateBanner.Visibility = Visibility.Collapsed; }
     }
 
     private void SetBusy(bool busy)
@@ -404,7 +439,7 @@ public partial class MainWindow : Window
     private void MainWindow_OnClosing(object? sender, CancelEventArgs e) { if (_allowExit) return; e.Cancel = true; Hide(); ShowInTaskbar = false; }
     private void ShowMainWindow() { ShowInTaskbar = true; Show(); if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal; Activate(); }
     private void ExitApplication() { PrepareForExit(); Application.Current.Shutdown(); }
-    internal void PrepareForExit() { _allowExit = true; _chatCancellation?.Cancel(); _sessionTimer.Stop(); _trayIcon?.Dispose(); _trayIcon = null; }
+    internal void PrepareForExit() { _allowExit = true; _chatCancellation?.Cancel(); _updateCancellation.Cancel(); _sessionTimer.Stop(); _trayIcon?.Dispose(); _trayIcon = null; }
 }
 
 public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyChanged
@@ -416,4 +451,11 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
     private ChatDisplayMessage(SyncedChatMessage source) { Source = source; _content = source.Content; }
     public static ChatDisplayMessage From(SyncedChatMessage source) => new(source) { Sender = source.Role == "user" ? "我" : "GPT-5.6" };
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+}
+
+public sealed record ConversationListItem(LocalConversation Conversation)
+{
+    public string Title => Conversation.Title;
+    public string UpdatedText => Conversation.UpdatedAt.ToLocalTime().ToString("MM-dd HH:mm");
+    public static ConversationListItem From(LocalConversation conversation) => new(conversation);
 }

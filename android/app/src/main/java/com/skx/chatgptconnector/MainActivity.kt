@@ -50,7 +50,7 @@ private fun LoginScreen(model: ConnectorViewModel) {
     val state = model.state
     Column(Modifier.fillMaxSize().background(Color(0xFFF4F7FB)).verticalScroll(rememberScrollState()).padding(22.dp), verticalArrangement = Arrangement.Center) {
         Text("泺栋chat", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Text("安全登录并同步 Windows 与 Android 数据", color = Color.Gray, modifier = Modifier.padding(top = 6.dp, bottom = 20.dp))
+        Text("安全登录，对话内容不保存在服务器", color = Color.Gray, modifier = Modifier.padding(top = 6.dp, bottom = 20.dp))
         UpdateNotice(state, model::installUpdate)
         Card(colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(2.dp)) {
             Column(Modifier.padding(20.dp)) {

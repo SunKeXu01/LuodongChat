@@ -45,12 +45,11 @@ class ConnectorViewModel(application: Application) : AndroidViewModel(applicatio
             viewModelScope.launch {
                 try {
                     val result = withContext(Dispatchers.IO) {
-                        val profile = api.profile(saved.accessToken)
-                        profile to api.sync(saved.accessToken)
+                        api.profile(saved.accessToken)
                     }
-                    val session = saved.copy(profile = result.first)
+                    val session = saved.copy(profile = result)
                     sessionStore.save(session)
-                    applySync(session, result.second)
+                    state = state.copy(session = session, loading = false, error = null)
                 } catch (_: Exception) {
                     sessionStore.clear()
                     state = ConnectorUiState(error = "登录已过期，请重新登录")
@@ -109,8 +108,7 @@ class ConnectorViewModel(application: Application) : AndroidViewModel(applicatio
 
     private suspend fun finishLogin(session: AccountSession) {
         sessionStore.save(session)
-        val sync = withContext(Dispatchers.IO) { api.sync(session.accessToken) }
-        applySync(session, sync)
+        state = state.copy(session = session, conversationId = null, messages = emptyList(), loading = false, error = null)
     }
 
     private fun normalizedEmail(): String {
@@ -159,9 +157,6 @@ class ConnectorViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             try {
                 val answer = withContext(Dispatchers.IO) {
-                    if (state.conversationId == conversationId && context.count { it.conversationId == conversationId } == 1)
-                        api.saveConversation(session.accessToken, conversationId, text.take(40))
-                    api.saveMessage(session.accessToken, userMessage)
                     api.streamResponse(session.accessToken, context) { delta ->
                         mainHandler.post {
                             state = state.copy(messages = state.messages.map {
@@ -171,20 +166,11 @@ class ConnectorViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                 }
                 val assistant = placeholder.copy(content = answer.ifBlank { "暂时没有收到模型输出。" })
-                withContext(Dispatchers.IO) { api.saveMessage(session.accessToken, assistant) }
                 state = state.copy(messages = state.messages.map { if (it.id == assistantId) assistant else it }, loading = false)
             } catch (error: Exception) {
                 state = state.copy(messages = state.messages.filterNot { it.id == assistantId }, loading = false, error = error.message ?: "发送失败")
             }
         }
-    }
-
-    private fun applySync(session: AccountSession, sync: SyncState) {
-        val conversation = sync.conversations.lastOrNull { it.deletedAt == null }
-        val messages = conversation?.let { selected ->
-            sync.messages.filter { it.conversationId == selected.id }.sortedBy { it.clientCreatedAt }
-        }.orEmpty()
-        state = state.copy(session = session, conversationId = conversation?.id, messages = messages, loading = false, error = null)
     }
 
     private fun runBusy(block: suspend () -> Unit) {

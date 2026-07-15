@@ -8,6 +8,7 @@ class AndroidUpdateServiceTest {
     @Test
     fun comparesPreviewVersions() {
         assertTrue(AndroidUpdateService.isNewer("1.0", "0.1.0-preview.18"))
+        assertTrue(AndroidUpdateService.isNewer("1.1", "1.0"))
         assertFalse(AndroidUpdateService.isNewer("1.0", "1.0"))
         assertFalse(AndroidUpdateService.isNewer("0.1.0-preview.18", "1.0"))
     }

@@ -18,15 +18,3 @@ data class ChatMessage(
     val content: String,
     val clientCreatedAt: String,
 )
-
-data class SyncedConversation(
-    val id: String,
-    val title: String,
-    val deletedAt: String?,
-)
-
-data class SyncState(
-    val conversations: List<SyncedConversation>,
-    val messages: List<ChatMessage>,
-    val serverTime: String,
-)

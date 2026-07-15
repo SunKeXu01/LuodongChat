@@ -178,31 +178,26 @@ test("uses an authenticated account session without exposing a gateway key", asy
   assert.equal(recorded?.gatewayKeyHash, undefined);
 });
 
-test("scopes cross-device sync calls to the signed-in account", async (t) => {
+test("keeps legacy sync clients compatible without storing conversations", async (t) => {
   const config: GatewayConfig = {
     port: 0, upstreamBaseUrl: "http://127.0.0.1:1", upstreamApiKey: "unused", upstreamApiKeys: ["unused"],
     upstreamResponsesPath: "/responses", gatewayKeyHashes: new Set(), requestsPerMinute: 10,
     maxConcurrentRequests: 2, upstreamTimeoutMs: 100,
   };
-  const userId = "00000000-0000-4000-8000-000000000003";
   const enrollmentService = {
-    authenticate: async (token: string) => token === "usr_valid" ? { id: userId, email: "sync@example.com", nickname: "sync", avatarMediaType: null, avatarBase64: null, balanceMicrounits: 0 } : null,
+    authenticate: async (token: string) => token === "usr_valid" ? { id: "00000000-0000-4000-8000-000000000003", email: "local@example.com", nickname: "local", avatarMediaType: null, avatarBase64: null, balanceMicrounits: 0 } : null,
   } as unknown as EnrollmentService;
-  const calls: string[] = [];
-  const chatSyncRepository = {
-    getChanges: async (owner: string) => { calls.push(owner); return { conversations: [], messages: [], serverTime: new Date(0).toISOString() }; },
-    upsertConversation: async () => null,
-    deleteConversation: async () => false,
-    appendMessage: async () => null,
-  };
-  const gateway = createGatewayServer(config, { enrollmentService, chatSyncRepository });
+  const gateway = createGatewayServer(config, { enrollmentService });
   const port = await listen(gateway);
   t.after(() => gateway.close());
   const unauthorized = await fetch(`http://127.0.0.1:${port}/sync/state`);
   assert.equal(unauthorized.status, 401);
   const response = await fetch(`http://127.0.0.1:${port}/sync/state`, { headers: { authorization: "Bearer usr_valid" } });
   assert.equal(response.status, 200);
-  assert.deepEqual(calls, [userId]);
+  const body = await response.json() as { conversations: unknown[]; messages: unknown[]; storage: string };
+  assert.deepEqual(body.conversations, []);
+  assert.deepEqual(body.messages, []);
+  assert.equal(body.storage, "local_only");
 });
 
 test("serves a safe public landing page", async (t) => {
