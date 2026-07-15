@@ -195,6 +195,7 @@ jobs:
       - name: Publish synchronized Windows and Android assets
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           tag="${{ github.ref_name }}"
           version="${tag#v}"
