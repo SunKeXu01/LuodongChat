@@ -254,19 +254,26 @@ test("serves a safe public landing page", async (t) => {
   assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat\.apk/);
   assert.match(page, /github\.com\/SunKeXu01\/LuodongChat\/releases\/latest/);
   assert.match(page, /viewport-fit=cover/);
-  assert.match(page, /其他平台与便携版/);
-  assert.match(page, /对话仅存本机/);
-  assert.match(page, /SHA-256 安全校验/);
+  assert.match(page, /其他下载方式/);
+  assert.match(page, /对话仅保存在设备中/);
+  assert.match(page, /文件安全校验/);
+  assert.match(page, /轻量、独立的/);
+  assert.match(page, /\/assets\/landing\.js/);
+
+  const landingScript = await fetch(`http://127.0.0.1:${gatewayPort}/assets/landing.js`);
+  assert.equal(landingScript.status, 200);
+  assert.match(landingScript.headers.get("content-type") ?? "", /^application\/javascript/);
+  assert.match(await landingScript.text(), /正在开始下载/);
 
   const windowsResponse = await fetch(`http://127.0.0.1:${gatewayPort}/`, {
     headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
   });
-  assert.match(await windowsResponse.text(), /已为此设备推荐 Windows 安装版/);
+  assert.match(await windowsResponse.text(), /下载 Windows 安装版/);
 
   const androidResponse = await fetch(`http://127.0.0.1:${gatewayPort}/`, {
     headers: { "user-agent": "Mozilla/5.0 (Linux; Android 15; Mobile)" },
   });
-  assert.match(await androidResponse.text(), /已为此设备推荐 Android 版/);
+  assert.match(await androidResponse.text(), /下载 Android 版/);
 });
 
 test("does not expose the legacy user gateway-key enrollment API", async (t) => {
