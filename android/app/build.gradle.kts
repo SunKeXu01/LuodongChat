@@ -26,7 +26,7 @@ android {
         versionName = "0.1.0-preview.18"
     }
 
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     signingConfigs {
         if (hasReleaseSigning) {
             create("release") {

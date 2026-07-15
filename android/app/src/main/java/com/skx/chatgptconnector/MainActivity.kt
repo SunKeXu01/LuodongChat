@@ -17,7 +17,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -121,7 +120,7 @@ private fun ChatScreen(model: ConnectorViewModel) {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             clipboard.setPrimaryClip(ClipData.newPlainText("当前对话", text))
                             Toast.makeText(context, "已复制当前对话", Toast.LENGTH_SHORT).show()
-                        }, enabled = state.messages.isNotEmpty()) { Icon(Icons.Default.ContentCopy, "复制当前对话") }
+                        }, enabled = state.messages.isNotEmpty()) { Text("复制") }
                         IconButton(model::newConversation, enabled = !state.loading) { Icon(Icons.Default.Add, "新建会话") }
                         TextButton(model::logout, enabled = !state.loading) { Text("退出") }
                     },
