@@ -21,7 +21,7 @@
 - [直接下载最新 Windows 安装程序](https://520skx.com/client/download/LuodongChat-Setup.exe)
 - [直接下载最新 Android APK](https://520skx.com/client/download/LuodongChat.apk)
 
-Release 文件均包含版本号，例如 `LuodongChat-1.1-win-x64-setup.exe`、`LuodongChat-1.1-win-x64-portable.zip` 与 `LuodongChat-1.1-android.apk`，并同时提供 SHA-256 校验文件。
+Release 文件均包含版本号，例如 `LuodongChat-1.1.1-win-x64-setup.exe`、`LuodongChat-1.1.1-win-x64-portable.zip` 与 `LuodongChat-1.1.1-android.apk`，并同时提供 SHA-256 校验文件。
 
 当前 Windows 版尚未进行代码签名。如果系统显示“Windows 已保护你的电脑”，请确认安装包来自本仓库或上述下载地址，然后点击“更多信息”→“仍要运行”。Android 版使用固定发布证书签名，更新时会覆盖旧版本并保留账号数据。
 

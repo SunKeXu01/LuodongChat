@@ -86,6 +86,13 @@ jobs:
       - name: Install NSIS 3.12
         shell: pwsh
         run: choco install nsis --version=3.12 --yes --no-progress
+      - name: Verify NSIS script uses UTF-8 BOM
+        shell: pwsh
+        run: |
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path 'installer/LuodongChat.nsi'))
+          if ($bytes.Length -lt 3 -or $bytes[0] -ne 0xEF -or $bytes[1] -ne 0xBB -or $bytes[2] -ne 0xBF) {
+            throw 'installer/LuodongChat.nsi must use UTF-8 with BOM so Chinese text is compiled correctly.'
+          }
       - name: Test and publish
         shell: pwsh
         run: |
@@ -116,13 +123,17 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or !(Test-Path $setup)) { throw "NSIS installer build failed." }
           (Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant() |
             Set-Content "$setup.sha256"
-          $testRoot = Join-Path $env:RUNNER_TEMP 'LuodongChat-Installer-Test'
+          # Exercise Unicode and whitespace handling in the exact installer users receive.
+          $testRoot = Join-Path $env:RUNNER_TEMP '泺栋chat 安装测试'
+          $desktopShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) '泺栋chat.lnk'
+          Remove-Item $desktopShortcut -Force -ErrorAction SilentlyContinue
           $process = Start-Process $setup -ArgumentList @('/S', "/D=$testRoot") -Wait -PassThru
-          if ($process.ExitCode -ne 0 -or !(Test-Path "$testRoot/LuodongChat.exe") -or !(Test-Path "$testRoot/Uninstall.exe")) { throw "Installer smoke test failed." }
+          if ($process.ExitCode -ne 0 -or !(Test-Path "$testRoot/LuodongChat.exe") -or !(Test-Path "$testRoot/Uninstall.exe") -or !(Test-Path $desktopShortcut)) { throw "Unicode-path installer or desktop shortcut smoke test failed." }
           & "$testRoot/LuodongChat.exe" --smoke-test
           if ($LASTEXITCODE -ne 0) { throw "Installed executable failed its startup smoke test." }
           $uninstall = Start-Process "$testRoot/Uninstall.exe" -ArgumentList '/S' -Wait -PassThru
           if ($uninstall.ExitCode -ne 0) { throw "Uninstaller smoke test failed." }
+          if (Test-Path $desktopShortcut) { throw "Uninstaller did not remove the desktop shortcut." }
       - uses: actions/upload-artifact@v6
         with:
           name: LuodongChat-win-x64

@@ -1,4 +1,4 @@
-Unicode True
+﻿Unicode True
 !include "MUI2.nsh"
 
 !ifndef VERSION
@@ -49,6 +49,7 @@ VIAddVersionKey "FileVersion" "${FILE_VERSION}"
 !insertmacro MUI_LANGUAGE "SimpChinese"
 
 Section "泺栋chat" MainSection
+  SetShellVarContext current
   SetOutPath "$INSTDIR"
   SetOverwrite on
   File /oname=LuodongChat.exe "${SOURCE_EXE}"
@@ -59,6 +60,7 @@ Section "泺栋chat" MainSection
   FileWrite $0 "${VERSION}"
   FileClose $0
   WriteUninstaller "$INSTDIR\Uninstall.exe"
+  CreateShortCut "$DESKTOP\泺栋chat.lnk" "$INSTDIR\LuodongChat.exe" "" "$INSTDIR\LuodongChat.exe" 0
 
   WriteRegStr HKCU "Software\LuodongChat" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LuodongChat" "DisplayName" "泺栋chat"
@@ -71,9 +73,11 @@ Section "泺栋chat" MainSection
 SectionEnd
 
 Section "Uninstall"
+  SetShellVarContext current
   MessageBox MB_YESNO|MB_ICONQUESTION "是否同时删除本机登录状态、日志和更新缓存？" /SD IDYES IDNO keepData
   RMDir /r "$INSTDIR\data"
 keepData:
+  Delete "$DESKTOP\泺栋chat.lnk"
   Delete "$INSTDIR\LuodongChat.exe"
   Delete "$INSTDIR\.installed"
   Delete "$INSTDIR\Uninstall.exe"
