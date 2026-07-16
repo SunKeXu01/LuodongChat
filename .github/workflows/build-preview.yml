@@ -140,7 +140,13 @@ jobs:
           # The exact silent installer used by automatic updates must launch the
           # newly installed client and leave it running, not merely create a process.
           $env:LUODONGCHAT_AUTOSTART = '1'
-          try { $autoStartUpgrade = Start-Process $setup -ArgumentList '/S' -Wait -PassThru }
+          try {
+            $autoStartUpgrade = Start-Process $setup -ArgumentList '/S' -PassThru
+            if (!$autoStartUpgrade.WaitForExit(60000)) {
+              Stop-Process -Id $autoStartUpgrade.Id -Force -ErrorAction SilentlyContinue
+              throw "Automatic-update installer did not exit."
+            }
+          }
           finally { Remove-Item Env:LUODONGCHAT_AUTOSTART -ErrorAction SilentlyContinue }
           if ($autoStartUpgrade.ExitCode -ne 0) { throw "Automatic-update installer failed." }
           Start-Sleep -Seconds 3
