@@ -24,5 +24,6 @@
   </ItemGroup>
   <ItemGroup>
     <Resource Include="Assets/AppIcon.png" />
+    <Resource Include="Assets/HomeHero.png" />
   </ItemGroup>
 </Project>
