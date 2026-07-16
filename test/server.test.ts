@@ -254,11 +254,20 @@ test("serves a safe public landing page", async (t) => {
   assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat\.apk/);
   assert.match(page, /github\.com\/SunKeXu01\/LuodongChat\/releases\/latest/);
   assert.match(page, /viewport-fit=cover/);
-  assert.match(page, /其他下载方式/);
-  assert.match(page, /对话仅保存在设备中/);
-  assert.match(page, /文件安全校验/);
-  assert.match(page, /轻量、独立的/);
+  assert.match(page, /选择适合你的版本/);
+  assert.match(page, /历史对话不会在泺栋 Chat 服务器持久化/);
+  assert.match(page, /自动联网搜索/);
+  assert.match(page, /支持图片生成/);
+  assert.match(page, /办公、学习与创作的/);
+  assert.match(page, /客户端界面预览/);
+  assert.match(page, /Windows 版本暂未代码签名/);
+  assert.match(page, /\/assets\/landing\.css/);
   assert.match(page, /\/assets\/landing\.js/);
+
+  const landingStyles = await fetch(`http://127.0.0.1:${gatewayPort}/assets/landing.css`);
+  assert.equal(landingStyles.status, 200);
+  assert.match(landingStyles.headers.get("content-type") ?? "", /^text\/css/);
+  assert.match(await landingStyles.text(), /\.product-window/);
 
   const landingScript = await fetch(`http://127.0.0.1:${gatewayPort}/assets/landing.js`);
   assert.equal(landingScript.status, 200);
@@ -268,7 +277,7 @@ test("serves a safe public landing page", async (t) => {
   const windowsResponse = await fetch(`http://127.0.0.1:${gatewayPort}/`, {
     headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
   });
-  assert.match(await windowsResponse.text(), /下载 Windows 安装版/);
+  assert.match(await windowsResponse.text(), /下载 Windows 版/);
 
   const androidResponse = await fetch(`http://127.0.0.1:${gatewayPort}/`, {
     headers: { "user-agent": "Mozilla/5.0 (Linux; Android 15; Mobile)" },
