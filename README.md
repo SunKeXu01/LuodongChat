@@ -24,7 +24,7 @@
 - [GitHub Releases（含历史版本）](https://github.com/SunKeXu01/LuodongChat/releases)
 - Android APK 请从 [GitHub Releases](https://github.com/SunKeXu01/LuodongChat/releases/latest) 下载
 
-GitHub Release 文件均包含版本号，例如 `LuodongChat-1.7-win-x64-setup.exe`、`LuodongChat-1.7-win-x64-portable.zip` 与 `LuodongChat-1.7-android.apk`，并同时提供 SHA-256 校验文件。OSS 同步存储 Windows 与 Android 最新版且不积累旧安装包；Android 对外下载暂由 GitHub Release 提供。
+GitHub Release 和 OSS 文件均包含版本号，例如 `LuodongChat-1.8-win-x64-setup.exe`、`LuodongChat-1.8-win-x64-portable.zip` 与 `LuodongChat-1.8-android.apk`，并同时提供 SHA-256 校验文件。OSS 还保留不带版本号的固定地址用于自动更新，并且只存储最新版，不积累历史安装包。
 
 当前 Windows 版尚未进行代码签名。如果系统显示“Windows 已保护你的电脑”，请确认安装包来自本仓库或上述下载地址，然后点击“更多信息”→“仍要运行”。Android 版使用固定发布证书签名，更新时会覆盖旧版本并保留账号数据。
 

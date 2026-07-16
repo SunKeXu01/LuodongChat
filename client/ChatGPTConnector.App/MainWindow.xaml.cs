@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using System.Windows.Automation;
 using System.Collections.ObjectModel;
 using ChatGPTConnector.Core;
 using Microsoft.Win32;
@@ -37,12 +38,38 @@ public partial class MainWindow : Window
     private readonly CancellationTokenSource _updateCancellation = new();
     private bool _chatScrollPending;
     private bool _syncingPasswordVisibility;
+    private ClientUpdate? _availableUpdate;
+    private AppTheme _theme;
 
-    public MainWindow() : this(false) { }
-
-    internal MainWindow(bool skipStartupChecks)
+    private static string? CurrentVersion
     {
+        get
+        {
+            try
+            {
+                var raw = Assembly.GetExecutingAssembly()
+                    .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+                    ?.Split('+')[0].Trim().TrimStart('v');
+                if (!Version.TryParse(raw, out var version)) return null;
+                return $"{version.Major}.{version.Minor}.{Math.Max(0, version.Build)}";
+            }
+            catch { return null; }
+        }
+    }
+
+    public MainWindow() : this(false, AppThemeManager.Load()) { }
+
+    internal MainWindow(bool skipStartupChecks, AppTheme initialTheme = AppTheme.Light)
+    {
+        _theme = initialTheme;
         InitializeComponent();
+        if (CurrentVersion is { } currentVersion)
+        {
+            CurrentVersionText.Text = $"v{currentVersion}";
+            CurrentVersionPill.ToolTip = $"当前版本 v{currentVersion}";
+            CurrentVersionPill.Visibility = Visibility.Visible;
+        }
+        UpdateThemeButton();
         ChatMessagesItems.ItemsSource = _chatMessages;
         ConversationsList.ItemsSource = _conversations;
         FitToWorkingArea();
@@ -330,9 +357,83 @@ public partial class MainWindow : Window
         button.IsEnabled = true;
     }
 
-    private void HelpButton_OnClick(object sender, RoutedEventArgs e) => MessageBox.Show(
-        "如需帮助或反馈，请联系 QQ：2554798585\n\n你也可以在 GitHub Issues 中提交问题。",
-        "帮助与反馈", MessageBoxButton.OK, MessageBoxImage.Information);
+    private void HelpButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        const string website = "https://520skx.com";
+        const string github = "https://github.com/SunKeXu01/LuodongChat";
+        var content = new System.Windows.Controls.StackPanel { Margin = new Thickness(24) };
+        content.Children.Add(new System.Windows.Controls.TextBlock
+        {
+            Text = "帮助与反馈",
+            FontSize = 24,
+            FontWeight = FontWeights.SemiBold,
+        });
+        var description = new System.Windows.Controls.TextBlock
+        {
+            Text = "你可以选择并复制下面的地址，或直接点击“打开”。",
+            Margin = new Thickness(0, 7, 0, 16),
+        };
+        description.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "MutedBrush");
+        content.Children.Add(description);
+        content.Children.Add(CreateSupportAddressRow("官方网站", website, () => OpenExternalUri(new Uri(website))));
+        content.Children.Add(CreateSupportAddressRow("GitHub 项目", github, () => OpenExternalUri(new Uri(github))));
+        content.Children.Add(CreateSupportAddressRow("客服 QQ", "2554798585", null));
+        var close = new System.Windows.Controls.Button { Content = "关闭", Width = 96, Height = 42, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        content.Children.Add(close);
+        var dialog = new Window
+        {
+            Title = "帮助与反馈",
+            Owner = this,
+            Width = 560,
+            Height = 410,
+            MinWidth = 480,
+            MinHeight = 360,
+            ResizeMode = ResizeMode.CanResize,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = content,
+            ShowInTaskbar = false,
+        };
+        close.Click += (_, _) => dialog.Close();
+        dialog.ShowDialog();
+    }
+
+    private void ThemeToggleButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        _theme = _theme == AppTheme.Light ? AppTheme.Dark : AppTheme.Light;
+        AppThemeManager.Apply(Application.Current, _theme);
+        AppThemeManager.Save(_theme);
+        UpdateThemeButton();
+    }
+
+    private void UpdateThemeButton()
+    {
+        var switchLabel = _theme == AppTheme.Light ? "切换至暗黑模式" : "切换至浅色模式";
+        ThemeToggleButton.ToolTip = switchLabel;
+        AutomationProperties.SetName(ThemeToggleButton, switchLabel);
+        ThemeIconPath.Data = Geometry.Parse(_theme == AppTheme.Light
+            ? "M 20.5,15.2 A 8.5,8.5 0 0 1 8.8,3.5 A 9,9 0 1 0 20.5,15.2 Z"
+            : "M 12,3 L 12,1 M 12,23 L 12,21 M 3,12 L 1,12 M 23,12 L 21,12 M 5.64,5.64 L 4.22,4.22 M 19.78,19.78 L 18.36,18.36 M 18.36,5.64 L 19.78,4.22 M 4.22,19.78 L 5.64,18.36 M 12,7 A 5,5 0 1 1 12,17 A 5,5 0 1 1 12,7");
+    }
+
+    private static FrameworkElement CreateSupportAddressRow(string label, string value, Action? open)
+    {
+        var panel = new System.Windows.Controls.StackPanel { Margin = new Thickness(0, 0, 0, 13) };
+        panel.Children.Add(new System.Windows.Controls.TextBlock { Text = label, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6) });
+        var grid = new System.Windows.Controls.Grid();
+        grid.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition());
+        if (open is not null) grid.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition { Width = new GridLength(82) });
+        var address = new System.Windows.Controls.TextBox { Text = value, IsReadOnly = true, Height = 44, VerticalContentAlignment = VerticalAlignment.Center };
+        grid.Children.Add(address);
+        if (open is not null)
+        {
+            var button = new System.Windows.Controls.Button { Content = "打开", Height = 44, Margin = new Thickness(10, 0, 0, 0) };
+            button.Click += (_, _) => open();
+            System.Windows.Controls.Grid.SetColumn(button, 1);
+            grid.Children.Add(button);
+        }
+        panel.Children.Add(grid);
+        return panel;
+    }
 
     private async Task CompleteLoginAsync(AccountSession session)
     {
@@ -666,9 +767,12 @@ public partial class MainWindow : Window
     {
         try
         {
-            var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
-            var update = await _updates.CheckAsync(version, cancellationToken);
-            if (update is null) { UpdateBanner.Visibility = Visibility.Collapsed; return; }
+            if (CurrentVersion is not { } currentVersion) return;
+            var update = await _updates.CheckAsync(currentVersion, cancellationToken);
+            if (update is null) { UpdateBanner.Visibility = Visibility.Collapsed; VersionUpdateButton.Visibility = Visibility.Collapsed; return; }
+            _availableUpdate = update;
+            VersionUpdateButton.Content = $"新版本 v{update.Version.TrimStart('v')}";
+            VersionUpdateButton.Visibility = Visibility.Visible;
             UpdateBanner.Visibility = Visibility.Visible;
             GlobalUpdateText.Text = $"正在低速下载版本 {update.Version}，不会阻塞登录和对话。";
             var prepared = await _updates.PrepareAsync(update, cancellationToken: cancellationToken);
@@ -685,6 +789,32 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException) { }
         catch { UpdateBanner.Visibility = Visibility.Collapsed; }
+    }
+
+    private void VersionUpdateButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (VersionUpdateButton.ContextMenu is null) return;
+        VersionUpdateButton.ContextMenu.PlacementTarget = VersionUpdateButton;
+        VersionUpdateButton.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        VersionUpdateButton.ContextMenu.IsOpen = true;
+    }
+
+    private void DownloadUpdateFromOss_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_availableUpdate?.InstallerUri is { } uri) OpenExternalUri(uri);
+    }
+
+    private void DownloadUpdateFromGithub_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_availableUpdate is null) return;
+        var version = string.Concat(_availableUpdate.Version.Where(character => char.IsLetterOrDigit(character) || character is '.' or '-' or '_'));
+        OpenExternalUri(new Uri($"https://github.com/SunKeXu01/LuodongChat/releases/download/v{version}/LuodongChat-{version}-win-x64-setup.exe"));
+    }
+
+    private static void OpenExternalUri(Uri uri)
+    {
+        try { Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); }
+        catch { MessageBox.Show("无法打开地址，请检查默认浏览器设置。", "打开失败", MessageBoxButton.OK, MessageBoxImage.Warning); }
     }
 
     private void SetBusy(bool busy)

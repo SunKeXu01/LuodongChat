@@ -31,8 +31,10 @@ public partial class App : Application
         try
         {
             ApplicationDirectories.EnsureWritable();
+            var theme = AppThemeManager.Load();
+            AppThemeManager.Apply(this, theme);
             var smokeTest = e.Args.Contains("--smoke-test", StringComparer.OrdinalIgnoreCase);
-            var window = new MainWindow(skipStartupChecks: smokeTest);
+            var window = new MainWindow(skipStartupChecks: smokeTest, initialTheme: theme);
             window.Show();
             if (smokeTest)
             {

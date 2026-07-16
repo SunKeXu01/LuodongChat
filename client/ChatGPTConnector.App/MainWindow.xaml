@@ -5,14 +5,14 @@
         Icon="/LuodongChat;component/Assets/AppIcon.png"
         WindowStartupLocation="CenterScreen" ResizeMode="CanResizeWithGrip"
         UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
-  <Grid Background="#F5F7FA">
+  <Grid Background="{DynamicResource PageBackgroundBrush}">
     <Grid.RowDefinitions>
       <RowDefinition Height="64"/>
       <RowDefinition Height="Auto"/>
       <RowDefinition Height="*"/>
     </Grid.RowDefinitions>
 
-    <Border Grid.Row="0" Background="#FFFFFF" BorderBrush="#E5E7EB" BorderThickness="0,0,0,1">
+    <Border Grid.Row="0" Background="{DynamicResource TopBarBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
       <Grid Margin="22,0">
         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
@@ -20,9 +20,32 @@
             <Image Source="/LuodongChat;component/Assets/AppIcon.png" Margin="5"/>
           </Border>
           <TextBlock Text="泺栋 Chat" FontSize="19" FontWeight="SemiBold" VerticalAlignment="Center" Margin="11,0,0,0"/>
+          <Border x:Name="CurrentVersionPill" Style="{StaticResource VersionPill}" Visibility="Collapsed"
+                  Margin="11,0,0,0" VerticalAlignment="Center" ToolTipService.ShowDuration="6000">
+            <TextBlock x:Name="CurrentVersionText" VerticalAlignment="Center"/>
+          </Border>
         </StackPanel>
-        <Button x:Name="HelpButton" Grid.Column="1" Content="?  帮助与反馈" Style="{StaticResource HeaderButton}"
-                VerticalAlignment="Center" Click="HelpButton_OnClick"/>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+          <Button x:Name="VersionUpdateButton" Content="新版本" Style="{StaticResource VersionBadgeButton}"
+                  Visibility="Collapsed" Margin="0,0,8,0" Click="VersionUpdateButton_OnClick">
+            <Button.ContextMenu>
+              <ContextMenu>
+                <MenuItem Header="从 OSS 下载（推荐）" Click="DownloadUpdateFromOss_OnClick"/>
+                <MenuItem Header="从 GitHub 下载" Click="DownloadUpdateFromGithub_OnClick"/>
+              </ContextMenu>
+            </Button.ContextMenu>
+          </Button>
+          <Button x:Name="ThemeToggleButton" Style="{StaticResource ThemeToggleButton}" Margin="0,0,8,0"
+                  ToolTip="切换至暗黑模式" AutomationProperties.Name="切换至暗黑模式"
+                  Click="ThemeToggleButton_OnClick">
+            <Viewbox Width="18" Height="18">
+              <Path x:Name="ThemeIconPath" Stroke="{DynamicResource ThemeIconBrush}" StrokeThickness="2"
+                    StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+            </Viewbox>
+          </Button>
+          <Button x:Name="HelpButton" Content="?  帮助与反馈" Style="{StaticResource HeaderButton}"
+                  VerticalAlignment="Center" Click="HelpButton_OnClick"/>
+        </StackPanel>
       </Grid>
     </Border>
 
@@ -35,12 +58,12 @@
     </Border>
 
     <Grid Grid.Row="2">
-      <Grid x:Name="LoginPanel" Background="#F5F7FA">
-        <Border Margin="28,24" CornerRadius="24" Background="White" BorderBrush="#E2E8F0" BorderThickness="1">
+      <Grid x:Name="LoginPanel" Background="{DynamicResource PageBackgroundBrush}">
+        <Border Margin="28,24" CornerRadius="24" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
           <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="3*"/><ColumnDefinition Width="2*"/></Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0" Padding="42,34" CornerRadius="24,0,0,24" Background="#142033">
+            <Border Grid.Column="0" Padding="42,34" CornerRadius="24,0,0,24" Background="{DynamicResource LeftPanelBrush}">
               <Grid>
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                 <StackPanel>
@@ -60,13 +83,13 @@
               </Grid>
             </Border>
 
-            <Border Grid.Column="1" Padding="40,32" CornerRadius="0,24,24,0" Background="White">
+            <Border Grid.Column="1" Padding="40,32" CornerRadius="0,24,24,0" Background="{DynamicResource SurfaceBrush}">
               <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <Grid VerticalAlignment="Center">
                   <StackPanel x:Name="LoginFormsPanel">
                     <StackPanel x:Name="PasswordLoginPanel">
                       <TextBlock Text="欢迎回来" FontSize="29" FontWeight="SemiBold"/>
-                      <TextBlock Text="使用邮箱登录，继续你的对话" Foreground="#667085" Margin="0,7,0,18"/>
+                      <TextBlock Text="使用邮箱登录，继续你的对话" Foreground="{DynamicResource MutedBrush}" Margin="0,7,0,18"/>
                       <TextBlock Text="邮箱" Style="{StaticResource FieldLabel}"/>
                       <TextBox x:Name="LoginEmailInput" Height="52" MaxLength="254" Tag="name@example.com" Style="{StaticResource WatermarkTextBox}" TextChanged="LoginEmailInput_OnTextChanged" KeyDown="LoginInput_OnKeyDown"/>
                       <TextBlock x:Name="LoginEmailError" Style="{StaticResource FieldError}"/>
@@ -76,18 +99,18 @@
                         <TextBox x:Name="LoginPasswordRevealInput" Height="52" MaxLength="128" Visibility="Collapsed" Padding="12,8,54,8" KeyDown="LoginInput_OnKeyDown" TextChanged="LoginPasswordRevealInput_OnTextChanged"/>
                         <Button x:Name="PasswordRevealButton" Content="◉" ToolTip="显示密码" HorizontalAlignment="Right" Width="44" Margin="0,5,5,5" FontSize="17" Style="{StaticResource InlineButton}" Click="PasswordRevealButton_OnClick"/>
                       </Grid>
-                      <TextBlock x:Name="CapsLockNotice" Text="大写锁定已开启" Foreground="#B54708" FontSize="12" Margin="2,5,0,0" Visibility="Collapsed"/>
+                      <TextBlock x:Name="CapsLockNotice" Text="大写锁定已开启" Foreground="{DynamicResource WarningBrush}" FontSize="12" Margin="2,5,0,0" Visibility="Collapsed"/>
                       <TextBlock x:Name="LoginPasswordError" Style="{StaticResource FieldError}"/>
                       <TextBlock x:Name="AuthError" Style="{StaticResource FormError}"/>
                       <Button x:Name="PasswordLoginButton" Content="登录" Height="54" Margin="0,24,0,0" Click="PasswordLoginButton_OnClick"/>
                       <Button Content="使用邮箱验证码登录" Style="{StaticResource LinkButton}" HorizontalAlignment="Left" Margin="-4,13,0,0" Click="ShowCodeLoginButton_OnClick"/>
-                      <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="16"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Orientation="Horizontal"><TextBlock Text="没有账号？" Foreground="#667085" VerticalAlignment="Center"/><Button Content="注册账号" Style="{StaticResource LinkButton}" Click="ShowRegisterButton_OnClick"/></StackPanel><Button Grid.Column="2" Content="忘记密码" Style="{StaticResource LinkButton}" Click="ShowResetPasswordButton_OnClick"/></Grid>
+                      <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="16"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Orientation="Horizontal"><TextBlock Text="没有账号？" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/><Button Content="注册账号" Style="{StaticResource LinkButton}" Click="ShowRegisterButton_OnClick"/></StackPanel><Button Grid.Column="2" Content="忘记密码" Style="{StaticResource LinkButton}" Click="ShowResetPasswordButton_OnClick"/></Grid>
                     </StackPanel>
 
                     <StackPanel x:Name="CodeLoginPanel" Visibility="Collapsed">
                       <Button Content="← 返回密码登录" Style="{StaticResource LinkButton}" HorizontalAlignment="Left" Margin="-4,0,0,12" Click="BackToPasswordLoginButton_OnClick"/>
                       <TextBlock Text="邮箱验证码登录" FontSize="27" FontWeight="SemiBold"/>
-                      <TextBlock Text="验证码将发送到你的邮箱" Foreground="#667085" Margin="0,7,0,18"/>
+                      <TextBlock Text="验证码将发送到你的邮箱" Foreground="{DynamicResource MutedBrush}" Margin="0,7,0,18"/>
                       <TextBlock Text="邮箱" Style="{StaticResource FieldLabel}"/>
                       <TextBox x:Name="CodeLoginEmailInput" Height="52" MaxLength="254" Tag="name@example.com" Style="{StaticResource WatermarkTextBox}" TextChanged="CodeLoginEmailInput_OnTextChanged"/>
                       <TextBlock x:Name="CodeLoginEmailError" Style="{StaticResource FieldError}"/>
@@ -95,7 +118,7 @@
                       <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="132"/></Grid.ColumnDefinitions><TextBox x:Name="CodeLoginCodeInput" Height="52" MaxLength="6" KeyDown="CodeLoginInput_OnKeyDown"/><Button x:Name="CodeLoginSendButton" Grid.Column="1" Content="获取验证码" Style="{StaticResource SecondaryButton}" Margin="10,0,0,0" Click="CodeLoginSendButton_OnClick"/></Grid>
                       <TextBlock x:Name="CodeLoginError" Style="{StaticResource FormError}"/>
                       <Button x:Name="CodeLoginButton" Content="登录" Height="54" Margin="0,24,0,0" Click="CodeLoginButton_OnClick"/>
-                      <StackPanel Orientation="Horizontal" Margin="0,12,0,0"><TextBlock Text="没有账号？" Foreground="#667085" VerticalAlignment="Center"/><Button Content="注册账号" Style="{StaticResource LinkButton}" Click="ShowRegisterButton_OnClick"/></StackPanel>
+                      <StackPanel Orientation="Horizontal" Margin="0,12,0,0"><TextBlock Text="没有账号？" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/><Button Content="注册账号" Style="{StaticResource LinkButton}" Click="ShowRegisterButton_OnClick"/></StackPanel>
                     </StackPanel>
                     <TextBlock x:Name="AuthNotice" Foreground="#067647" TextWrapping="Wrap" Margin="0,12,0,0"/>
                   </StackPanel>
@@ -103,7 +126,7 @@
                   <StackPanel x:Name="AccountActionPanel" Visibility="Collapsed">
                     <Button Content="← 返回登录" Style="{StaticResource LinkButton}" HorizontalAlignment="Left" Margin="-4,0,0,6" Click="BackToLoginButton_OnClick"/>
                     <TextBlock x:Name="AccountActionTitle" Text="注册账号" FontSize="27" FontWeight="SemiBold" Margin="0,10,0,0"/>
-                    <TextBlock x:Name="AccountActionSubtitle" Text="使用邮箱创建你的泺栋 Chat 账号" Foreground="#667085" Margin="0,7,0,10"/>
+                    <TextBlock x:Name="AccountActionSubtitle" Text="使用邮箱创建你的泺栋 Chat 账号" Foreground="{DynamicResource MutedBrush}" Margin="0,7,0,10"/>
                     <TextBlock Text="邮箱" Style="{StaticResource FieldLabel}"/><TextBox x:Name="RegisterEmailInput" Height="52" MaxLength="254" Tag="name@example.com" Style="{StaticResource WatermarkTextBox}" TextChanged="RegisterEmailInput_OnTextChanged"/><TextBlock x:Name="RegisterEmailError" Style="{StaticResource FieldError}"/>
                     <TextBlock Text="邮箱验证码" Style="{StaticResource FieldLabel}"/><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="132"/></Grid.ColumnDefinitions><TextBox x:Name="RegisterCodeInput" Height="52" MaxLength="6"/><Button x:Name="RegisterCodeButton" Grid.Column="1" Content="获取验证码" Style="{StaticResource SecondaryButton}" Margin="10,0,0,0" Click="RegisterCodeButton_OnClick"/></Grid>
                     <TextBlock Text="设置密码" Style="{StaticResource FieldLabel}"/><PasswordBox x:Name="RegisterPasswordInput" Height="52" MaxLength="128"/>
@@ -119,12 +142,12 @@
         </Border>
       </Grid>
 
-      <TabControl x:Name="AccountPanel" Visibility="Collapsed" Background="#FFFFFF" BorderThickness="0" Padding="0">
+      <TabControl x:Name="AccountPanel" Visibility="Collapsed" Background="{DynamicResource SurfaceBrush}" BorderThickness="0" Padding="0">
         <TabItem Header="聊天">
-          <Grid Background="#FFFFFF">
+          <Grid Background="{DynamicResource SurfaceBrush}">
             <Grid.ColumnDefinitions><ColumnDefinition Width="240"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0" Background="#F7F7F8" BorderBrush="#E5E7EB" BorderThickness="0,0,1,0">
+            <Border Grid.Column="0" Background="{DynamicResource SidebarBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0">
               <Grid Margin="12">
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                 <Button x:Name="NewChatButton" Content="＋  新建对话" Height="42" Background="#111827" Margin="0,0,0,10" Click="NewChatButton_OnClick"/>
@@ -140,13 +163,13 @@
                   </ListBox.ItemContainerStyle>
                   <ListBox.ItemTemplate>
                     <DataTemplate>
-                      <Border Padding="11,10" CornerRadius="9" Background="White" BorderBrush="#E5E7EB" BorderThickness="1">
+                      <Border Padding="11,10" CornerRadius="9" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                         <Border.ContextMenu>
                           <ContextMenu><MenuItem Header="删除对话" CommandParameter="{Binding}" Click="DeleteConversationMenuItem_OnClick"/></ContextMenu>
                         </Border.ContextMenu>
                         <StackPanel>
                           <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                          <TextBlock Text="{Binding UpdatedText}" Foreground="#98A2B3" FontSize="11" Margin="0,4,0,0"/>
+                          <TextBlock Text="{Binding UpdatedText}" Foreground="{DynamicResource WeakTextBrush}" FontSize="11" Margin="0,4,0,0"/>
                         </StackPanel>
                       </Border>
                     </DataTemplate>
@@ -157,7 +180,7 @@
 
             <Grid Grid.Column="1">
               <Grid.RowDefinitions><RowDefinition Height="58"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-              <Border BorderBrush="#E5E7EB" BorderThickness="0,0,0,1" Padding="22,0">
+              <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="22,0">
                 <Grid>
                   <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                   <TextBlock Text="GPT-5.6" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/>
@@ -166,17 +189,17 @@
                 </Grid>
               </Border>
 
-              <ScrollViewer x:Name="ChatMessagesScroll" Grid.Row="1" Background="#FFFFFF" Padding="18,14"
+              <ScrollViewer x:Name="ChatMessagesScroll" Grid.Row="1" Background="{DynamicResource SurfaceBrush}" Padding="18,14"
                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                             CanContentScroll="False" Focusable="False">
                 <ItemsControl x:Name="ChatMessagesItems">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
                       <Grid Margin="4,5">
-                        <Border x:Name="MessageBubble" Background="#F8FAFC" BorderBrush="#E5E7EB" BorderThickness="1"
+                        <Border x:Name="MessageBubble" Background="{DynamicResource MessageSurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
                                 CornerRadius="16" Padding="16,13" MaxWidth="760" HorizontalAlignment="Left">
                           <StackPanel>
-                            <TextBlock x:Name="MessageSender" Text="{Binding Sender}" FontWeight="SemiBold" Foreground="#475467"/>
+                            <TextBlock x:Name="MessageSender" Text="{Binding Sender}" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/>
                             <TextBox Text="{Binding Content}" IsReadOnly="True" IsReadOnlyCaretVisible="True"
                                      TextWrapping="Wrap" AcceptsReturn="True" BorderThickness="0" Background="Transparent"
                                      Padding="0" Margin="0,7,0,0" Cursor="IBeam"
@@ -202,7 +225,7 @@
                                 <DataTemplate>
                                   <Button Content="{Binding Title}" Tag="{Binding Url}" ToolTip="{Binding Url}"
                                           HorizontalAlignment="Left" Padding="0,3" Background="Transparent"
-                                          Foreground="#155EEF" BorderThickness="0" Click="CitationButton_OnClick"/>
+                                          Foreground="{DynamicResource LinkBrush}" BorderThickness="0" Click="CitationButton_OnClick"/>
                                 </DataTemplate>
                               </ItemsControl.ItemTemplate>
                             </ItemsControl>
@@ -212,9 +235,9 @@
                       <DataTemplate.Triggers>
                         <DataTrigger Binding="{Binding IsUser}" Value="True">
                           <Setter TargetName="MessageBubble" Property="HorizontalAlignment" Value="Right"/>
-                          <Setter TargetName="MessageBubble" Property="Background" Value="#E8F2FF"/>
-                          <Setter TargetName="MessageBubble" Property="BorderBrush" Value="#C7DCFA"/>
-                          <Setter TargetName="MessageSender" Property="Foreground" Value="#175CD3"/>
+                          <Setter TargetName="MessageBubble" Property="Background" Value="{DynamicResource UserMessageBrush}"/>
+                          <Setter TargetName="MessageBubble" Property="BorderBrush" Value="{DynamicResource UserMessageBorderBrush}"/>
+                          <Setter TargetName="MessageSender" Property="Foreground" Value="{DynamicResource LinkBrush}"/>
                         </DataTrigger>
                       </DataTemplate.Triggers>
                     </DataTemplate>
@@ -222,8 +245,8 @@
                 </ItemsControl>
               </ScrollViewer>
 
-              <TextBlock x:Name="ChatNotice" Grid.Row="2" Foreground="#B42318" TextWrapping="Wrap" Margin="24,4,24,2"/>
-              <Border Grid.Row="3" Background="#F8FAFC" BorderBrush="#D0D5DD" BorderThickness="1" CornerRadius="14" Margin="22,10,22,18" Padding="10">
+              <TextBlock x:Name="ChatNotice" Grid.Row="2" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" Margin="24,4,24,2"/>
+              <Border Grid.Row="3" Background="{DynamicResource MessageSurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="14" Margin="22,10,22,18" Padding="10">
                 <Grid>
                   <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="82"/></Grid.ColumnDefinitions>
                   <TextBox x:Name="ChatInput" MinHeight="48" MaxHeight="140" AcceptsReturn="True" TextWrapping="Wrap"
@@ -241,7 +264,7 @@
           <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="34" Width="460" HorizontalAlignment="Center">
               <TextBlock Text="个人资料" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,24"/>
-              <Border Width="96" Height="96" CornerRadius="48" BorderBrush="#E5E7EB" BorderThickness="1" HorizontalAlignment="Left" ClipToBounds="True">
+              <Border Width="96" Height="96" CornerRadius="48" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" HorizontalAlignment="Left" ClipToBounds="True">
                 <Image x:Name="AvatarImage" Stretch="UniformToFill"/>
               </Border>
               <Button x:Name="UploadAvatarButton" Content="更换头像" Width="110" Margin="0,10,0,12" HorizontalAlignment="Left"
@@ -252,7 +275,7 @@
               <TextBox x:Name="NicknameInput" MaxLength="20"/>
               <Button x:Name="SaveProfileButton" Content="保存" Height="42" Margin="0,16,0,0" Click="SaveProfileButton_OnClick"/>
               <Button x:Name="LogoutButton" Content="退出登录" Height="42" Margin="0,12,0,0"
-                      Background="#FEE4E2" Foreground="#B42318" Click="LogoutButton_OnClick"/>
+                      Background="{DynamicResource DangerSurfaceBrush}" Foreground="{DynamicResource DangerTextBrush}" Click="LogoutButton_OnClick"/>
             </StackPanel>
           </ScrollViewer>
         </TabItem>

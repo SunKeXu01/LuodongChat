@@ -358,9 +358,10 @@ jobs:
           test -s "$portable_checksum"
           test -s "$android_apk"
           test -s "$android_checksum"
+          version="${VERSION#v}"
           base='https://luodongchat-app.oss-cn-beijing.aliyuncs.com/latest'
           github_base="https://github.com/${{ github.repository }}/releases/download/$VERSION"
-          printf '{"version":"%s","executableUrl":"%s/LuodongChat.exe","checksumUrl":"%s/LuodongChat.exe.sha256","installerUrl":"%s/LuodongChat-Setup.exe","installerChecksumUrl":"%s/LuodongChat-Setup.exe.sha256","androidApkUrl":"%s/LuodongChat-%s-android.apk","androidChecksumUrl":"%s/LuodongChat-%s-android.apk.sha256"}\n' "${VERSION#v}" "$base" "$base" "$base" "$base" "$github_base" "${VERSION#v}" "$github_base" "${VERSION#v}" > update.json
+          printf '{"version":"%s","executableUrl":"%s/LuodongChat-%s-win-x64.exe","checksumUrl":"%s/LuodongChat-%s-win-x64.exe.sha256","installerUrl":"%s/LuodongChat-%s-win-x64-setup.exe","installerChecksumUrl":"%s/LuodongChat-%s-win-x64-setup.exe.sha256","androidApkUrl":"%s/LuodongChat-%s-android.apk","androidChecksumUrl":"%s/LuodongChat-%s-android.apk.sha256"}\n' "$version" "$base" "$version" "$base" "$version" "$base" "$version" "$base" "$version" "$github_base" "$version" "$github_base" "$version" > update.json
           install -d latest
           cp "$executable" latest/LuodongChat.exe
           cp "$checksum" latest/LuodongChat.exe.sha256
@@ -370,12 +371,23 @@ jobs:
           cp "$portable_checksum" latest/LuodongChat-portable.zip.sha256
           cp "$android_apk" latest/LuodongChat.apk
           cp "$android_checksum" latest/LuodongChat.apk.sha256
+          cp "$executable" "latest/LuodongChat-$version-win-x64.exe"
+          cp "$checksum" "latest/LuodongChat-$version-win-x64.exe.sha256"
+          cp "$installer" "latest/LuodongChat-$version-win-x64-setup.exe"
+          cp "$installer_checksum" "latest/LuodongChat-$version-win-x64-setup.exe.sha256"
+          cp "$portable" "latest/LuodongChat-$version-win-x64-portable.zip"
+          cp "$portable_checksum" "latest/LuodongChat-$version-win-x64-portable.zip.sha256"
+          cp "$android_apk" "latest/LuodongChat-$version-android.apk"
+          cp "$android_checksum" "latest/LuodongChat-$version-android.apk.sha256"
           cp update.json latest/update.json
           OSSUTIL="$RUNNER_TEMP/ossutil-bin"
           CONFIG="$RUNNER_TEMP/ossutil.conf"
           "$OSSUTIL" rm oss://luodongchat-app/latest/ --recursive --force --config-file "$CONFIG"
           "$OSSUTIL" cp latest/ oss://luodongchat-app/latest/ --recursive --force --acl public-read --cache-control 'public, max-age=300' --config-file "$CONFIG"
           for object in LuodongChat.exe LuodongChat.exe.sha256 LuodongChat-Setup.exe LuodongChat-Setup.exe.sha256 LuodongChat-portable.zip LuodongChat-portable.zip.sha256 LuodongChat.apk LuodongChat.apk.sha256 update.json; do
+            "$OSSUTIL" stat "oss://luodongchat-app/latest/$object" --config-file "$CONFIG" >/dev/null
+          done
+          for object in "LuodongChat-$version-win-x64.exe" "LuodongChat-$version-win-x64.exe.sha256" "LuodongChat-$version-win-x64-setup.exe" "LuodongChat-$version-win-x64-setup.exe.sha256" "LuodongChat-$version-win-x64-portable.zip" "LuodongChat-$version-win-x64-portable.zip.sha256" "LuodongChat-$version-android.apk" "LuodongChat-$version-android.apk.sha256"; do
             "$OSSUTIL" stat "oss://luodongchat-app/latest/$object" --config-file "$CONFIG" >/dev/null
           done
           rsync -rz update.json connector-deploy@8.140.211.162:/app/module/client-releases/update.json.next
