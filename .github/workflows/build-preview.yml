@@ -129,6 +129,14 @@ jobs:
           Remove-Item $desktopShortcut -Force -ErrorAction SilentlyContinue
           $process = Start-Process $setup -ArgumentList @('/S', "/D=$testRoot") -Wait -PassThru
           if ($process.ExitCode -ne 0 -or !(Test-Path "$testRoot/LuodongChat.exe") -or !(Test-Path "$testRoot/Uninstall.exe") -or !(Test-Path $desktopShortcut)) { throw "Unicode-path installer or desktop shortcut smoke test failed." }
+          # An in-place update must discover the registered installation path and
+          # preserve every user-owned file under data/.
+          $userState = "$testRoot/data/update-preservation-test.json"
+          '{"keep":true}' | Set-Content $userState -Encoding utf8
+          $upgrade = Start-Process $setup -ArgumentList '/S' -Wait -PassThru
+          if ($upgrade.ExitCode -ne 0 -or !(Test-Path $userState) -or (Get-Content $userState -Raw) -notmatch '"keep":true') {
+            throw "In-place update changed the install directory or deleted user data."
+          }
           & "$testRoot/LuodongChat.exe" --smoke-test
           if ($LASTEXITCODE -ne 0) { throw "Installed executable failed its startup smoke test." }
           # Reproduce the real user case: the close button leaves the WPF client

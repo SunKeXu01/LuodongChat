@@ -797,9 +797,29 @@ public partial class MainWindow : Window
         Width = Math.Min(Width, Math.Max(MinWidth, area.Width));
         Height = Math.Min(Height, Math.Max(MinHeight, area.Height));
     }
-    private void InitializeTrayIcon() => _trayIcon = new TrayIconService("泺栋 Chat", ShowMainWindow, ExitApplication);
+    private void InitializeTrayIcon() => _trayIcon = new TrayIconService("泺栋 Chat", ShowMainWindow, RestartApplication, ExitApplication);
     private void MainWindow_OnClosing(object? sender, CancelEventArgs e) { if (_allowExit) return; e.Cancel = true; Hide(); ShowInTaskbar = false; }
     private void ShowMainWindow() { ShowInTaskbar = true; Show(); if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal; Activate(); }
+    private void RestartApplication()
+    {
+        var executable = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(executable))
+        {
+            MessageBox.Show("无法确定程序位置，请退出后手动重新打开。", "重新启动失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        try
+        {
+            var startInfo = new ProcessStartInfo(executable) { UseShellExecute = true };
+            startInfo.ArgumentList.Add($"--restart-from={Environment.ProcessId}");
+            Process.Start(startInfo);
+            ExitApplication();
+        }
+        catch
+        {
+            MessageBox.Show("无法重新启动程序，请退出后手动重新打开。", "重新启动失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
     private void ExitApplication() { PrepareForExit(); Application.Current.Shutdown(); }
     internal void PrepareForExit() { _allowExit = true; _chatCancellation?.Cancel(); _updateCancellation.Cancel(); _sessionTimer.Stop(); _trayIcon?.Dispose(); _trayIcon = null; }
 }

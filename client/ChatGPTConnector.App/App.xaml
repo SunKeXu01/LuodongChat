@@ -24,7 +24,10 @@
     <SolidColorBrush x:Key="UserMessageBrush" Color="#E8F2FF"/>
     <SolidColorBrush x:Key="UserMessageBorderBrush" Color="#C7DCFA"/>
     <SolidColorBrush x:Key="VersionPillBrush" Color="#EEF3F8"/>
-    <SolidColorBrush x:Key="VersionPillTextBrush" Color="#52647A"/>
+    <SolidColorBrush x:Key="VersionPillTextBrush" Color="#08786C"/>
+    <SolidColorBrush x:Key="CurrentVersionPillBrush" Color="#EAF8F6"/>
+    <SolidColorBrush x:Key="UpdateVersionPillBrush" Color="#FEE4E2"/>
+    <SolidColorBrush x:Key="UpdateVersionPillTextBrush" Color="#B42318"/>
     <SolidColorBrush x:Key="ThemeButtonBrush" Color="#F1F4F8"/>
     <SolidColorBrush x:Key="ThemeIconBrush" Color="#475467"/>
     <SolidColorBrush x:Key="LeftPanelBrush" Color="#142033"/>
@@ -112,9 +115,22 @@
     <Style x:Key="HeaderButton" TargetType="Button" BasedOn="{StaticResource LinkButton}">
       <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/><Setter Property="Padding" Value="10,6"/>
     </Style>
-    <Style x:Key="VersionBadgeButton" TargetType="Button" BasedOn="{StaticResource LinkButton}">
-      <Setter Property="Background" Value="{DynamicResource SecondarySurfaceBrush}"/><Setter Property="Foreground" Value="{DynamicResource SecondaryForegroundBrush}"/>
-      <Setter Property="Padding" Value="10,5"/><Setter Property="FontSize" Value="12"/>
+    <Style x:Key="VersionBadgeButton" TargetType="Button">
+      <Setter Property="Height" Value="24"/><Setter Property="MinHeight" Value="24"/><Setter Property="Padding" Value="9,0"/>
+      <Setter Property="Background" Value="{DynamicResource UpdateVersionPillBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource UpdateVersionPillTextBrush}"/>
+      <Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="BorderThickness" Value="0"/><Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+        <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="999" Padding="{TemplateBinding Padding}">
+          <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Opacity" Value="0.82"/></Trigger>
+          <Trigger Property="IsPressed" Value="True"><Setter TargetName="Chrome" Property="Opacity" Value="0.68"/></Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/><Setter TargetName="Chrome" Property="BorderThickness" Value="2"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style x:Key="FeatureTag" TargetType="Border">
       <Setter Property="Background" Value="#22344C"/><Setter Property="CornerRadius" Value="12"/>
@@ -152,7 +168,7 @@
     </Style>
     <Style x:Key="VersionPill" TargetType="Border">
       <Setter Property="Height" Value="24"/><Setter Property="Padding" Value="9,0"/>
-      <Setter Property="CornerRadius" Value="999"/><Setter Property="Background" Value="{DynamicResource VersionPillBrush}"/>
+      <Setter Property="CornerRadius" Value="999"/><Setter Property="Background" Value="{DynamicResource CurrentVersionPillBrush}"/>
       <Setter Property="TextElement.Foreground" Value="{DynamicResource VersionPillTextBrush}"/>
       <Setter Property="TextElement.FontSize" Value="12"/><Setter Property="TextElement.FontWeight" Value="Medium"/>
     </Style>

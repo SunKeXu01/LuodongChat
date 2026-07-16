@@ -1,4 +1,5 @@
 using System.IO;
+using System.Diagnostics;
 using System.Text;
 using System.Windows;
 using System.Windows.Threading;
@@ -15,6 +16,7 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        WaitForRestartSource(e.Args);
         _singleInstanceMutex = new Mutex(true, @"Local\LuodongChat.WindowsClient", out var isFirstInstance);
         if (!isFirstInstance)
         {
@@ -48,6 +50,16 @@ public partial class App : Application
             ReportFatalError(error);
             Shutdown(1);
         }
+    }
+
+    private static void WaitForRestartSource(IEnumerable<string> arguments)
+    {
+        const string prefix = "--restart-from=";
+        var raw = arguments.FirstOrDefault(argument => argument.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (raw is null || !int.TryParse(raw[prefix.Length..], out var processId) || processId == Environment.ProcessId) return;
+        try { Process.GetProcessById(processId).WaitForExit(15_000); }
+        catch (ArgumentException) { }
+        catch (InvalidOperationException) { }
     }
 
     protected override void OnExit(ExitEventArgs e)

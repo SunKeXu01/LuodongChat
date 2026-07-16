@@ -24,10 +24,8 @@
                   Margin="11,0,0,0" VerticalAlignment="Center" ToolTipService.ShowDuration="6000">
             <TextBlock x:Name="CurrentVersionText" VerticalAlignment="Center"/>
           </Border>
-        </StackPanel>
-        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
           <Button x:Name="VersionUpdateButton" Content="新版本" Style="{StaticResource VersionBadgeButton}"
-                  Visibility="Collapsed" Margin="0,0,8,0" Click="VersionUpdateButton_OnClick">
+                  Visibility="Collapsed" Margin="7,0,0,0" Click="VersionUpdateButton_OnClick">
             <Button.ContextMenu>
               <ContextMenu>
                 <MenuItem Header="从 OSS 下载（推荐）" Click="DownloadUpdateFromOss_OnClick"/>
@@ -35,6 +33,8 @@
               </ContextMenu>
             </Button.ContextMenu>
           </Button>
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
           <Button x:Name="ThemeToggleButton" Style="{StaticResource ThemeToggleButton}" Margin="0,0,8,0"
                   ToolTip="切换至暗黑模式" AutomationProperties.Name="切换至暗黑模式"
                   Click="ThemeToggleButton_OnClick">

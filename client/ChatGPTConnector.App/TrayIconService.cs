@@ -24,7 +24,7 @@ internal sealed class TrayIconService : IDisposable
     private IntPtr _iconHandle;
     private bool _disposed;
 
-    public TrayIconService(string tooltip, Action showWindow, Action exitApplication)
+    public TrayIconService(string tooltip, Action showWindow, Action restartApplication, Action exitApplication)
     {
         _showWindow = showWindow;
         _source = new HwndSource(new HwndSourceParameters("ChatGPTConnector.TrayIcon")
@@ -38,9 +38,12 @@ internal sealed class TrayIconService : IDisposable
         _menu = new ContextMenu { Placement = PlacementMode.MousePoint };
         var showItem = new MenuItem { Header = "显示主界面" };
         showItem.Click += (_, _) => showWindow();
+        var restartItem = new MenuItem { Header = "重新启动" };
+        restartItem.Click += (_, _) => restartApplication();
         var exitItem = new MenuItem { Header = "退出" };
         exitItem.Click += (_, _) => exitApplication();
         _menu.Items.Add(showItem);
+        _menu.Items.Add(restartItem);
         _menu.Items.Add(new Separator());
         _menu.Items.Add(exitItem);
 

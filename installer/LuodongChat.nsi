@@ -51,6 +51,15 @@ VIAddVersionKey "FileVersion" "${FILE_VERSION}"
 Section "泺栋chat" MainSection
   SetShellVarContext current
   SetOutPath "$INSTDIR"
+  # Upgrade in place: stop the old client and remove only replaceable program
+  # files. The data directory is deliberately never removed by installation.
+  IfFileExists "$INSTDIR\LuodongChat.exe" 0 installFiles
+  nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /T /IM LuodongChat.exe'
+  Pop $0
+  Sleep 500
+  Delete /REBOOTOK "$INSTDIR\LuodongChat.exe"
+  Delete "$INSTDIR\Uninstall.exe"
+installFiles:
   SetOverwrite on
   File /oname=LuodongChat.exe "${SOURCE_EXE}"
   CreateDirectory "$INSTDIR\data"
