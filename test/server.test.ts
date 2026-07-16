@@ -249,9 +249,9 @@ test("serves a safe public landing page", async (t) => {
   assert.equal(response.headers.get("vary"), "User-Agent");
   const page = await response.text();
   assert.match(page, /泺栋 Chat/);
-  assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat-1\.8-win-x64-setup\.exe/);
-  assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat-1\.8-win-x64-portable\.zip/);
-  assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat-1\.8-android\.apk/);
+  assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat-1\.9-win-x64-setup\.exe/);
+  assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat-1\.9-win-x64-portable\.zip/);
+  assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat-1\.9-android\.apk/);
   assert.match(page, /github\.com\/SunKeXu01\/LuodongChat\/releases\/latest/);
   assert.match(page, /viewport-fit=cover/);
   assert.match(page, /选择适合你的版本/);

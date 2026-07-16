@@ -359,42 +359,7 @@ public partial class MainWindow : Window
 
     private void HelpButton_OnClick(object sender, RoutedEventArgs e)
     {
-        const string website = "https://520skx.com";
-        const string github = "https://github.com/SunKeXu01/LuodongChat";
-        var content = new System.Windows.Controls.StackPanel { Margin = new Thickness(24) };
-        content.Children.Add(new System.Windows.Controls.TextBlock
-        {
-            Text = "帮助与反馈",
-            FontSize = 24,
-            FontWeight = FontWeights.SemiBold,
-        });
-        var description = new System.Windows.Controls.TextBlock
-        {
-            Text = "你可以选择并复制下面的地址，或直接点击“打开”。",
-            Margin = new Thickness(0, 7, 0, 16),
-        };
-        description.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "MutedBrush");
-        content.Children.Add(description);
-        content.Children.Add(CreateSupportAddressRow("官方网站", website, () => OpenExternalUri(new Uri(website))));
-        content.Children.Add(CreateSupportAddressRow("GitHub 项目", github, () => OpenExternalUri(new Uri(github))));
-        content.Children.Add(CreateSupportAddressRow("客服 QQ", "2554798585", null));
-        var close = new System.Windows.Controls.Button { Content = "关闭", Width = 96, Height = 42, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
-        content.Children.Add(close);
-        var dialog = new Window
-        {
-            Title = "帮助与反馈",
-            Owner = this,
-            Width = 560,
-            Height = 410,
-            MinWidth = 480,
-            MinHeight = 360,
-            ResizeMode = ResizeMode.CanResize,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = content,
-            ShowInTaskbar = false,
-        };
-        close.Click += (_, _) => dialog.Close();
-        dialog.ShowDialog();
+        new HelpDialog(CurrentVersion) { Owner = this }.ShowDialog();
     }
 
     private void ThemeToggleButton_OnClick(object sender, RoutedEventArgs e)
@@ -413,26 +378,6 @@ public partial class MainWindow : Window
         ThemeIconPath.Data = Geometry.Parse(_theme == AppTheme.Light
             ? "M 20.5,15.2 A 8.5,8.5 0 0 1 8.8,3.5 A 9,9 0 1 0 20.5,15.2 Z"
             : "M 12,3 L 12,1 M 12,23 L 12,21 M 3,12 L 1,12 M 23,12 L 21,12 M 5.64,5.64 L 4.22,4.22 M 19.78,19.78 L 18.36,18.36 M 18.36,5.64 L 19.78,4.22 M 4.22,19.78 L 5.64,18.36 M 12,7 A 5,5 0 1 1 12,17 A 5,5 0 1 1 12,7");
-    }
-
-    private static FrameworkElement CreateSupportAddressRow(string label, string value, Action? open)
-    {
-        var panel = new System.Windows.Controls.StackPanel { Margin = new Thickness(0, 0, 0, 13) };
-        panel.Children.Add(new System.Windows.Controls.TextBlock { Text = label, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6) });
-        var grid = new System.Windows.Controls.Grid();
-        grid.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition());
-        if (open is not null) grid.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition { Width = new GridLength(82) });
-        var address = new System.Windows.Controls.TextBox { Text = value, IsReadOnly = true, Height = 44, VerticalContentAlignment = VerticalAlignment.Center };
-        grid.Children.Add(address);
-        if (open is not null)
-        {
-            var button = new System.Windows.Controls.Button { Content = "打开", Height = 44, Margin = new Thickness(10, 0, 0, 0) };
-            button.Click += (_, _) => open();
-            System.Windows.Controls.Grid.SetColumn(button, 1);
-            grid.Children.Add(button);
-        }
-        panel.Children.Add(grid);
-        return panel;
     }
 
     private async Task CompleteLoginAsync(AccountSession session)
