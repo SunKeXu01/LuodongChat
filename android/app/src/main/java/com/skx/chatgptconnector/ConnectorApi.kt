@@ -5,7 +5,7 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URI
 
-class ConnectorApi(private val baseUrl: String = "https://luodongchat.com") {
+class ConnectorApi(private val baseUrl: String = "https://520skx.com") {
     fun requestCode(email: String) {
         request("POST", "/account/code", body = JSONObject().put("email", email))
     }

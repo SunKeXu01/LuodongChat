@@ -33,7 +33,7 @@ function landingPage(userAgent = ""): string {
     ? {
         label: "下载 Android 版",
         href: "https://oss.520skx.com/latest/LuodongChat.apk",
-        meta: "v1.4 · Android 10+ · 约 2.4 MB",
+        meta: "v1.5 · Android 10+ · 约 2.4 MB",
         file: "LuodongChat.apk",
         icon: "◆",
       }
@@ -41,7 +41,7 @@ function landingPage(userAgent = ""): string {
       ? {
           label: "下载 Windows 安装版",
           href: "https://oss.520skx.com/latest/LuodongChat-Setup.exe",
-          meta: "v1.4 · Windows 10/11 · 64 位 · 约 58 MB",
+          meta: "v1.5 · Windows 10/11 · 64 位 · 约 58 MB",
           file: "LuodongChat-Setup.exe",
           icon: "⊞",
         }
@@ -88,7 +88,7 @@ function landingPage(userAgent = ""): string {
   <div class="trust" aria-label="产品特性"><div class="trust-item"><span class="trust-icon">✓</span><span class="trust-copy"><strong>本地存储</strong><small>对话仅保存在设备中</small></span></div><a class="trust-item" href="https://oss.520skx.com/latest/LuodongChat-Setup.exe.sha256"><span class="trust-icon">✓</span><span class="trust-copy"><strong>文件安全校验 →</strong><small>查看 Windows SHA-256</small></span></a><div class="trust-item"><span class="trust-icon">↻</span><span class="trust-copy"><strong>自动更新</strong><small>自动获取稳定版本</small></span></div></div>
   <details id="downloads"><summary><span class="summary-copy"><strong>其他下载方式</strong><small>Windows 便携版、Android APK 与历史版本</small></span><span class="chevron" aria-hidden="true">⌄</span></summary><div class="download-list"><a class="download-option" data-download data-file="LuodongChat-Setup.exe" href="https://oss.520skx.com/latest/LuodongChat-Setup.exe"><strong>Windows 安装版 →</strong><span>快捷方式与自动更新 · 约 58 MB</span></a><a class="download-option" data-download data-file="LuodongChat-portable.zip" href="https://oss.520skx.com/latest/LuodongChat-portable.zip"><strong>Windows 便携版 →</strong><span>解压即用，数据存放本地 · 约 59 MB</span></a><a class="download-option" data-download data-file="LuodongChat.apk" href="https://oss.520skx.com/latest/LuodongChat.apk"><strong>Android APK →</strong><span>Android 10 及以上 · 约 2.4 MB</span></a><a class="download-option" href="https://github.com/SunKeXu01/LuodongChat/releases/latest"><strong>历史版本 →</strong><span>版本记录与全部校验文件</span></a></div></details>
   <aside class="privacy-note"><span class="shield" aria-hidden="true">🛡</span><div><strong>隐私与账号安全</strong><p>对话记录仅保存在你的设备中，不上传至泺栋 Chat 服务器。</p><a href="https://github.com/SunKeXu01/LuodongChat/blob/main/docs/DATA_MODEL.md">了解登录与数据处理方式 →</a></div></aside>
-  <footer class="footer"><nav><a href="https://github.com/SunKeXu01/LuodongChat/blob/main/docs/DATA_MODEL.md">隐私说明</a><a href="https://github.com/SunKeXu01/LuodongChat#Windows-使用方式">安装帮助</a><a href="https://github.com/SunKeXu01/LuodongChat/releases/latest">更新记录</a><a href="https://github.com/SunKeXu01/LuodongChat">GitHub</a><a href="https://github.com/SunKeXu01/LuodongChat/issues">联系我们</a></nav><span class="version-date">v1.4 · 2026-07-15</span></footer>
+  <footer class="footer"><nav><a href="https://github.com/SunKeXu01/LuodongChat/blob/main/docs/DATA_MODEL.md">隐私说明</a><a href="https://github.com/SunKeXu01/LuodongChat#Windows-使用方式">安装帮助</a><a href="https://github.com/SunKeXu01/LuodongChat/releases/latest">更新记录</a><a href="https://github.com/SunKeXu01/LuodongChat">GitHub</a><a href="https://github.com/SunKeXu01/LuodongChat/issues">联系我们</a></nav><span class="version-date">v1.5 · 2026-07-16</span></footer>
 </main><script src="/assets/landing.js" defer></script></body>
 </html>`;
 }

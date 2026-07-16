@@ -11,7 +11,7 @@ import java.security.MessageDigest
 
 data class AndroidUpdate(val version: String, val apkUrl: String, val checksumUrl: String)
 
-class AndroidUpdateService(private val baseUrl: String = "https://luodongchat.com") {
+class AndroidUpdateService(private val baseUrl: String = "https://520skx.com") {
     fun check(currentVersion: String): AndroidUpdate? {
         val root = JSONObject(read("$baseUrl/client/update.json"))
         val version = root.getString("version").trimStart('v')
@@ -55,7 +55,7 @@ class AndroidUpdateService(private val baseUrl: String = "https://luodongchat.co
 
     private fun requireTrusted(value: String) {
         val uri = URI.create(value)
-        require(uri.scheme == "https" && uri.host in setOf("luodongchat.com", "luodongchat-app.oss-cn-beijing.aliyuncs.com", "github.com")) { "更新清单包含不受信任的下载地址" }
+        require(uri.scheme == "https" && uri.host in setOf("520skx.com", "luodongchat.com", "luodongchat-app.oss-cn-beijing.aliyuncs.com", "github.com")) { "更新清单包含不受信任的下载地址" }
     }
 
     companion object {

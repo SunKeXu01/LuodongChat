@@ -17,7 +17,7 @@ namespace ChatGPTConnector.App;
 
 public partial class MainWindow : Window
 {
-    private static readonly Uri GatewayUri = new("https://luodongchat.com");
+    private static readonly Uri GatewayUri = new("https://520skx.com");
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(5) };
     private static readonly HttpClient UpdateHttp = new() { Timeout = Timeout.InfiniteTimeSpan };
     private readonly AccountClient _accounts = new(Http);

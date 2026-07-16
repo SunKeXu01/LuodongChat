@@ -5,7 +5,7 @@ APP_DIR="${APP_DIR:-/app/chatgpt_connector}"
 COMPOSE_FILE="$APP_DIR/deploy/compose.server.yaml"
 ENV_FILE="$APP_DIR/.env"
 
-curl --fail --silent --show-error --max-time 10 https://luodongchat.com/healthz >/dev/null
+curl --fail --silent --show-error --max-time 10 https://520skx.com/healthz >/dev/null
 
 containers="$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps --quiet)"
 if [[ -z "$containers" ]]; then

@@ -9,9 +9,9 @@
     <Title>泺栋chat</Title>
     <Product>泺栋chat</Product>
     <Description>独立的 GPT-5.6 对话客户端</Description>
-    <Version>1.4</Version>
-    <AssemblyVersion>1.4.0.0</AssemblyVersion>
-    <FileVersion>1.4.0.0</FileVersion>
+    <Version>1.5</Version>
+    <AssemblyVersion>1.5.0.0</AssemblyVersion>
+    <FileVersion>1.5.0.0</FileVersion>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
