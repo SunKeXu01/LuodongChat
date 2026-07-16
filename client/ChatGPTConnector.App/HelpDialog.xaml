@@ -1,7 +1,7 @@
 <Window x:Class="ChatGPTConnector.App.HelpDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="帮助与反馈" Width="640" Height="448" MinWidth="600" MinHeight="420"
+        Title="帮助与反馈" Width="840" Height="630" MinWidth="720" MinHeight="580"
         Icon="/LuodongChat;component/Assets/AppIcon.png"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
         ShowInTaskbar="False" UseLayoutRounding="True" SnapsToDevicePixels="True"
@@ -12,8 +12,9 @@
       <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
       <Setter Property="BorderThickness" Value="1"/>
       <Setter Property="CornerRadius" Value="13"/>
-      <Setter Property="Padding" Value="16,12"/>
-      <Setter Property="Margin" Value="0,0,0,11"/>
+      <Setter Property="MinHeight" Value="102"/>
+      <Setter Property="Padding" Value="20,14"/>
+      <Setter Property="Margin" Value="0,0,0,14"/>
       <Style.Triggers>
         <Trigger Property="IsMouseOver" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
       </Style.Triggers>
@@ -85,27 +86,30 @@
     </Style>
   </Window.Resources>
 
-  <Grid Margin="24,22,24,18">
+  <Grid Margin="28,28,28,18">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <StackPanel>
-      <TextBlock Text="帮助与反馈" FontSize="30" FontWeight="Bold"/>
-      <TextBlock Text="获取使用帮助、访问项目主页或联系我们。" FontSize="14"
-                 Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,18"/>
+      <TextBlock Text="帮助与反馈" FontSize="31" FontWeight="Bold"/>
+      <TextBlock Text="获取使用帮助、访问项目主页或联系我们。" FontSize="15"
+                 Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,22"/>
     </StackPanel>
 
-    <StackPanel Grid.Row="1">
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                  Focusable="False" Padding="0,0,6,0">
+    <StackPanel>
       <Border Style="{StaticResource ResourceCard}">
         <Grid>
-          <Grid.ColumnDefinitions><ColumnDefinition Width="42"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <Viewbox Width="25" Height="25" HorizontalAlignment="Left" VerticalAlignment="Center">
             <Path Style="{StaticResource ResourceIcon}" Data="M3,12 A9,9 0 1 0 21,12 A9,9 0 1 0 3,12 M3,12 L21,12 M12,3 C16,7 16,17 12,21 M12,3 C8,7 8,17 12,21"/>
           </Viewbox>
           <StackPanel Grid.Column="1" VerticalAlignment="Center">
             <TextBlock Text="官方网站" FontWeight="SemiBold" FontSize="17"/>
             <TextBlock Text="产品介绍、软件下载和使用帮助" Foreground="{DynamicResource MutedBrush}" FontSize="13" Margin="0,2,0,0"/>
-            <TextBlock Text="520skx.com" Foreground="{DynamicResource LinkBrush}" FontSize="14" FontWeight="Medium" Margin="0,3,0,0"/>
+            <TextBlock Text="520skx.com" ToolTip="https://520skx.com" TextTrimming="CharacterEllipsis"
+                       Foreground="{DynamicResource LinkBrush}" FontSize="14" FontWeight="Medium" Margin="0,3,0,0"/>
           </StackPanel>
-          <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+          <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0,0,0" MaxWidth="300">
             <Button x:Name="CopyWebsiteButton" Content="复制" Style="{StaticResource ResourceSecondaryButton}" Click="CopyWebsite_OnClick"/>
             <Button Style="{StaticResource ResourceActionButton}" Click="OpenWebsite_OnClick">
               <StackPanel Orientation="Horizontal"><TextBlock Text="访问官网"/><Path Data="M4,12 L12,4 M7,4 H12 V9" Stroke="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Margin="6,1,0,0" Width="14" Height="14"/></StackPanel>
@@ -116,16 +120,17 @@
 
       <Border Style="{StaticResource ResourceCard}">
         <Grid>
-          <Grid.ColumnDefinitions><ColumnDefinition Width="42"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <Viewbox Width="25" Height="25" HorizontalAlignment="Left" VerticalAlignment="Center">
             <Path Style="{StaticResource ResourceIcon}" Data="M8,19 C4,20 4,17 3,16 M13,22 L13,18 C13,16 14,15 15,14 C11,14 7,13 7,8 C7,6 8,5 9,4 C9,3 8,1 10,2 C12,2 13,3 14,3 C15,3 17,2 19,2 C20,1 20,3 20,4 C21,5 22,6 22,8 C22,13 18,14 14,14"/>
           </Viewbox>
           <StackPanel Grid.Column="1" VerticalAlignment="Center">
             <TextBlock Text="GitHub 项目" FontWeight="SemiBold" FontSize="17"/>
             <TextBlock Text="查看源码、版本记录与提交问题" Foreground="{DynamicResource MutedBrush}" FontSize="13" Margin="0,2,0,0"/>
-            <TextBlock Text="github.com/SunKeXu01/LuodongChat" Foreground="{DynamicResource LinkBrush}" FontSize="14" FontWeight="Medium" Margin="0,3,0,0"/>
+            <TextBlock Text="github.com/SunKeXu01/LuodongChat" ToolTip="https://github.com/SunKeXu01/LuodongChat"
+                       TextTrimming="CharacterEllipsis" Foreground="{DynamicResource LinkBrush}" FontSize="14" FontWeight="Medium" Margin="0,3,0,0"/>
           </StackPanel>
-          <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+          <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0,0,0" MaxWidth="300">
             <Button x:Name="CopyGithubButton" Content="复制" Style="{StaticResource ResourceSecondaryButton}" Click="CopyGithub_OnClick"/>
             <Button Content="打开项目" Style="{StaticResource ResourceActionButton}" Click="OpenGithub_OnClick"/>
             <Button Content="反馈问题  →" Style="{StaticResource ResourceLinkButton}" Click="OpenIssues_OnClick"/>
@@ -135,7 +140,7 @@
 
       <Border Style="{StaticResource ResourceCard}">
         <Grid>
-          <Grid.ColumnDefinitions><ColumnDefinition Width="42"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <Viewbox Width="25" Height="25" HorizontalAlignment="Left" VerticalAlignment="Center">
             <Path Style="{StaticResource ResourceIcon}" Data="M4,5 H20 A2,2 0 0 1 22,7 V15 A2,2 0 0 1 20,17 H10 L5,21 V17 H4 A2,2 0 0 1 2,15 V7 A2,2 0 0 1 4,5 Z M7,10 H17 M7,13 H14"/>
           </Viewbox>
@@ -145,12 +150,13 @@
             <TextBlock Text="2554798585" Foreground="{DynamicResource LinkBrush}" FontSize="14" FontWeight="Medium" Margin="0,3,0,0"/>
           </StackPanel>
           <Button x:Name="CopyQqButton" Grid.Column="2" Content="复制 QQ" Style="{StaticResource ResourceSecondaryButton}"
-                  VerticalAlignment="Center" Click="CopyQq_OnClick"/>
+                  VerticalAlignment="Center" Margin="20,0,0,0" Click="CopyQq_OnClick"/>
         </Grid>
       </Border>
     </StackPanel>
+    </ScrollViewer>
 
-    <Border Grid.Row="2" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Margin="0,2,0,0" Padding="2,12,2,0">
+    <Border Grid.Row="2" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Margin="0,6,0,0" Padding="2,12,2,0">
       <Grid>
         <TextBlock Text="泺栋 Chat" Foreground="{DynamicResource MutedBrush}" FontSize="12" VerticalAlignment="Center"/>
         <TextBlock x:Name="CopyNotice" Foreground="{DynamicResource LinkBrush}" FontSize="13" VerticalAlignment="Center"

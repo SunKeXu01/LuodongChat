@@ -141,8 +141,20 @@ public sealed class ClientUpdateService(HttpClient http)
             $root = '{{escapedRoot}}'
             & $installer /S "/D=$root"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $target = Join-Path $root 'LuodongChat.exe'
+            $started = $false
+            for ($attempt = 0; $attempt -lt 20; $attempt++) {
+              if (Test-Path -LiteralPath $target) {
+                try {
+                  Start-Process -FilePath $target -WorkingDirectory $root
+                  $started = $true
+                  break
+                } catch { }
+              }
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $started) { throw '更新已经安装，但客户端未能自动启动。' }
             Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
-            Start-Process -FilePath (Join-Path $root 'LuodongChat.exe')
             Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
             """;
     }
@@ -164,7 +176,16 @@ public sealed class ClientUpdateService(HttpClient http)
               if (Test-Path -LiteralPath $backup) { Move-Item -LiteralPath $backup -Destination $target -Force }
               exit 1
             }
-            Start-Process -FilePath $target
+            $root = Split-Path -Parent $target
+            $started = $false
+            for ($attempt = 0; $attempt -lt 20; $attempt++) {
+              try {
+                Start-Process -FilePath $target -WorkingDirectory $root
+                $started = $true
+                break
+              } catch { Start-Sleep -Milliseconds 500 }
+            }
+            if (-not $started) { throw '更新已经安装，但客户端未能自动启动。' }
             Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
             """;

@@ -41,7 +41,8 @@ public sealed class ClientUpdateServiceTests
         Assert.Contains(@"D:\中文 目录\泺栋\data\updates\new.exe", script);
         Assert.Contains("Move-Item -LiteralPath $target -Destination $backup", script);
         Assert.Contains("Remove-Item -LiteralPath $backup", script);
-        Assert.Contains("Start-Process -FilePath $target", script);
+        Assert.Contains("Start-Process -FilePath $target -WorkingDirectory $root", script);
+        Assert.Contains("for ($attempt = 0; $attempt -lt 20; $attempt++)", script);
     }
 
     [Fact]
@@ -51,7 +52,9 @@ public sealed class ClientUpdateServiceTests
         Assert.Contains("Wait-Process -Id 4321", script);
         Assert.Contains(@"D:\中文 目录\泺栋\data\updates\setup.exe", script);
         Assert.Contains("& $installer /S \"/D=$root\"", script);
-        Assert.Contains("Join-Path $root 'LuodongChat.exe'", script);
+        Assert.Contains("$target = Join-Path $root 'LuodongChat.exe'", script);
+        Assert.Contains("Start-Process -FilePath $target -WorkingDirectory $root", script);
+        Assert.Contains("for ($attempt = 0; $attempt -lt 20; $attempt++)", script);
     }
 
     private sealed class StubHandler(string json) : HttpMessageHandler
