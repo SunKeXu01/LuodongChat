@@ -137,6 +137,17 @@ jobs:
           if ($upgrade.ExitCode -ne 0 -or !(Test-Path $userState) -or (Get-Content $userState -Raw) -notmatch '"keep":true') {
             throw "In-place update changed the install directory or deleted user data."
           }
+          # The exact silent installer used by automatic updates must launch the
+          # newly installed client and leave it running, not merely create a process.
+          $env:LUODONGCHAT_AUTOSTART = '1'
+          try { $autoStartUpgrade = Start-Process $setup -ArgumentList '/S' -Wait -PassThru }
+          finally { Remove-Item Env:LUODONGCHAT_AUTOSTART -ErrorAction SilentlyContinue }
+          if ($autoStartUpgrade.ExitCode -ne 0) { throw "Automatic-update installer failed." }
+          Start-Sleep -Seconds 3
+          $autoStartedClient = Get-Process LuodongChat -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (!$autoStartedClient -or $autoStartedClient.HasExited) { throw "Automatic update did not leave the client running." }
+          Stop-Process -Id $autoStartedClient.Id -Force
+          $autoStartedClient.WaitForExit(10000)
           & "$testRoot/LuodongChat.exe" --smoke-test
           if ($LASTEXITCODE -ne 0) { throw "Installed executable failed its startup smoke test." }
           # Reproduce the real user case: the close button leaves the WPF client

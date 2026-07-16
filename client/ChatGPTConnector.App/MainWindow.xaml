@@ -250,7 +250,8 @@
                 <Grid>
                   <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="82"/></Grid.ColumnDefinitions>
                   <TextBox x:Name="ChatInput" MinHeight="48" MaxHeight="140" AcceptsReturn="True" TextWrapping="Wrap"
-                           VerticalScrollBarVisibility="Auto" BorderThickness="0" Background="Transparent" Padding="8"/>
+                           VerticalScrollBarVisibility="Auto" BorderThickness="0" Background="Transparent" Padding="8"
+                           PreviewKeyDown="ChatInput_OnPreviewKeyDown" ToolTip="按 Enter 发送，Shift+Enter 换行"/>
                   <Button x:Name="StopGenerationButton" Grid.Column="1" Content="停止" Visibility="Collapsed" Margin="8,0,0,0"
                           Style="{StaticResource SecondaryButton}" Click="StopGenerationButton_OnClick"/>
                   <Button x:Name="ChatSendButton" Grid.Column="2" Content="发送" Margin="8,0,0,0" Click="ChatSendButton_OnClick"/>

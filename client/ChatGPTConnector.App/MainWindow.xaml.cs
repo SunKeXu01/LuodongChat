@@ -502,7 +502,17 @@ public partial class MainWindow : Window
         ChatNotice.Text = "当前对话已复制到剪贴板";
     }
 
-    private async void ChatSendButton_OnClick(object sender, RoutedEventArgs e)
+    private async void ChatSendButton_OnClick(object sender, RoutedEventArgs e) => await SendChatAsync();
+
+    private async void ChatInput_OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Enter
+            || System.Windows.Input.Keyboard.Modifiers != System.Windows.Input.ModifierKeys.None) return;
+        e.Handled = true;
+        await SendChatAsync();
+    }
+
+    private async Task SendChatAsync()
     {
         if (_session is null || _chatCancellation is not null) return;
         var text = ChatInput.Text.Trim();

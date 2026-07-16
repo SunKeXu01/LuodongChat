@@ -136,24 +136,50 @@ public sealed class ClientUpdateService(HttpClient http)
         var escapedRoot = EscapePowerShellValue(applicationRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         return $$"""
             $ErrorActionPreference = 'Stop'
+            $log = Join-Path '{{escapedRoot}}' 'data\logs\update.log'
+            New-Item -ItemType Directory -Path (Split-Path -Parent $log) -Force | Out-Null
+            function Write-UpdateLog([string] $message) {
+              Add-Content -LiteralPath $log -Value ("{0:u} {1}" -f (Get-Date), $message) -Encoding UTF8
+            }
+            Write-UpdateLog '等待旧版本退出。'
             Wait-Process -Id {{currentProcessId}} -ErrorAction SilentlyContinue
             $installer = '{{escapedInstaller}}'
             $root = '{{escapedRoot}}'
-            & $installer /S "/D=$root"
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $env:LUODONGCHAT_AUTOSTART = '1'
+            try {
+              & $installer /S "/D=$root"
+              $installerExitCode = $LASTEXITCODE
+            } finally {
+              Remove-Item Env:LUODONGCHAT_AUTOSTART -ErrorAction SilentlyContinue
+            }
+            if ($installerExitCode -ne 0) {
+              Write-UpdateLog "安装器返回错误代码 $installerExitCode。"
+              exit $installerExitCode
+            }
+            Write-UpdateLog '安装完成，正在确认新版本是否运行。'
             $target = Join-Path $root 'LuodongChat.exe'
             $started = $false
             for ($attempt = 0; $attempt -lt 20; $attempt++) {
-              if (Test-Path -LiteralPath $target) {
+              $running = Get-Process -Name 'LuodongChat' -ErrorAction SilentlyContinue
+              if ($running) {
+                Start-Sleep -Milliseconds 750
+                $running = Get-Process -Name 'LuodongChat' -ErrorAction SilentlyContinue
+                if ($running) { $started = $true; break }
+              }
+              if ((Test-Path -LiteralPath $target) -and -not $running) {
                 try {
-                  Start-Process -FilePath $target -WorkingDirectory $root
-                  $started = $true
-                  break
+                  $process = Start-Process -FilePath $target -WorkingDirectory $root -PassThru
+                  Start-Sleep -Milliseconds 1000
+                  if (-not $process.HasExited) { $started = $true; break }
                 } catch { }
               }
               Start-Sleep -Milliseconds 500
             }
-            if (-not $started) { throw '更新已经安装，但客户端未能自动启动。' }
+            if (-not $started) {
+              Write-UpdateLog '更新已经安装，但客户端自动启动失败。'
+              throw '更新已经安装，但客户端未能自动启动。'
+            }
+            Write-UpdateLog '新版本已自动启动。'
             Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
             """;
@@ -165,6 +191,12 @@ public sealed class ClientUpdateService(HttpClient http)
         var escapedTarget = EscapePowerShellValue(currentExecutable);
         return $$"""
             $ErrorActionPreference = 'Stop'
+            $log = Join-Path (Split-Path -Parent '{{escapedTarget}}') 'data\logs\update.log'
+            New-Item -ItemType Directory -Path (Split-Path -Parent $log) -Force | Out-Null
+            function Write-UpdateLog([string] $message) {
+              Add-Content -LiteralPath $log -Value ("{0:u} {1}" -f (Get-Date), $message) -Encoding UTF8
+            }
+            Write-UpdateLog '等待旧版本退出。'
             Wait-Process -Id {{currentProcessId}} -ErrorAction SilentlyContinue
             $source = '{{escapedSource}}'
             $target = '{{escapedTarget}}'
@@ -180,12 +212,16 @@ public sealed class ClientUpdateService(HttpClient http)
             $started = $false
             for ($attempt = 0; $attempt -lt 20; $attempt++) {
               try {
-                Start-Process -FilePath $target -WorkingDirectory $root
-                $started = $true
-                break
+                $process = Start-Process -FilePath $target -WorkingDirectory $root -PassThru
+                Start-Sleep -Milliseconds 1000
+                if (-not $process.HasExited) { $started = $true; break }
               } catch { Start-Sleep -Milliseconds 500 }
             }
-            if (-not $started) { throw '更新已经安装，但客户端未能自动启动。' }
+            if (-not $started) {
+              Write-UpdateLog '便携版更新完成，但客户端自动启动失败。'
+              throw '更新已经安装，但客户端未能自动启动。'
+            }
+            Write-UpdateLog '便携版新版本已自动启动。'
             Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
             """;
