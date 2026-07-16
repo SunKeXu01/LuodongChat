@@ -225,7 +225,8 @@ public partial class MainWindow : Window
         var reveal = LoginPasswordRevealInput.Visibility != Visibility.Visible;
         LoginPasswordRevealInput.Visibility = reveal ? Visibility.Visible : Visibility.Collapsed;
         LoginPasswordInput.Visibility = reveal ? Visibility.Collapsed : Visibility.Visible;
-        PasswordRevealButton.Content = reveal ? "隐藏" : "显示";
+        PasswordRevealButton.Content = reveal ? "◎" : "◉";
+        PasswordRevealButton.ToolTip = reveal ? "隐藏密码" : "显示密码";
         if (reveal) { LoginPasswordRevealInput.CaretIndex = LoginPasswordRevealInput.Text.Length; LoginPasswordRevealInput.Focus(); }
         else LoginPasswordInput.Focus();
     }
@@ -252,6 +253,26 @@ public partial class MainWindow : Window
     private void ShowResetPasswordButton_OnClick(object sender, RoutedEventArgs e) => ShowAccountAction(resetPassword: true);
     private void BackToLoginButton_OnClick(object sender, RoutedEventArgs e) => ShowLoginForms(RegisterEmailInput.Text.Trim());
 
+    private void ShowCodeLoginButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        PasswordLoginPanel.Visibility = Visibility.Collapsed;
+        CodeLoginPanel.Visibility = Visibility.Visible;
+        AuthNotice.Text = "";
+        ClearAuthErrors();
+        if (CodeLoginEmailInput.Text.Length == 0) CodeLoginEmailInput.Text = LoginEmailInput.Text.Trim();
+        CodeLoginEmailInput.Focus();
+    }
+
+    private void BackToPasswordLoginButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        CodeLoginPanel.Visibility = Visibility.Collapsed;
+        PasswordLoginPanel.Visibility = Visibility.Visible;
+        AuthNotice.Text = "";
+        ClearAuthErrors();
+        if (LoginEmailInput.Text.Length == 0) LoginEmailInput.Text = CodeLoginEmailInput.Text.Trim();
+        LoginEmailInput.Focus();
+    }
+
     private void ShowAccountAction(bool resetPassword)
     {
         LoginFormsPanel.Visibility = Visibility.Collapsed;
@@ -262,7 +283,7 @@ public partial class MainWindow : Window
         ResetPasswordButton.Visibility = resetPassword ? Visibility.Visible : Visibility.Collapsed;
         AccountActionError.Text = "";
         AuthNotice.Text = "";
-        var sourceEmail = AuthTabs.SelectedIndex == 1 ? CodeLoginEmailInput.Text : LoginEmailInput.Text;
+        var sourceEmail = CodeLoginPanel.Visibility == Visibility.Visible ? CodeLoginEmailInput.Text : LoginEmailInput.Text;
         if (RegisterEmailInput.Text.Length == 0) RegisterEmailInput.Text = sourceEmail;
         RegisterEmailInput.Focus();
     }
@@ -271,7 +292,8 @@ public partial class MainWindow : Window
     {
         AccountActionPanel.Visibility = Visibility.Collapsed;
         LoginFormsPanel.Visibility = Visibility.Visible;
-        AuthTabs.SelectedIndex = 0;
+        CodeLoginPanel.Visibility = Visibility.Collapsed;
+        PasswordLoginPanel.Visibility = Visibility.Visible;
         if (!string.IsNullOrWhiteSpace(email)) LoginEmailInput.Text = email;
         AuthNotice.Text = notice ?? "";
         ClearAuthErrors();
@@ -605,8 +627,8 @@ public partial class MainWindow : Window
         AccountPanel.Visibility = Visibility.Collapsed;
         LoginPanel.Visibility = Visibility.Visible;
         WindowState = WindowState.Normal;
-        Width = Math.Min(1040, SystemParameters.WorkArea.Width);
-        Height = Math.Min(720, SystemParameters.WorkArea.Height);
+        Width = Math.Min(1200, SystemParameters.WorkArea.Width);
+        Height = Math.Min(780, SystemParameters.WorkArea.Height);
         Left = Math.Max(SystemParameters.WorkArea.Left, SystemParameters.WorkArea.Left + (SystemParameters.WorkArea.Width - Width) / 2);
         Top = Math.Max(SystemParameters.WorkArea.Top, SystemParameters.WorkArea.Top + (SystemParameters.WorkArea.Height - Height) / 2);
         ShowLoginForms();
