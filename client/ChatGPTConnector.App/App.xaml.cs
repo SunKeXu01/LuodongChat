@@ -18,7 +18,7 @@ public partial class App : Application
         _singleInstanceMutex = new Mutex(true, @"Local\LuodongChat.WindowsClient", out var isFirstInstance);
         if (!isFirstInstance)
         {
-            MessageBox.Show("泺栋chat 已经在运行，请在任务栏托盘中打开主界面。", "泺栋chat",
+            MessageBox.Show("泺栋 Chat 已经在运行，请在任务栏托盘中打开主界面。", "泺栋 Chat",
                 MessageBoxButton.OK, MessageBoxImage.Information);
             _singleInstanceMutex.Dispose();
             _singleInstanceMutex = null;
@@ -76,7 +76,7 @@ public partial class App : Application
         var logPath = WriteCrashLog(error);
         MessageBox.Show(
             $"客户端启动失败。错误记录已保存到：\n{logPath}\n\n请联系客服 QQ：2554798585。",
-            "泺栋chat",
+            "泺栋 Chat",
             MessageBoxButton.OK,
             MessageBoxImage.Error);
     }
@@ -88,7 +88,7 @@ public partial class App : Application
             var directory = ApplicationDirectories.Logs;
             Directory.CreateDirectory(directory);
             var path = Path.Combine(directory, $"crash-{DateTime.Now:yyyyMMdd-HHmmss}.log");
-            File.WriteAllText(path, $"泺栋chat {DateTimeOffset.Now:O}{Environment.NewLine}{error}", new UTF8Encoding(false));
+            File.WriteAllText(path, $"泺栋 Chat {DateTimeOffset.Now:O}{Environment.NewLine}{error}", new UTF8Encoding(false));
             return path;
         }
         catch

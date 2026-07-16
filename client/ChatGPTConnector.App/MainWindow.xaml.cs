@@ -36,6 +36,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _chatCancellation;
     private readonly CancellationTokenSource _updateCancellation = new();
     private bool _chatScrollPending;
+    private bool _syncingPasswordVisibility;
 
     public MainWindow() : this(false) { }
 
@@ -77,89 +78,239 @@ public partial class MainWindow : Window
 
     private async void PasswordLoginButton_OnClick(object sender, RoutedEventArgs e)
     {
-        if (!TryNormalizeEmail(LoginEmailInput, out var email)) return;
-        var password = LoginPasswordInput.Password;
-        if (!PasswordPolicy.IsValid(password)) { MessageBox.Show(PasswordPolicy.Requirement, "密码格式不正确", MessageBoxButton.OK, MessageBoxImage.Information); return; }
-        await RunExclusiveAsync(async () => {
+        ClearAuthErrors();
+        if (!TryNormalizeEmail(LoginEmailInput, LoginEmailError, out var email)) return;
+        var password = CurrentLoginPassword();
+        if (!PasswordPolicy.IsValid(password)) { LoginPasswordError.Text = PasswordPolicy.Requirement; return; }
+        await RunAuthOperationAsync(PasswordLoginButton, "登录中…", async () => {
             try { await CompleteLoginAsync(await _accounts.LoginAsync(GatewayUri, email, password)); }
-            catch (Exception error) { MessageBox.Show(error.Message, "登录失败", MessageBoxButton.OK, MessageBoxImage.Warning); }
+            catch (Exception error) { AuthError.Text = FriendlyAuthError(error, "邮箱或密码不正确，请重新输入。"); }
         });
     }
 
     private async void RegisterCodeButton_OnClick(object sender, RoutedEventArgs e) =>
-        await SendCodeAsync(RegisterEmailInput);
+        await SendCodeAsync(RegisterEmailInput, RegisterEmailError, RegisterCodeButton);
 
     private async void CodeLoginSendButton_OnClick(object sender, RoutedEventArgs e) =>
-        await SendCodeAsync(CodeLoginEmailInput);
+        await SendCodeAsync(CodeLoginEmailInput, CodeLoginEmailError, CodeLoginSendButton);
 
-    private async Task SendCodeAsync(System.Windows.Controls.TextBox emailInput)
+    private async Task SendCodeAsync(System.Windows.Controls.TextBox emailInput, System.Windows.Controls.TextBlock errorText, System.Windows.Controls.Button sendButton)
     {
-        if (!TryNormalizeEmail(emailInput, out var email)) return;
-        await RunExclusiveAsync(async () => {
-            try { await _accounts.RequestCodeAsync(GatewayUri, email); AuthNotice.Text = "验证码已发送，请检查邮箱。"; }
-            catch (Exception error) { MessageBox.Show(error.Message, "发送失败", MessageBoxButton.OK, MessageBoxImage.Warning); }
+        errorText.Text = "";
+        if (!TryNormalizeEmail(emailInput, errorText, out var email)) return;
+        var sent = false;
+        await RunAuthOperationAsync(sendButton, "发送中…", async () => {
+            try
+            {
+                await _accounts.RequestCodeAsync(GatewayUri, email);
+                AuthNotice.Text = "验证码已发送，请检查邮箱。";
+                sent = true;
+            }
+            catch (Exception error) { errorText.Text = FriendlyAuthError(error, "验证码发送失败，请稍后重试。"); }
         });
+        if (sent) _ = RunCodeCountdownAsync(sendButton);
     }
 
     private async void RegisterButton_OnClick(object sender, RoutedEventArgs e)
     {
+        AccountActionError.Text = "";
         if (!TryGetRegistrationInput(out var email, out var password, out var code)) return;
-        await RunExclusiveAsync(async () => {
-            try { await CompleteLoginAsync(await _accounts.RegisterAsync(GatewayUri, email, password, code)); RegisterCodeInput.Clear(); }
+        await RunAuthOperationAsync(RegisterButton, "注册中…", async () => {
+            try
+            {
+                var session = await _accounts.RegisterAsync(GatewayUri, email, password, code);
+                await _accounts.LogoutAsync(GatewayUri, session.AccessToken).ContinueWith(_ => { });
+                RegisterCodeInput.Clear();
+                ShowLoginForms(email, "注册成功，请使用刚设置的密码登录。");
+            }
             catch (AccountApiException error) when (error.Code == "account_already_registered")
             {
-                MessageBox.Show("该邮箱已经注册，请返回密码登录；如果忘记密码，可点击“已有账号，重置密码”。", "账号已存在", MessageBoxButton.OK, MessageBoxImage.Information);
+                AccountActionError.Text = "该邮箱已经注册，请直接登录；如果忘记密码，请返回后选择“忘记密码”。";
             }
-            catch (Exception error) { MessageBox.Show(error.Message, "注册失败", MessageBoxButton.OK, MessageBoxImage.Warning); }
+            catch (Exception error) { AccountActionError.Text = FriendlyAuthError(error, "注册失败，请检查填写内容。"); }
         });
     }
 
     private async void ResetPasswordButton_OnClick(object sender, RoutedEventArgs e)
     {
+        AccountActionError.Text = "";
         if (!TryGetRegistrationInput(out var email, out var password, out var code)) return;
-        await RunExclusiveAsync(async () => {
+        await RunAuthOperationAsync(ResetPasswordButton, "重置中…", async () => {
             try
             {
-                await CompleteLoginAsync(await _accounts.ResetPasswordAsync(GatewayUri, email, password, code));
+                var session = await _accounts.ResetPasswordAsync(GatewayUri, email, password, code);
+                await _accounts.LogoutAsync(GatewayUri, session.AccessToken).ContinueWith(_ => { });
                 RegisterCodeInput.Clear();
-                MessageBox.Show("密码已重置并完成登录。", "重置成功", MessageBoxButton.OK, MessageBoxImage.Information);
+                ShowLoginForms(email, "密码已重置，请使用新密码登录。");
             }
-            catch (Exception error) { MessageBox.Show(error.Message, "重置失败", MessageBoxButton.OK, MessageBoxImage.Warning); }
+            catch (Exception error) { AccountActionError.Text = FriendlyAuthError(error, "密码重置失败，请检查验证码。"); }
         });
     }
 
     private bool TryGetRegistrationInput(out string email, out string password, out string code)
     {
         email = ""; password = RegisterPasswordInput.Password; code = RegisterCodeInput.Text.Trim();
-        if (!TryNormalizeEmail(RegisterEmailInput, out email)) return false;
-        if (!PasswordPolicy.IsValid(password)) { MessageBox.Show(PasswordPolicy.Requirement, "密码格式不正确", MessageBoxButton.OK, MessageBoxImage.Information); return false; }
-        if (!string.Equals(password, RegisterConfirmPasswordInput.Password, StringComparison.Ordinal)) { MessageBox.Show("两次输入的密码不一致。", "请检查密码"); return false; }
-        if (code.Length != 6 || !code.All(char.IsDigit)) { MessageBox.Show("请输入邮件中的 6 位验证码。", "验证码不正确"); return false; }
+        if (!TryNormalizeEmail(RegisterEmailInput, RegisterEmailError, out email)) return false;
+        if (!PasswordPolicy.IsValid(password)) { AccountActionError.Text = PasswordPolicy.Requirement; return false; }
+        if (!string.Equals(password, RegisterConfirmPasswordInput.Password, StringComparison.Ordinal)) { AccountActionError.Text = "两次输入的密码不一致。"; return false; }
+        if (code.Length != 6 || !code.All(char.IsDigit)) { AccountActionError.Text = "请输入邮件中的 6 位验证码。"; return false; }
         return true;
     }
 
     private async void CodeLoginButton_OnClick(object sender, RoutedEventArgs e)
     {
-        if (!TryNormalizeEmail(CodeLoginEmailInput, out var email)) return;
+        CodeLoginError.Text = "";
+        if (!TryNormalizeEmail(CodeLoginEmailInput, CodeLoginEmailError, out var email)) return;
         var code = CodeLoginCodeInput.Text.Trim();
-        if (code.Length != 6 || !code.All(char.IsDigit)) { MessageBox.Show("请输入邮件中的 6 位验证码。", "验证码不正确"); return; }
-        await RunExclusiveAsync(async () => {
+        if (code.Length != 6 || !code.All(char.IsDigit)) { CodeLoginError.Text = "请输入邮件中的 6 位验证码。"; return; }
+        await RunAuthOperationAsync(CodeLoginButton, "登录中…", async () => {
             try { await CompleteLoginAsync(await _accounts.VerifyAsync(GatewayUri, email, code)); CodeLoginCodeInput.Clear(); }
-            catch (Exception error) { MessageBox.Show(error.Message, "登录失败", MessageBoxButton.OK, MessageBoxImage.Warning); }
+            catch (Exception error) { CodeLoginError.Text = FriendlyAuthError(error, "验证码不正确或已经失效。"); }
         });
     }
 
-    private static bool TryNormalizeEmail(System.Windows.Controls.TextBox input, out string email)
+    private static bool TryNormalizeEmail(System.Windows.Controls.TextBox input, System.Windows.Controls.TextBlock errorText, out string email)
     {
         if (!EmailAddressValidator.TryNormalize(input.Text, out email))
         {
-            MessageBox.Show("请输入完整、有效的邮箱地址，例如 name@example.com。不会向无效地址发送邮件。", "邮箱格式不正确", MessageBoxButton.OK, MessageBoxImage.Information);
+            errorText.Text = "请输入有效的邮箱地址，例如 name@example.com。";
             input.Focus();
             return false;
         }
+        errorText.Text = "";
         input.Text = email;
         return true;
     }
+
+    private string CurrentLoginPassword() => LoginPasswordRevealInput.Visibility == Visibility.Visible
+        ? LoginPasswordRevealInput.Text : LoginPasswordInput.Password;
+
+    private void LoginEmailInput_OnTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) =>
+        ValidateEmailWhileTyping(LoginEmailInput, LoginEmailError);
+
+    private void CodeLoginEmailInput_OnTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) =>
+        ValidateEmailWhileTyping(CodeLoginEmailInput, CodeLoginEmailError);
+
+    private void RegisterEmailInput_OnTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) =>
+        ValidateEmailWhileTyping(RegisterEmailInput, RegisterEmailError);
+
+    private static void ValidateEmailWhileTyping(System.Windows.Controls.TextBox input, System.Windows.Controls.TextBlock errorText)
+    {
+        var value = input.Text.Trim();
+        errorText.Text = value.Length == 0 || EmailAddressValidator.TryNormalize(value, out _)
+            ? "" : "邮箱格式不正确，请检查后再继续。";
+    }
+
+    private void LoginPasswordInput_OnPasswordChanged(object sender, RoutedEventArgs e)
+    {
+        if (_syncingPasswordVisibility) return;
+        _syncingPasswordVisibility = true;
+        LoginPasswordRevealInput.Text = LoginPasswordInput.Password;
+        _syncingPasswordVisibility = false;
+        LoginPasswordError.Text = "";
+        UpdateCapsLockNotice();
+    }
+
+    private void LoginPasswordRevealInput_OnTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+    {
+        if (_syncingPasswordVisibility) return;
+        _syncingPasswordVisibility = true;
+        LoginPasswordInput.Password = LoginPasswordRevealInput.Text;
+        _syncingPasswordVisibility = false;
+        LoginPasswordError.Text = "";
+    }
+
+    private void PasswordRevealButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var reveal = LoginPasswordRevealInput.Visibility != Visibility.Visible;
+        LoginPasswordRevealInput.Visibility = reveal ? Visibility.Visible : Visibility.Collapsed;
+        LoginPasswordInput.Visibility = reveal ? Visibility.Collapsed : Visibility.Visible;
+        PasswordRevealButton.Content = reveal ? "隐藏" : "显示";
+        if (reveal) { LoginPasswordRevealInput.CaretIndex = LoginPasswordRevealInput.Text.Length; LoginPasswordRevealInput.Focus(); }
+        else LoginPasswordInput.Focus();
+    }
+
+    private void LoginInput_OnKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        UpdateCapsLockNotice();
+        if (e.Key != System.Windows.Input.Key.Enter) return;
+        e.Handled = true;
+        PasswordLoginButton_OnClick(PasswordLoginButton, new RoutedEventArgs());
+    }
+
+    private void CodeLoginInput_OnKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Enter) return;
+        e.Handled = true;
+        CodeLoginButton_OnClick(CodeLoginButton, new RoutedEventArgs());
+    }
+
+    private void UpdateCapsLockNotice() => CapsLockNotice.Visibility =
+        System.Windows.Input.Keyboard.IsKeyToggled(System.Windows.Input.Key.CapsLock) ? Visibility.Visible : Visibility.Collapsed;
+
+    private void ShowRegisterButton_OnClick(object sender, RoutedEventArgs e) => ShowAccountAction(resetPassword: false);
+    private void ShowResetPasswordButton_OnClick(object sender, RoutedEventArgs e) => ShowAccountAction(resetPassword: true);
+    private void BackToLoginButton_OnClick(object sender, RoutedEventArgs e) => ShowLoginForms(RegisterEmailInput.Text.Trim());
+
+    private void ShowAccountAction(bool resetPassword)
+    {
+        LoginFormsPanel.Visibility = Visibility.Collapsed;
+        AccountActionPanel.Visibility = Visibility.Visible;
+        AccountActionTitle.Text = resetPassword ? "重置密码" : "注册账号";
+        AccountActionSubtitle.Text = resetPassword ? "验证邮箱后设置一个新密码" : "使用邮箱创建你的泺栋 Chat 账号";
+        RegisterButton.Visibility = resetPassword ? Visibility.Collapsed : Visibility.Visible;
+        ResetPasswordButton.Visibility = resetPassword ? Visibility.Visible : Visibility.Collapsed;
+        AccountActionError.Text = "";
+        AuthNotice.Text = "";
+        var sourceEmail = AuthTabs.SelectedIndex == 1 ? CodeLoginEmailInput.Text : LoginEmailInput.Text;
+        if (RegisterEmailInput.Text.Length == 0) RegisterEmailInput.Text = sourceEmail;
+        RegisterEmailInput.Focus();
+    }
+
+    private void ShowLoginForms(string? email = null, string? notice = null)
+    {
+        AccountActionPanel.Visibility = Visibility.Collapsed;
+        LoginFormsPanel.Visibility = Visibility.Visible;
+        AuthTabs.SelectedIndex = 0;
+        if (!string.IsNullOrWhiteSpace(email)) LoginEmailInput.Text = email;
+        AuthNotice.Text = notice ?? "";
+        ClearAuthErrors();
+        LoginEmailInput.Focus();
+    }
+
+    private void ClearAuthErrors()
+    {
+        LoginEmailError.Text = "";
+        LoginPasswordError.Text = "";
+        AuthError.Text = "";
+        CodeLoginEmailError.Text = "";
+        CodeLoginError.Text = "";
+        AccountActionError.Text = "";
+    }
+
+    private static string FriendlyAuthError(Exception error, string fallback) => error switch
+    {
+        HttpRequestException => "暂时无法连接服务器，请检查网络后重试。",
+        TaskCanceledException => "连接服务器超时，请稍后重试。",
+        AccountApiException api when !string.IsNullOrWhiteSpace(api.Message) => api.Message,
+        _ => string.IsNullOrWhiteSpace(error.Message) ? fallback : error.Message,
+    };
+
+    private static async Task RunCodeCountdownAsync(System.Windows.Controls.Button button)
+    {
+        for (var remaining = 60; remaining > 0; remaining--)
+        {
+            button.IsEnabled = false;
+            button.Content = $"{remaining} 秒后重试";
+            await Task.Delay(1000);
+        }
+        button.Content = "获取验证码";
+        button.IsEnabled = true;
+    }
+
+    private void HelpButton_OnClick(object sender, RoutedEventArgs e) => MessageBox.Show(
+        "如需帮助或反馈，请联系 QQ：2554798585\n\n你也可以在 GitHub Issues 中提交问题。",
+        "帮助与反馈", MessageBoxButton.OK, MessageBoxImage.Information);
 
     private async Task CompleteLoginAsync(AccountSession session)
     {
@@ -449,8 +600,25 @@ public partial class MainWindow : Window
 
     private void StopGenerationButton_OnClick(object sender, RoutedEventArgs e) => _chatCancellation?.Cancel();
 
-    private void ShowLogin() { AccountPanel.Visibility = Visibility.Collapsed; LoginPanel.Visibility = Visibility.Visible; AuthNotice.Text = ""; }
-    private void ShowAccount(AccountProfile profile) { LoginPanel.Visibility = Visibility.Collapsed; AccountPanel.Visibility = Visibility.Visible; AccountPanel.SelectedIndex = 0; UpdateProfile(profile); }
+    private void ShowLogin()
+    {
+        AccountPanel.Visibility = Visibility.Collapsed;
+        LoginPanel.Visibility = Visibility.Visible;
+        WindowState = WindowState.Normal;
+        Width = Math.Min(1040, SystemParameters.WorkArea.Width);
+        Height = Math.Min(720, SystemParameters.WorkArea.Height);
+        Left = Math.Max(SystemParameters.WorkArea.Left, SystemParameters.WorkArea.Left + (SystemParameters.WorkArea.Width - Width) / 2);
+        Top = Math.Max(SystemParameters.WorkArea.Top, SystemParameters.WorkArea.Top + (SystemParameters.WorkArea.Height - Height) / 2);
+        ShowLoginForms();
+    }
+    private void ShowAccount(AccountProfile profile)
+    {
+        LoginPanel.Visibility = Visibility.Collapsed;
+        AccountPanel.Visibility = Visibility.Visible;
+        AccountPanel.SelectedIndex = 0;
+        UpdateProfile(profile);
+        WindowState = WindowState.Maximized;
+    }
     private void UpdateProfile(AccountProfile profile)
     {
         if (_session is not null) { _session = _session with { Profile = profile }; _sessionStore.Save(_session); }
@@ -486,7 +654,7 @@ public partial class MainWindow : Window
             UpdateBanner.Visibility = Visibility.Collapsed;
             var answer = MessageBox.Show(
                 $"版本 {prepared.Version} 已在后台下载并通过完整性校验。是否现在更新？\n\n选择“否”后，本次不再提醒；下次启动软件时会再次询问。",
-                "泺栋chat 更新已准备好",
+                "泺栋 Chat 更新已准备好",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Information);
             if (answer != MessageBoxResult.Yes) return;
@@ -511,13 +679,28 @@ public partial class MainWindow : Window
         try { await operation(); }
         finally { SetBusy(false); _operationGate.Release(); }
     }
+
+    private async Task RunAuthOperationAsync(System.Windows.Controls.Button button, string busyText, Func<Task> operation)
+    {
+        if (!await _operationGate.WaitAsync(0)) return;
+        var idleText = button.Content;
+        button.Content = busyText;
+        SetBusy(true);
+        try { await operation(); }
+        finally
+        {
+            button.Content = idleText;
+            SetBusy(false);
+            _operationGate.Release();
+        }
+    }
     private void FitToWorkingArea()
     {
         var area = SystemParameters.WorkArea;
         Width = Math.Min(Width, Math.Max(MinWidth, area.Width));
         Height = Math.Min(Height, Math.Max(MinHeight, area.Height));
     }
-    private void InitializeTrayIcon() => _trayIcon = new TrayIconService("泺栋chat", ShowMainWindow, ExitApplication);
+    private void InitializeTrayIcon() => _trayIcon = new TrayIconService("泺栋 Chat", ShowMainWindow, ExitApplication);
     private void MainWindow_OnClosing(object? sender, CancelEventArgs e) { if (_allowExit) return; e.Cancel = true; Hide(); ShowInTaskbar = false; }
     private void ShowMainWindow() { ShowInTaskbar = true; Show(); if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal; Activate(); }
     private void ExitApplication() { PrepareForExit(); Application.Current.Shutdown(); }

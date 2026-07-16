@@ -17,8 +17,8 @@ const icon = (name: "arrow" | "check" | "download" | "globe" | "history" | "imag
 export function landingPage(userAgent = ""): string {
   const isAndroid = /android/i.test(userAgent);
   const primary = isAndroid
-    ? { label: "下载 Android 版", meta: "v1.5 · Android 10+ · 约 2.4 MB", href: "https://oss.520skx.com/latest/LuodongChat.apk", file: "LuodongChat.apk", platform: "android" as const }
-    : { label: "下载 Windows 版", meta: "v1.5 · Windows 10/11 x64 · 约 58 MB", href: "https://oss.520skx.com/latest/LuodongChat-Setup.exe", file: "LuodongChat-Setup.exe", platform: "windows" as const };
+    ? { label: "下载 Android 版", meta: "v1.6 · Android 10+ · 约 2.4 MB", href: "https://oss.520skx.com/latest/LuodongChat.apk", file: "LuodongChat.apk", platform: "android" as const }
+    : { label: "下载 Windows 版", meta: "v1.6 · Windows 10/11 x64 · 约 58 MB", href: "https://oss.520skx.com/latest/LuodongChat-Setup.exe", file: "LuodongChat-Setup.exe", platform: "windows" as const };
   const secondary = isAndroid
     ? { label: "Windows 版", href: "https://oss.520skx.com/latest/LuodongChat-Setup.exe", file: "LuodongChat-Setup.exe", platform: "windows" as const }
     : { label: "Android 版", href: "https://oss.520skx.com/latest/LuodongChat.apk", file: "LuodongChat.apk", platform: "android" as const };
@@ -89,7 +89,7 @@ export function landingPage(userAgent = ""): string {
 
     <aside class="privacy-note" id="privacy">${icon("shield")}<div><strong>隐私与账号安全</strong><p>历史对话不会在泺栋 Chat 服务器持久化；发送消息时，内容仍需传输至模型服务以生成回复。</p></div><a href="https://github.com/SunKeXu01/LuodongChat/blob/main/docs/DATA_MODEL.md">了解数据处理方式 →</a></aside>
 
-    <footer class="footer"><nav><a href="https://github.com/SunKeXu01/LuodongChat/blob/main/docs/DATA_MODEL.md">隐私说明</a><a href="https://github.com/SunKeXu01/LuodongChat#Windows-使用方式">安装帮助</a><a href="https://github.com/SunKeXu01/LuodongChat/releases/latest">更新记录</a><a href="https://github.com/SunKeXu01/LuodongChat/issues">联系我们</a></nav><span>v1.5 · 服务正常 <i class="status-dot"></i></span></footer>
+    <footer class="footer"><nav><a href="https://github.com/SunKeXu01/LuodongChat/blob/main/docs/DATA_MODEL.md">隐私说明</a><a href="https://github.com/SunKeXu01/LuodongChat#Windows-使用方式">安装帮助</a><a href="https://github.com/SunKeXu01/LuodongChat/releases/latest">更新记录</a><a href="https://github.com/SunKeXu01/LuodongChat/issues">联系我们</a></nav><span>v1.6 · 服务正常 <i class="status-dot"></i></span></footer>
   </main>
   <script src="/assets/landing.js" defer></script>
 </body>

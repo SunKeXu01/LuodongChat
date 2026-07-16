@@ -2,8 +2,9 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <Application.Resources>
-    <SolidColorBrush x:Key="BrandBrush" Color="#111827"/>
-    <SolidColorBrush x:Key="BrandHoverBrush" Color="#1F2937"/>
+    <SolidColorBrush x:Key="BrandBrush" Color="#142033"/>
+    <SolidColorBrush x:Key="BrandHoverBrush" Color="#1D2B40"/>
+    <SolidColorBrush x:Key="AccentBrush" Color="#12B8A6"/>
     <SolidColorBrush x:Key="TextBrush" Color="#101828"/>
     <SolidColorBrush x:Key="MutedBrush" Color="#667085"/>
     <SolidColorBrush x:Key="BorderBrush" Color="#DDE3EC"/>
@@ -13,20 +14,43 @@
       <Setter Property="Background" Value="#FFFFFF"/>
     </Style>
     <Style TargetType="TextBox">
-      <Setter Property="MinHeight" Value="42"/>
+      <Setter Property="MinHeight" Value="46"/>
       <Setter Property="Padding" Value="12,8"/>
       <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
       <Setter Property="BorderThickness" Value="1"/>
       <Setter Property="Background" Value="White"/>
       <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Style.Triggers><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/><Setter Property="BorderThickness" Value="2"/></Trigger></Style.Triggers>
+    </Style>
+    <Style x:Key="WatermarkTextBox" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TextBox">
+            <Border x:Name="InputBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}">
+              <Grid>
+                <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="Watermark" Text="{TemplateBinding Tag}" Foreground="#98A2B3"
+                           Margin="{TemplateBinding Padding}" VerticalAlignment="Center" IsHitTestVisible="False" Visibility="Collapsed"/>
+              </Grid>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="Text" Value=""><Setter TargetName="Watermark" Property="Visibility" Value="Visible"/></Trigger>
+              <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="Watermark" Property="Visibility" Value="Collapsed"/><Setter TargetName="InputBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}"/><Setter TargetName="InputBorder" Property="BorderThickness" Value="2"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter TargetName="InputBorder" Property="Opacity" Value="0.6"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
     <Style TargetType="PasswordBox">
-      <Setter Property="MinHeight" Value="42"/>
+      <Setter Property="MinHeight" Value="46"/>
       <Setter Property="Padding" Value="12,8"/>
       <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
       <Setter Property="BorderThickness" Value="1"/>
       <Setter Property="Background" Value="White"/>
       <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Style.Triggers><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/><Setter Property="BorderThickness" Value="2"/></Trigger></Style.Triggers>
     </Style>
     <Style TargetType="Button">
       <Setter Property="MinHeight" Value="40"/>
@@ -39,11 +63,12 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="7" Padding="{TemplateBinding Padding}">
+            <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="10" Padding="{TemplateBinding Padding}">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Opacity" Value="0.88"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Chrome" Property="Opacity" Value="0.72"/></Trigger>
               <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.55"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -51,14 +76,25 @@
       </Setter>
     </Style>
     <Style x:Key="SecondaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-      <Setter Property="Background" Value="#E8EEF8"/>
-      <Setter Property="Foreground" Value="#1D4ED8"/>
+      <Setter Property="Background" Value="#EAF8F6"/>
+      <Setter Property="Foreground" Value="#08786C"/>
+    </Style>
+    <Style x:Key="LinkButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="MinHeight" Value="24"/><Setter Property="Padding" Value="4,2"/><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="#08786C"/>
+    </Style>
+    <Style x:Key="InlineButton" TargetType="Button" BasedOn="{StaticResource LinkButton}">
+      <Setter Property="Foreground" Value="#475467"/><Setter Property="FontSize" Value="12"/>
+    </Style>
+    <Style x:Key="HeaderButton" TargetType="Button" BasedOn="{StaticResource LinkButton}">
+      <Setter Property="Foreground" Value="#475467"/><Setter Property="Padding" Value="10,6"/>
     </Style>
     <Style x:Key="FieldLabel" TargetType="TextBlock">
       <Setter Property="Foreground" Value="#344054"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
       <Setter Property="Margin" Value="0,12,0,6"/>
     </Style>
+    <Style x:Key="FieldError" TargetType="TextBlock"><Setter Property="Foreground" Value="#B42318"/><Setter Property="FontSize" Value="12"/><Setter Property="Margin" Value="2,5,0,0"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
+    <Style x:Key="FormError" TargetType="TextBlock" BasedOn="{StaticResource FieldError}"><Setter Property="Margin" Value="2,12,0,0"/></Style>
     <Style TargetType="TabItem">
       <Setter Property="Padding" Value="15,9"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
@@ -72,7 +108,7 @@
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsSelected" Value="True">
-                <Setter TargetName="TabChrome" Property="Background" Value="#EEF2F6"/>
+                <Setter TargetName="TabChrome" Property="Background" Value="#EAF8F6"/>
                 <Setter Property="Foreground" Value="#101828"/>
               </Trigger>
               <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="TabChrome" Property="Background" Value="#F2F4F7"/></Trigger>
