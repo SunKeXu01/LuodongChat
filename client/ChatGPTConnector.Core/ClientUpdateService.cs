@@ -15,11 +15,26 @@ public sealed record PreparedClientUpdate(string Version, string FilePath, bool 
 
 public sealed class ClientUpdateService(HttpClient http)
 {
-    private static readonly Uri UpdateManifest = new("https://520skx.com/client/update.json");
+    private static readonly Uri[] UpdateManifests =
+    [
+        new("https://oss.520skx.com/latest/update.json"),
+        new("https://520skx.com/client/update.json")
+    ];
 
     public async Task<ClientUpdate?> CheckAsync(string currentVersion, CancellationToken cancellationToken = default)
     {
-        using var response = await http.GetAsync(UpdateManifest, cancellationToken);
+        HttpRequestException? lastError = null;
+        foreach (var manifest in UpdateManifests)
+        {
+            try { return await CheckManifestAsync(manifest, currentVersion, cancellationToken); }
+            catch (HttpRequestException error) { lastError = error; }
+        }
+        throw lastError ?? new HttpRequestException("无法获取客户端更新清单。");
+    }
+
+    private async Task<ClientUpdate?> CheckManifestAsync(Uri manifest, string currentVersion, CancellationToken cancellationToken)
+    {
+        using var response = await http.GetAsync(manifest, cancellationToken);
         response.EnsureSuccessStatusCode();
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
         var root = document.RootElement;
@@ -87,12 +102,26 @@ public sealed class ClientUpdateService(HttpClient http)
 
     public void SchedulePrepared(PreparedClientUpdate prepared, string currentExecutable, int currentProcessId)
     {
-        var script = Path.Combine(ApplicationDirectories.Updates, "install-update.cmd");
+        var script = Path.Combine(ApplicationDirectories.Updates, "install-update.ps1");
         var contents = prepared.IsInstaller
             ? BuildInstallerScript(prepared.FilePath, ApplicationDirectories.Root, currentProcessId)
             : BuildPortableInstallScript(prepared.FilePath, currentExecutable, currentProcessId);
-        File.WriteAllText(script, contents, new UTF8Encoding(false));
-        Process.Start(new ProcessStartInfo(script) { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden });
+        File.WriteAllText(script, contents, new UTF8Encoding(true));
+        var powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe");
+        var startInfo = new ProcessStartInfo(powershell)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden
+        };
+        startInfo.ArgumentList.Add("-NoLogo");
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-ExecutionPolicy");
+        startInfo.ArgumentList.Add("Bypass");
+        startInfo.ArgumentList.Add("-File");
+        startInfo.ArgumentList.Add(script);
+        Process.Start(startInfo);
     }
 
     private static async Task<string> HashFileAsync(string path, CancellationToken cancellationToken)
@@ -103,57 +132,45 @@ public sealed class ClientUpdateService(HttpClient http)
 
     internal static string BuildInstallerScript(string installer, string applicationRoot, int currentProcessId)
     {
-        var escapedInstaller = EscapeBatchValue(installer);
-        var escapedRoot = EscapeBatchValue(applicationRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        return $"""
-            @echo off
-            setlocal
-            :wait_for_exit
-            tasklist /FI "PID eq {currentProcessId}" /NH 2>nul | findstr /R /C:"[ ]{currentProcessId}[ ]" >nul
-            if not errorlevel 1 (
-              timeout /t 1 /nobreak >nul
-              goto wait_for_exit
-            )
-            set "installer={escapedInstaller}"
-            set "root={escapedRoot}"
-            start /wait "" "%installer%" /S "/D=%root%"
-            if errorlevel 1 exit /b %errorlevel%
-            del /f /q "%installer%" >nul 2>&1
-            start "" "%root%\LuodongChat.exe"
-            del "%~f0"
+        var escapedInstaller = EscapePowerShellValue(installer);
+        var escapedRoot = EscapePowerShellValue(applicationRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        return $$"""
+            $ErrorActionPreference = 'Stop'
+            Wait-Process -Id {{currentProcessId}} -ErrorAction SilentlyContinue
+            $installer = '{{escapedInstaller}}'
+            $root = '{{escapedRoot}}'
+            & $installer /S "/D=$root"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
+            Start-Process -FilePath (Join-Path $root 'LuodongChat.exe')
+            Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
             """;
     }
 
     internal static string BuildPortableInstallScript(string downloaded, string currentExecutable, int currentProcessId)
     {
-        var escapedSource = EscapeBatchValue(downloaded);
-        var escapedTarget = EscapeBatchValue(currentExecutable);
-        return $"""
-            @echo off
-            setlocal
-            :wait_for_exit
-            tasklist /FI "PID eq {currentProcessId}" /NH 2>nul | findstr /R /C:"[ ]{currentProcessId}[ ]" >nul
-            if not errorlevel 1 (
-              timeout /t 1 /nobreak >nul
-              goto wait_for_exit
-            )
-            set "source={escapedSource}"
-            set "target={escapedTarget}"
-            set "backup={escapedTarget}.previous"
-            del /f /q "%backup%" >nul 2>&1
-            if exist "%target%" move /y "%target%" "%backup%" >nul
-            move /y "%source%" "%target%" >nul
-            if errorlevel 1 (
-              if exist "%backup%" move /y "%backup%" "%target%" >nul
-              exit /b 1
-            )
-            start "" "%target%"
-            del /f /q "%backup%" >nul 2>&1
-            del "%~f0"
+        var escapedSource = EscapePowerShellValue(downloaded);
+        var escapedTarget = EscapePowerShellValue(currentExecutable);
+        return $$"""
+            $ErrorActionPreference = 'Stop'
+            Wait-Process -Id {{currentProcessId}} -ErrorAction SilentlyContinue
+            $source = '{{escapedSource}}'
+            $target = '{{escapedTarget}}'
+            $backup = "$target.previous"
+            Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $target) { Move-Item -LiteralPath $target -Destination $backup -Force }
+            try { Move-Item -LiteralPath $source -Destination $target -Force }
+            catch {
+              if (Test-Path -LiteralPath $backup) { Move-Item -LiteralPath $backup -Destination $target -Force }
+              exit 1
+            }
+            Start-Process -FilePath $target
+            Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
             """;
     }
 
-    private static string EscapeBatchValue(string value) => value.Replace("%", "%%");
+    private static string EscapePowerShellValue(string value) => value.Replace("'", "''");
 
     private static Uri TrustedUri(JsonElement root, string property) =>
         ValidateTrusted(new Uri(root.GetProperty(property).GetString()!));
@@ -164,7 +181,7 @@ public sealed class ClientUpdateService(HttpClient http)
 
     private static Uri ValidateTrusted(Uri uri)
     {
-        if (uri.Scheme != Uri.UriSchemeHttps || (uri.Host != "520skx.com" && uri.Host != "luodongchat.com" && uri.Host != "luodongchat-app.oss-cn-beijing.aliyuncs.com"))
+        if (uri.Scheme != Uri.UriSchemeHttps || (uri.Host != "520skx.com" && uri.Host != "luodongchat.com" && uri.Host != "oss.520skx.com" && uri.Host != "luodongchat-app.oss-cn-beijing.aliyuncs.com"))
             throw new InvalidDataException("更新清单包含不受信任的下载地址。");
         return uri;
     }

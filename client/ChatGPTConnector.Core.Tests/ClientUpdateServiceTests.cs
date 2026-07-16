@@ -34,23 +34,24 @@ public sealed class ClientUpdateServiceTests
     }
 
     [Fact]
-    public void PortableUpdaterWaitsForExitAndDeletesThePreviousExecutable()
+    public void PortableUpdaterUsesUnicodeSafePowerShellAndDeletesThePreviousExecutable()
     {
-        var script = ClientUpdateService.BuildPortableInstallScript(@"C:\Apps\LuodongChat\data\updates\new.exe", @"C:\Apps\LuodongChat\LuodongChat.exe", 4321);
-        Assert.Contains("tasklist /FI \"PID eq 4321\"", script);
-        Assert.Contains("move /y \"%target%\" \"%backup%\"", script);
-        Assert.Contains("del /f /q \"%backup%\"", script);
-        Assert.Contains("start \"\" \"%target%\"", script);
+        var script = ClientUpdateService.BuildPortableInstallScript(@"D:\中文 目录\泺栋\data\updates\new.exe", @"D:\中文 目录\泺栋\LuodongChat.exe", 4321);
+        Assert.Contains("Wait-Process -Id 4321", script);
+        Assert.Contains(@"D:\中文 目录\泺栋\data\updates\new.exe", script);
+        Assert.Contains("Move-Item -LiteralPath $target -Destination $backup", script);
+        Assert.Contains("Remove-Item -LiteralPath $backup", script);
+        Assert.Contains("Start-Process -FilePath $target", script);
     }
 
     [Fact]
     public void InstalledUpdaterRunsTheInstallerInTheExistingDirectory()
     {
-        var script = ClientUpdateService.BuildInstallerScript(@"C:\Apps\LuodongChat\data\updates\setup.exe", @"C:\Apps\LuodongChat\", 4321);
-        Assert.Contains("tasklist /FI \"PID eq 4321\"", script);
-        Assert.Contains("/S", script);
-        Assert.Contains("/D=%root%", script);
-        Assert.Contains("%root%\\LuodongChat.exe", script);
+        var script = ClientUpdateService.BuildInstallerScript(@"D:\中文 目录\泺栋\data\updates\setup.exe", @"D:\中文 目录\泺栋\", 4321);
+        Assert.Contains("Wait-Process -Id 4321", script);
+        Assert.Contains(@"D:\中文 目录\泺栋\data\updates\setup.exe", script);
+        Assert.Contains("& $installer /S \"/D=$root\"", script);
+        Assert.Contains("Join-Path $root 'LuodongChat.exe'", script);
     }
 
     private sealed class StubHandler(string json) : HttpMessageHandler

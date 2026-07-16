@@ -367,7 +367,7 @@ jobs:
           test -s "$android_apk"
           test -s "$android_checksum"
           version="${VERSION#v}"
-          base='https://luodongchat-app.oss-cn-beijing.aliyuncs.com/latest'
+          base='https://oss.520skx.com/latest'
           github_base="https://github.com/${{ github.repository }}/releases/download/$VERSION"
           printf '{"version":"%s","executableUrl":"%s/LuodongChat-%s-win-x64.exe","checksumUrl":"%s/LuodongChat-%s-win-x64.exe.sha256","installerUrl":"%s/LuodongChat-%s-win-x64-setup.exe","installerChecksumUrl":"%s/LuodongChat-%s-win-x64-setup.exe.sha256","androidApkUrl":"%s/LuodongChat-%s-android.apk","androidChecksumUrl":"%s/LuodongChat-%s-android.apk.sha256"}\n' "$version" "$base" "$version" "$base" "$version" "$base" "$version" "$base" "$version" "$github_base" "$version" "$github_base" "$version" > update.json
           install -d latest
