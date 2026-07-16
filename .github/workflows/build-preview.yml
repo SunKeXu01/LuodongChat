@@ -131,8 +131,17 @@ jobs:
           if ($process.ExitCode -ne 0 -or !(Test-Path "$testRoot/LuodongChat.exe") -or !(Test-Path "$testRoot/Uninstall.exe") -or !(Test-Path $desktopShortcut)) { throw "Unicode-path installer or desktop shortcut smoke test failed." }
           & "$testRoot/LuodongChat.exe" --smoke-test
           if ($LASTEXITCODE -ne 0) { throw "Installed executable failed its startup smoke test." }
+          # Reproduce the real user case: the close button leaves the WPF client
+          # running in the notification area, which keeps LuodongChat.exe locked.
+          $runningClient = Start-Process "$testRoot/LuodongChat.exe" -PassThru
+          Start-Sleep -Seconds 2
+          $runningClient.Refresh()
+          if ($runningClient.HasExited) { throw "Installed client exited before the running-app uninstall test." }
           $uninstall = Start-Process "$testRoot/Uninstall.exe" -ArgumentList '/S' -Wait -PassThru
           if ($uninstall.ExitCode -ne 0) { throw "Uninstaller smoke test failed." }
+          $runningClient.Refresh()
+          if (!$runningClient.HasExited) { throw "Uninstaller did not stop the running client." }
+          if (Test-Path "$testRoot/LuodongChat.exe") { throw "Uninstaller left LuodongChat.exe behind." }
           if (Test-Path $desktopShortcut) { throw "Uninstaller did not remove the desktop shortcut." }
       - uses: actions/upload-artifact@v6
         with:

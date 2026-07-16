@@ -74,11 +74,17 @@ SectionEnd
 
 Section "Uninstall"
   SetShellVarContext current
+  MessageBox MB_OKCANCEL|MB_ICONINFORMATION "卸载前需要退出泺栋 Chat。$\r$\n$\r$\n请先保存正在进行的对话；点击“确定”后，卸载程序会自动关闭仍在运行或位于系统托盘中的客户端。" /SD IDOK IDOK closeClient
+  Abort
+closeClient:
+  nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /T /IM LuodongChat.exe'
+  Pop $0
+  Sleep 750
   MessageBox MB_YESNO|MB_ICONQUESTION "是否同时删除本机登录状态、日志和更新缓存？" /SD IDYES IDNO keepData
   RMDir /r "$INSTDIR\data"
 keepData:
   Delete "$DESKTOP\泺栋chat.lnk"
-  Delete "$INSTDIR\LuodongChat.exe"
+  Delete /REBOOTOK "$INSTDIR\LuodongChat.exe"
   Delete "$INSTDIR\.installed"
   Delete "$INSTDIR\Uninstall.exe"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LuodongChat"
