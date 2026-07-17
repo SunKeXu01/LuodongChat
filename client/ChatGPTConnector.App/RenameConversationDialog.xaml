@@ -1,0 +1,82 @@
+<Window x:Class="ChatGPTConnector.App.RenameConversationDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="重命名会话" Width="440" Height="220" MinWidth="440" MinHeight="220"
+        WindowStartupLocation="CenterOwner" WindowStyle="None" ResizeMode="NoResize"
+        AllowsTransparency="True" Background="Transparent" ShowInTaskbar="False"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        PreviewKeyDown="Window_OnPreviewKeyDown">
+  <Window.Resources>
+    <Style x:Key="DialogActionButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Height" Value="40"/>
+      <Setter Property="MinHeight" Value="40"/>
+      <Setter Property="MinWidth" Value="76"/>
+      <Setter Property="Padding" Value="16,6"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Opacity" Value="0.86"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Chrome" Property="Opacity" Value="0.7"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.45"/></Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/><Setter TargetName="Chrome" Property="BorderThickness" Value="2"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="DialogCancelButton" TargetType="Button" BasedOn="{StaticResource DialogActionButton}">
+      <Setter Property="Background" Value="{DynamicResource SurfaceBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+    </Style>
+    <Style x:Key="DialogCloseButton" TargetType="Button">
+      <Setter Property="Width" Value="34"/><Setter Property="Height" Value="34"/><Setter Property="MinHeight" Value="34"/>
+      <Setter Property="Padding" Value="8"/><Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/><Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+        <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+          <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource SecondarySurfaceBrush}"/></Trigger>
+          <Trigger Property="IsPressed" Value="True"><Setter TargetName="Chrome" Property="Opacity" Value="0.7"/></Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/><Setter TargetName="Chrome" Property="BorderThickness" Value="2"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+  </Window.Resources>
+
+  <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="14">
+    <Grid>
+      <Grid.RowDefinitions><RowDefinition Height="52"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+      <Grid Grid.Row="0" Margin="20,0,12,0" MouseLeftButtonDown="Header_OnMouseLeftButtonDown">
+        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <TextBlock Text="重命名会话" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/>
+        <Button Grid.Column="1" Style="{StaticResource DialogCloseButton}" ToolTip="关闭" AutomationProperties.Name="关闭" Click="CancelButton_OnClick">
+          <Viewbox Width="15" Height="15"><Path Data="M4,4 L20,20 M20,4 L4,20" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round"/></Viewbox>
+        </Button>
+      </Grid>
+
+      <Grid Grid.Row="1" Margin="32,8,32,22">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <TextBlock Text="会话名称" FontSize="14" FontWeight="Medium"/>
+        <TextBox x:Name="NameInput" Grid.Row="1" Height="42" MinHeight="42" MaxLength="50" Margin="0,8,0,0"
+                 Padding="12,7" TextChanged="NameInput_OnTextChanged"/>
+        <TextBlock x:Name="ValidationError" Grid.Row="2" Foreground="{DynamicResource ErrorBrush}" FontSize="12"
+                   MinHeight="17" Margin="2,4,0,0" TextWrapping="Wrap"/>
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,7,0,0">
+          <Button Content="取消" Style="{StaticResource DialogCancelButton}" Margin="0,0,12,0" Click="CancelButton_OnClick"/>
+          <Button x:Name="SaveButton" Content="保存" Style="{StaticResource DialogActionButton}" IsEnabled="False" Click="SaveButton_OnClick"/>
+        </StackPanel>
+      </Grid>
+    </Grid>
+  </Border>
+</Window>

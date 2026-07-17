@@ -550,20 +550,29 @@ public partial class MainWindow : Window
         ChatNotice.Text = "本地对话已删除";
     }
 
-    private async void RenameConversationMenuItem_OnClick(object sender, RoutedEventArgs e)
+    private void RenameConversationMenuItem_OnClick(object sender, RoutedEventArgs e)
     {
         if (_session is null || _chatCancellation is not null
             || sender is not System.Windows.Controls.MenuItem { CommandParameter: ConversationListItem item }) return;
-        var title = PromptForText("重命名会话", "输入新的会话名称", item.Title);
-        if (string.IsNullOrWhiteSpace(title)) return;
-        var renamed = item.Conversation with { Title = title.Trim()[..Math.Min(title.Trim().Length, 60)], UpdatedAt = DateTimeOffset.UtcNow };
-        await _conversationStore.SaveAsync(_session.Profile.Id, renamed);
-        var index = _conversations.IndexOf(item);
-        var replacement = ConversationListItem.From(renamed);
-        _conversations[index] = replacement;
-        if (_currentConversation?.Id == renamed.Id) _currentConversation = renamed;
-        ConversationsList.SelectedItem = replacement;
-        ChatNotice.Text = "会话已重命名";
+        var dialog = new RenameConversationDialog(item.Title, async title =>
+        {
+            try
+            {
+                var renamed = item.Conversation with { Title = title, UpdatedAt = DateTimeOffset.UtcNow };
+                await _conversationStore.SaveAsync(_session.Profile.Id, renamed);
+                var index = _conversations.IndexOf(item);
+                var replacement = ConversationListItem.From(renamed);
+                _conversations[index] = replacement;
+                if (_currentConversation?.Id == renamed.Id) _currentConversation = renamed;
+                ConversationsList.SelectedItem = replacement;
+                return null;
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                return "无法保存会话名称，请检查软件目录是否可写。";
+            }
+        }) { Owner = this };
+        if (dialog.ShowDialog() == true) ShowChatToast("会话名称已保存");
     }
 
     private void ShowConversation(LocalConversation? conversation)
@@ -1028,30 +1037,6 @@ public partial class MainWindow : Window
     {
         var source = string.IsNullOrWhiteSpace(profile.Nickname) ? profile.Email : profile.Nickname.Trim();
         return string.IsNullOrWhiteSpace(source) ? "我" : source[..1].ToUpperInvariant();
-    }
-
-    private string? PromptForText(string title, string message, string initialValue)
-    {
-        var input = new System.Windows.Controls.TextBox { Text = initialValue, Height = 46, MaxLength = 60, Margin = new Thickness(0, 8, 0, 18) };
-        input.SelectAll();
-        var cancel = new System.Windows.Controls.Button { Content = "取消", Style = (Style)FindResource("SecondaryButton"), Width = 82, Margin = new Thickness(0, 0, 8, 0) };
-        var confirm = new System.Windows.Controls.Button { Content = "保存", Width = 82 };
-        var actions = new System.Windows.Controls.StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        actions.Children.Add(cancel); actions.Children.Add(confirm);
-        var panel = new System.Windows.Controls.StackPanel { Margin = new Thickness(26) };
-        panel.Children.Add(new System.Windows.Controls.TextBlock { Text = message, FontSize = 15, FontWeight = FontWeights.SemiBold });
-        panel.Children.Add(input); panel.Children.Add(actions);
-        var dialog = new Window
-        {
-            Title = title, Owner = this, WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Width = 430, Height = 210, MinWidth = 380, MinHeight = 200, ResizeMode = ResizeMode.NoResize,
-            Content = panel, ShowInTaskbar = false,
-        };
-        cancel.Click += (_, _) => dialog.DialogResult = false;
-        confirm.Click += (_, _) => { if (!string.IsNullOrWhiteSpace(input.Text)) dialog.DialogResult = true; };
-        input.KeyDown += (_, args) => { if (args.Key == System.Windows.Input.Key.Enter && !string.IsNullOrWhiteSpace(input.Text)) dialog.DialogResult = true; };
-        dialog.Loaded += (_, _) => input.Focus();
-        return dialog.ShowDialog() == true ? input.Text : null;
     }
 
     private static ImageSource? DecodeAvatar(string? base64)
