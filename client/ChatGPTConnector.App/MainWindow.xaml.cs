@@ -699,7 +699,7 @@ public partial class MainWindow : Window
     private void ApplyProjectSelection(string? path)
     {
         _selectedProjectPath = Directory.Exists(path) ? Path.GetFullPath(path) : null;
-        ProjectPickerButton.Content = _selectedProjectPath is null ? "▱  选择项目" : $"▱  {Path.GetFileName(_selectedProjectPath)}";
+        ProjectPickerLabel.Text = _selectedProjectPath is null ? "选择项目" : Path.GetFileName(_selectedProjectPath);
         ProjectPickerButton.ToolTip = _selectedProjectPath ?? "选择项目目录";
         ProjectReadOnlyBadge.Visibility = _selectedProjectPath is null ? Visibility.Collapsed : Visibility.Visible;
     }
@@ -955,7 +955,19 @@ public partial class MainWindow : Window
         ProfileEmailText.Text = profile.Email;
         NicknameInput.Text = profile.Nickname;
         SidebarProfileName.Text = string.IsNullOrWhiteSpace(profile.Nickname) ? profile.Email : profile.Nickname;
-        AvatarImage.Source = DecodeAvatar(profile.AvatarBase64);
+        SidebarProfileEmail.Text = profile.Email;
+        var avatar = DecodeAvatar(profile.AvatarBase64);
+        AvatarImage.Source = avatar;
+        SidebarAvatarImage.Source = avatar;
+        SidebarAvatarImage.Visibility = avatar is null ? Visibility.Collapsed : Visibility.Visible;
+        SidebarAvatarFallbackText.Visibility = avatar is null ? Visibility.Visible : Visibility.Collapsed;
+        SidebarAvatarFallbackText.Text = ProfileInitial(profile);
+    }
+
+    private static string ProfileInitial(AccountProfile profile)
+    {
+        var source = string.IsNullOrWhiteSpace(profile.Nickname) ? profile.Email : profile.Nickname.Trim();
+        return string.IsNullOrWhiteSpace(source) ? "我" : source[..1].ToUpperInvariant();
     }
 
     private string? PromptForText(string title, string message, string initialValue)

@@ -116,6 +116,21 @@
       <Setter Property="MinHeight" Value="24"/><Setter Property="Padding" Value="6,2"/><Setter Property="Margin" Value="0,0,3,0"/>
       <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/><Setter Property="FontSize" Value="11"/><Setter Property="FontWeight" Value="Medium"/>
     </Style>
+    <Style x:Key="IconToolbarButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+      <Setter Property="Width" Value="36"/><Setter Property="Height" Value="36"/><Setter Property="MinHeight" Value="36"/>
+      <Setter Property="Padding" Value="9"/><Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+      <Setter Property="Background" Value="Transparent"/>
+    </Style>
+    <Style x:Key="IconActionButton" TargetType="Button" BasedOn="{StaticResource LinkButton}">
+      <Setter Property="Width" Value="30"/><Setter Property="Height" Value="28"/><Setter Property="MinHeight" Value="28"/>
+      <Setter Property="Padding" Value="6"/><Setter Property="Margin" Value="0,0,2,0"/>
+      <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+    </Style>
+    <Style x:Key="SidebarAccountButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Height" Value="58"/><Setter Property="Padding" Value="10,7"/>
+      <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+    </Style>
     <Style x:Key="HeaderButton" TargetType="Button" BasedOn="{StaticResource LinkButton}">
       <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/><Setter Property="Padding" Value="10,6"/>
     </Style>
