@@ -199,6 +199,9 @@ jobs:
           retention-days: 14
   android-preview:
     name: Android client
+    # Windows is the actively maintained client. Keep Android available for an
+    # explicit manual build without making normal pushes or releases wait for it.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
@@ -265,7 +268,7 @@ jobs:
   publish-github-release:
     name: Publish GitHub release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [gateway, core, integration, windows-preview, android-preview]
+    needs: [gateway, core, integration, windows-preview]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -274,11 +277,7 @@ jobs:
         with:
           name: LuodongChat-win-x64
           path: release/windows
-      - uses: actions/download-artifact@v4
-        with:
-          name: LuodongChat-android-preview
-          path: release/android
-      - name: Publish synchronized Windows and Android assets
+      - name: Publish verified Windows assets
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -289,11 +288,9 @@ jobs:
             \( -name "LuodongChat-$version-win-x64-setup.exe" \
             -o -name "LuodongChat-$version-win-x64-setup.exe.sha256" \
             -o -name "LuodongChat-$version-win-x64-portable.zip" \
-            -o -name "LuodongChat-$version-win-x64-portable.zip.sha256" \
-            -o -name "LuodongChat-$version-android.apk" \
-            -o -name "LuodongChat-$version-android.apk.sha256" \) \
+            -o -name "LuodongChat-$version-win-x64-portable.zip.sha256" \) \
             -print)
-          test "${#files[@]}" -eq 6
+          test "${#files[@]}" -eq 4
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "${files[@]}" --clobber
           else
@@ -303,7 +300,7 @@ jobs:
   deploy-production:
     name: Deploy production
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [gateway, core, integration, windows-preview, android-preview]
+    needs: [gateway, core, integration, windows-preview]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:
@@ -341,17 +338,13 @@ jobs:
   publish-client-update:
     name: Publish latest client packages to OSS
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [windows-preview, android-preview]
+    needs: [windows-preview]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: LuodongChat-win-x64
           path: release/windows
-      - uses: actions/download-artifact@v4
-        with:
-          name: LuodongChat-android-preview
-          path: release/android
       - name: Install pinned Alibaba Cloud ossutil
         run: |
           curl --fail --silent --show-error --location \
@@ -390,20 +383,15 @@ jobs:
           installer_checksum="$(find release -type f -name 'LuodongChat-*-win-x64-setup.exe.sha256' -print -quit)"
           portable="$(find release -type f -name 'LuodongChat-*-win-x64-portable.zip' -print -quit)"
           portable_checksum="$(find release -type f -name 'LuodongChat-*-win-x64-portable.zip.sha256' -print -quit)"
-          android_apk="$(find release/android -type f -name 'LuodongChat-*-android.apk' ! -name '*-debug.apk' -print -quit)"
-          android_checksum="$(find release/android -type f -name 'LuodongChat-*-android.apk.sha256' -print -quit)"
           test -s "$executable"
           test -s "$checksum"
           test -s "$installer"
           test -s "$installer_checksum"
           test -s "$portable"
           test -s "$portable_checksum"
-          test -s "$android_apk"
-          test -s "$android_checksum"
           version="${VERSION#v}"
           base='https://oss.520skx.com/latest'
-          github_base="https://github.com/${{ github.repository }}/releases/download/$VERSION"
-          printf '{"version":"%s","executableUrl":"%s/LuodongChat-%s-win-x64.exe","checksumUrl":"%s/LuodongChat-%s-win-x64.exe.sha256","installerUrl":"%s/LuodongChat-%s-win-x64-setup.exe","installerChecksumUrl":"%s/LuodongChat-%s-win-x64-setup.exe.sha256","androidApkUrl":"%s/LuodongChat-%s-android.apk","androidChecksumUrl":"%s/LuodongChat-%s-android.apk.sha256"}\n' "$version" "$base" "$version" "$base" "$version" "$base" "$version" "$base" "$version" "$github_base" "$version" "$github_base" "$version" > update.json
+          printf '{"version":"%s","executableUrl":"%s/LuodongChat-%s-win-x64.exe","checksumUrl":"%s/LuodongChat-%s-win-x64.exe.sha256","installerUrl":"%s/LuodongChat-%s-win-x64-setup.exe","installerChecksumUrl":"%s/LuodongChat-%s-win-x64-setup.exe.sha256","androidApkUrl":"%s/LuodongChat.apk","androidChecksumUrl":"%s/LuodongChat.apk.sha256"}\n' "$version" "$base" "$version" "$base" "$version" "$base" "$version" "$base" "$version" "$base" "$base" > update.json
           install -d latest
           cp "$executable" latest/LuodongChat.exe
           cp "$checksum" latest/LuodongChat.exe.sha256
@@ -411,25 +399,25 @@ jobs:
           cp "$installer_checksum" latest/LuodongChat-Setup.exe.sha256
           cp "$portable" latest/LuodongChat-portable.zip
           cp "$portable_checksum" latest/LuodongChat-portable.zip.sha256
-          cp "$android_apk" latest/LuodongChat.apk
-          cp "$android_checksum" latest/LuodongChat.apk.sha256
           cp "$executable" "latest/LuodongChat-$version-win-x64.exe"
           cp "$checksum" "latest/LuodongChat-$version-win-x64.exe.sha256"
           cp "$installer" "latest/LuodongChat-$version-win-x64-setup.exe"
           cp "$installer_checksum" "latest/LuodongChat-$version-win-x64-setup.exe.sha256"
           cp "$portable" "latest/LuodongChat-$version-win-x64-portable.zip"
           cp "$portable_checksum" "latest/LuodongChat-$version-win-x64-portable.zip.sha256"
-          cp "$android_apk" "latest/LuodongChat-$version-android.apk"
-          cp "$android_checksum" "latest/LuodongChat-$version-android.apk.sha256"
           cp update.json latest/update.json
           OSSUTIL="$RUNNER_TEMP/ossutil-bin"
           CONFIG="$RUNNER_TEMP/ossutil.conf"
+          # Preserve the last published Android package while Android work is
+          # paused; only Windows artifacts and the manifest are refreshed.
+          "$OSSUTIL" cp oss://luodongchat-app/latest/LuodongChat.apk latest/LuodongChat.apk --force --config-file "$CONFIG"
+          "$OSSUTIL" cp oss://luodongchat-app/latest/LuodongChat.apk.sha256 latest/LuodongChat.apk.sha256 --force --config-file "$CONFIG"
           "$OSSUTIL" rm oss://luodongchat-app/latest/ --recursive --force --config-file "$CONFIG"
           "$OSSUTIL" cp latest/ oss://luodongchat-app/latest/ --recursive --force --acl public-read --cache-control 'public, max-age=300' --config-file "$CONFIG"
           for object in LuodongChat.exe LuodongChat.exe.sha256 LuodongChat-Setup.exe LuodongChat-Setup.exe.sha256 LuodongChat-portable.zip LuodongChat-portable.zip.sha256 LuodongChat.apk LuodongChat.apk.sha256 update.json; do
             "$OSSUTIL" stat "oss://luodongchat-app/latest/$object" --config-file "$CONFIG" >/dev/null
           done
-          for object in "LuodongChat-$version-win-x64.exe" "LuodongChat-$version-win-x64.exe.sha256" "LuodongChat-$version-win-x64-setup.exe" "LuodongChat-$version-win-x64-setup.exe.sha256" "LuodongChat-$version-win-x64-portable.zip" "LuodongChat-$version-win-x64-portable.zip.sha256" "LuodongChat-$version-android.apk" "LuodongChat-$version-android.apk.sha256"; do
+          for object in "LuodongChat-$version-win-x64.exe" "LuodongChat-$version-win-x64.exe.sha256" "LuodongChat-$version-win-x64-setup.exe" "LuodongChat-$version-win-x64-setup.exe.sha256" "LuodongChat-$version-win-x64-portable.zip" "LuodongChat-$version-win-x64-portable.zip.sha256"; do
             "$OSSUTIL" stat "oss://luodongchat-app/latest/$object" --config-file "$CONFIG" >/dev/null
           done
           rsync -rz update.json connector-deploy@8.140.211.162:/app/module/client-releases/update.json.next
