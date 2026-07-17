@@ -38,6 +38,7 @@ public partial class MainWindow : Window
     private bool _allowExit;
     private readonly SemaphoreSlim _operationGate = new(1, 1);
     private readonly DispatcherTimer _sessionTimer = new() { Interval = TimeSpan.FromMinutes(5) };
+    private readonly DispatcherTimer _chatToastTimer = new() { Interval = TimeSpan.FromSeconds(1.8) };
     private CancellationTokenSource? _chatCancellation;
     private readonly CancellationTokenSource _updateCancellation = new();
     private bool _chatScrollPending;
@@ -45,6 +46,7 @@ public partial class MainWindow : Window
     private ClientUpdate? _availableUpdate;
     private AppTheme _theme;
     private string? _selectedProjectPath;
+    private bool _webSearchEnabled = true;
 
     private static string? CurrentVersion
     {
@@ -75,6 +77,7 @@ public partial class MainWindow : Window
             CurrentVersionPill.Visibility = Visibility.Visible;
         }
         UpdateThemeButton();
+        _chatToastTimer.Tick += (_, _) => { _chatToastTimer.Stop(); ChatToast.Visibility = Visibility.Collapsed; };
         ChatMessagesItems.ItemsSource = _chatMessages;
         _conversationView = CollectionViewSource.GetDefaultView(_conversations);
         _conversationView.Filter = FilterConversation;
@@ -579,14 +582,22 @@ public partial class MainWindow : Window
         if (_chatMessages.Count == 0) return;
         var text = string.Join(Environment.NewLine + Environment.NewLine, _chatMessages.Select(message => $"{message.Sender}：{message.Content}"));
         Clipboard.SetText(text);
-        ChatNotice.Text = "当前对话已复制到剪贴板";
+        ShowChatToast("当前对话已复制到剪贴板");
     }
 
     private void CopyMessageButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (sender is not System.Windows.Controls.Button { Tag: ChatDisplayMessage message }) return;
         Clipboard.SetText(message.Content);
-        ChatNotice.Text = "消息已复制到剪贴板";
+        ShowChatToast("消息已复制到剪贴板");
+    }
+
+    private void ShowChatToast(string text)
+    {
+        ChatToastText.Text = text;
+        ChatToast.Visibility = Visibility.Visible;
+        _chatToastTimer.Stop();
+        _chatToastTimer.Start();
     }
 
     private async void RegenerateMessageButton_OnClick(object sender, RoutedEventArgs e)
@@ -658,6 +669,9 @@ public partial class MainWindow : Window
         if (_selectedProjectPath is not null)
         {
             menu.Items.Add(new System.Windows.Controls.Separator());
+            var details = new System.Windows.Controls.MenuItem { Header = "查看项目上下文详情…" };
+            details.Click += async (_, _) => await ShowProjectContextDetailsAsync();
+            menu.Items.Add(details);
             var clear = new System.Windows.Controls.MenuItem { Header = "移出当前项目空间" };
             clear.Click += async (_, _) => await SelectProjectAsync(null);
             menu.Items.Add(clear);
@@ -701,7 +715,51 @@ public partial class MainWindow : Window
         _selectedProjectPath = Directory.Exists(path) ? Path.GetFullPath(path) : null;
         ProjectPickerLabel.Text = _selectedProjectPath is null ? "选择项目" : Path.GetFileName(_selectedProjectPath);
         ProjectPickerButton.ToolTip = _selectedProjectPath ?? "选择项目目录";
-        ProjectReadOnlyBadge.Visibility = _selectedProjectPath is null ? Visibility.Collapsed : Visibility.Visible;
+        if (_selectedProjectPath is not null)
+            ProjectPickerButton.ToolTip = $"项目上下文：{_selectedProjectPath}\n只读访问；点击查看文件或移除上下文";
+    }
+
+    private async Task ShowProjectContextDetailsAsync()
+    {
+        if (_selectedProjectPath is null) return;
+        var inspected = await _projectContextBuilder.InspectAsync(_selectedProjectPath);
+        if (inspected is null) { ChatNotice.Text = "项目目录不存在，请重新选择。"; return; }
+        var dialog = new Window
+        {
+            Title = $"项目上下文 · {inspected.ProjectName}", Owner = this, Width = 580, Height = 500,
+            MinWidth = 480, MinHeight = 400, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = (Brush)FindResource("SurfaceBrush"), Foreground = (Brush)FindResource("TextBrush"),
+        };
+        var root = new System.Windows.Controls.Grid { Margin = new Thickness(24) };
+        root.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new System.Windows.Controls.RowDefinition());
+        root.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = GridLength.Auto });
+        root.Children.Add(new System.Windows.Controls.TextBlock { Text = inspected.ProjectName, FontSize = 22, FontWeight = FontWeights.SemiBold });
+        var summary = new System.Windows.Controls.TextBlock
+        {
+            Text = $"访问模式：只读  ·  扫描 {inspected.ScannedFileCount} 个文件  ·  可读取 {inspected.ReadableFiles.Count} 个  ·  忽略 {inspected.IgnoredFileCount} 个",
+            Foreground = (Brush)FindResource("MutedBrush"), Margin = new Thickness(0, 8, 0, 14), TextWrapping = TextWrapping.Wrap,
+        };
+        System.Windows.Controls.Grid.SetRow(summary, 1); root.Children.Add(summary);
+        var files = new System.Windows.Controls.ListBox { ItemsSource = inspected.ReadableFiles, BorderBrush = (Brush)FindResource("BorderBrush"), BorderThickness = new Thickness(1) };
+        System.Windows.Controls.Grid.SetRow(files, 2); root.Children.Add(files);
+        var actions = new System.Windows.Controls.StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 16, 0, 0) };
+        var remove = new System.Windows.Controls.Button { Content = "移除上下文", Style = (Style)FindResource("SecondaryButton"), Margin = new Thickness(0, 0, 8, 0) };
+        remove.Click += async (_, _) => { dialog.Close(); await SelectProjectAsync(null); };
+        var close = new System.Windows.Controls.Button { Content = "关闭" }; close.Click += (_, _) => dialog.Close();
+        actions.Children.Add(remove); actions.Children.Add(close);
+        System.Windows.Controls.Grid.SetRow(actions, 3); root.Children.Add(actions);
+        dialog.Content = root;
+        dialog.ShowDialog();
+    }
+
+    private void WebSearchToggleButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        _webSearchEnabled = !_webSearchEnabled;
+        WebSearchToggleLabel.Text = _webSearchEnabled ? "联网开启" : "联网关闭";
+        WebSearchToggleButton.ToolTip = _webSearchEnabled ? "点击关闭联网搜索" : "点击开启联网搜索";
+        NetworkStatusText.Text = _webSearchEnabled ? "联网搜索已开启" : "联网搜索已关闭";
     }
 
     private void ExportConversationMenuItem_OnClick(object sender, RoutedEventArgs e)
@@ -754,7 +812,7 @@ public partial class MainWindow : Window
         var cancellationToken = _chatCancellation.Token;
         ChatSendButton.IsEnabled = false;
         StopGenerationButton.Visibility = Visibility.Visible;
-        NetworkStatusText.Text = "正在判断是否需要搜索…";
+        NetworkStatusText.Text = _webSearchEnabled ? "正在判断是否需要搜索…" : "联网搜索已关闭";
         try
         {
             var now = DateTimeOffset.UtcNow;
@@ -793,7 +851,7 @@ public partial class MainWindow : Window
                 if (wantsImage) ChatNotice.Text = "正在生成图片，请稍候…";
                 var result = await _chat.StreamResponseAsync(
                     GatewayUri, _session.AccessToken, context, progress, cancellationToken,
-                    enableWebSearch: true, enableImageGeneration: wantsImage);
+                    enableWebSearch: _webSearchEnabled, enableImageGeneration: wantsImage);
                 var storedImages = new List<GeneratedChatImage>();
                 foreach (var image in result.Images)
                     storedImages.Add(await _conversationStore.SaveGeneratedImageAsync(
@@ -812,7 +870,7 @@ public partial class MainWindow : Window
                 await SaveCurrentConversationAsync(cancellationToken);
                 ChatNotice.Text = result.WebSearchUnavailable
                     ? "当前上游暂不支持联网搜索，本次已自动使用普通对话。" : "";
-                NetworkStatusText.Text = result.WebSearchUnavailable
+                NetworkStatusText.Text = !_webSearchEnabled ? "联网搜索已关闭" : result.WebSearchUnavailable
                     ? "联网不可用 · 可重试"
                     : result.WebSearchPerformed ? "已联网并检索来源" : "联网搜索已开启 · 本次未调用";
                 ScrollChatToEnd();
@@ -828,7 +886,7 @@ public partial class MainWindow : Window
                     await SaveCurrentConversationAsync(CancellationToken.None);
                 }
                 ChatNotice.Text = "已停止生成";
-                NetworkStatusText.Text = "联网搜索已开启";
+                NetworkStatusText.Text = _webSearchEnabled ? "联网搜索已开启" : "联网搜索已关闭";
             }
             catch (Exception error)
             {
@@ -1134,10 +1192,20 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
     public IReadOnlyList<ChatCitation> Sources => _source.Citations ?? [];
     public bool HasSources => Sources.Count > 0;
     public string TimeText => _source.ClientCreatedAt.ToLocalTime().ToString("HH:mm");
+    public double BubbleWidth
+    {
+        get
+        {
+            var natural = CalculateBubbleWidth(_content, IsUser);
+            if (_images.Count > 0) natural = Math.Max(natural, 600);
+            if (HasSources) natural = Math.Max(natural, 420);
+            return natural;
+        }
+    }
     private Visibility _sourcesVisibility = Visibility.Collapsed;
     public Visibility SourcesVisibility { get => _sourcesVisibility; set { if (_sourcesVisibility == value) return; _sourcesVisibility = value; PropertyChanged?.Invoke(this, new(nameof(SourcesVisibility))); } }
     private IReadOnlyList<ChatDisplayImage> _images = [];
-    public IReadOnlyList<ChatDisplayImage> Images { get => _images; set { _images = value; PropertyChanged?.Invoke(this, new(nameof(Images))); } }
+    public IReadOnlyList<ChatDisplayImage> Images { get => _images; set { _images = value; PropertyChanged?.Invoke(this, new(nameof(Images))); PropertyChanged?.Invoke(this, new(nameof(BubbleWidth))); } }
     public SyncedChatMessage Source
     {
         get => _source;
@@ -1149,12 +1217,22 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
             PropertyChanged?.Invoke(this, new(nameof(IsUser)));
             PropertyChanged?.Invoke(this, new(nameof(HasSources)));
             PropertyChanged?.Invoke(this, new(nameof(TimeText)));
+            PropertyChanged?.Invoke(this, new(nameof(BubbleWidth)));
         }
     }
-    public string Content { get => _content; set { if (_content == value) return; _content = value; PropertyChanged?.Invoke(this, new(nameof(Content))); } }
+    public string Content { get => _content; set { if (_content == value) return; _content = value; PropertyChanged?.Invoke(this, new(nameof(Content))); PropertyChanged?.Invoke(this, new(nameof(BubbleWidth))); } }
     private ChatDisplayMessage(SyncedChatMessage source) { _source = source; _content = source.Content; }
     public static ChatDisplayMessage From(SyncedChatMessage source, IReadOnlyList<ChatDisplayImage>? images = null) =>
         new(source) { Sender = source.Role == "user" ? "我" : "GPT-5.6", Images = images ?? [] };
+    private static double CalculateBubbleWidth(string content, bool isUser)
+    {
+        if (string.IsNullOrEmpty(content)) return isUser ? 52 : 72;
+        var lines = content.Replace("\r", "").Split('\n');
+        var longest = lines.Max(line => line.Sum(character => character > 255 ? 15.5 : 8.2));
+        var natural = longest + (isUser ? 38 : 42);
+        if (content.Length > 160 && longest < 360) natural = Math.Max(natural, isUser ? 430 : 620);
+        return Math.Min(isUser ? 700 : 840, Math.Max(isUser ? 48 : 58, natural));
+    }
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
 }
 

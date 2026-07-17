@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 namespace ChatGPTConnector.Core;
 
 public sealed record ProjectContext(string Content, int IndexedFileCount, int IncludedFileCount, bool Truncated);
+public sealed record ProjectInspection(string ProjectName, IReadOnlyList<string> ReadableFiles, int ScannedFileCount, int IgnoredFileCount, bool Truncated);
 
 public sealed class ProjectContextBuilder
 {
@@ -22,6 +23,50 @@ public sealed class ProjectContextBuilder
 
     private static readonly HashSet<string> AllowedExtensionlessFiles = new(StringComparer.OrdinalIgnoreCase)
     { "Dockerfile", "Makefile", "Procfile", "LICENSE", "README", "AGENTS" };
+
+    public Task<ProjectInspection?> InspectAsync(string root, CancellationToken cancellationToken = default) => Task.Run(() =>
+    {
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) return null;
+        var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var readable = new List<string>();
+        var pending = new Stack<string>();
+        pending.Push(fullRoot);
+        var scanned = 0;
+        var ignored = 0;
+        var truncated = false;
+        while (pending.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var directory = pending.Pop();
+            IEnumerable<string> entries;
+            try { entries = Directory.EnumerateFileSystemEntries(directory).ToArray(); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { continue; }
+            foreach (var entry in entries)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (scanned >= 2_000) { truncated = true; break; }
+                try
+                {
+                    if (Directory.Exists(entry))
+                    {
+                        var info = new DirectoryInfo(entry);
+                        if (IgnoredDirectories.Contains(info.Name) || info.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
+                        pending.Push(entry);
+                        continue;
+                    }
+                    scanned++;
+                    var infoFile = new FileInfo(entry);
+                    if (!IsAllowed(entry) || infoFile.Attributes.HasFlag(FileAttributes.ReparsePoint)) { ignored++; continue; }
+                    if (readable.Count < MaxIndexedFiles) readable.Add(Path.GetRelativePath(fullRoot, entry).Replace('\\', '/'));
+                    else truncated = true;
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException) { ignored++; }
+            }
+            if (truncated && scanned >= 2_000) break;
+        }
+        readable.Sort(StringComparer.OrdinalIgnoreCase);
+        return new ProjectInspection(Path.GetFileName(fullRoot), readable, scanned, ignored, truncated);
+    }, cancellationToken);
 
     public async Task<ProjectContext?> BuildAsync(string root, string query, CancellationToken cancellationToken = default)
     {

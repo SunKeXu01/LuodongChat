@@ -162,7 +162,7 @@
         </TabControl.Template>
         <TabItem Header="聊天">
           <Grid Background="{DynamicResource SurfaceBrush}">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="280"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="256"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
 
             <Border Grid.Column="0" Background="{DynamicResource SidebarBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0">
               <Grid Margin="14,16,14,12">
@@ -173,8 +173,13 @@
                     <TextBlock Text="新建对话" VerticalAlignment="Center"/>
                   </StackPanel>
                 </Button>
-                <TextBox x:Name="ConversationSearchInput" Grid.Row="1" Height="42" MinHeight="42" Tag="搜索会话…"
-                         Style="{StaticResource WatermarkTextBox}" Margin="0,0,0,10" TextChanged="ConversationSearchInput_OnTextChanged"/>
+                <Grid Grid.Row="1" Margin="0,0,0,10">
+                  <TextBox x:Name="ConversationSearchInput" Height="42" MinHeight="42" Tag="搜索会话…" Padding="34,8,12,8"
+                           Style="{StaticResource WatermarkTextBox}" TextChanged="ConversationSearchInput_OnTextChanged"/>
+                  <Viewbox Width="15" Height="15" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="12,0,0,0" IsHitTestVisible="False">
+                    <Path Data="M10.5,18 A7.5,7.5 0 1 1 10.5,3 A7.5,7.5 0 0 1 10.5,18 M16,16 L21,21" Stroke="{DynamicResource MutedBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" Fill="Transparent"/>
+                  </Viewbox>
+                </Grid>
                 <ListBox x:Name="ConversationsList" Grid.Row="2" BorderThickness="0" Background="Transparent"
                          SelectionChanged="ConversationsList_OnSelectionChanged" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                   <ListBox.GroupStyle>
@@ -213,6 +218,7 @@
                         <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
                           <Setter TargetName="ConversationCard" Property="Background" Value="{DynamicResource SecondarySurfaceBrush}"/>
                           <Setter TargetName="ConversationCard" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                          <Setter TargetName="ConversationCard" Property="BorderThickness" Value="3,0,0,0"/>
                         </DataTrigger>
                         <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
                           <Setter TargetName="ConversationCard" Property="Background" Value="{DynamicResource SurfaceBrush}"/>
@@ -278,7 +284,7 @@
                             <Border x:Name="MessageAvatar" Width="28" Height="28" CornerRadius="14" Background="{DynamicResource BrandBrush}"><TextBlock x:Name="MessageAvatarText" Text="AI" Foreground="White" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                             <TextBlock x:Name="MessageSender" Text="{Binding Sender}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
                           </StackPanel>
-                          <Border x:Name="MessageBubble" Background="{DynamicResource MessageSurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="14" Padding="17,14">
+                          <Border x:Name="MessageBubble" Width="{Binding BubbleWidth}" HorizontalAlignment="Left" Background="{DynamicResource MessageSurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="16" Padding="20,16">
                             <StackPanel>
                             <local:MarkdownViewer MarkdownText="{Binding Content}" FontSize="15.5" FontWeight="Normal" Foreground="{DynamicResource TextBrush}" Background="Transparent"/>
                             <ItemsControl ItemsSource="{Binding Images}" Margin="0,10,0,0">
@@ -308,10 +314,10 @@
                             </ItemsControl>
                             </StackPanel>
                           </Border>
-                          <Grid x:Name="MessageActions" Margin="4,6,4,0" Opacity="0.48">
+                          <Grid x:Name="MessageActions" Margin="4,6,4,0">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                            <TextBlock Text="{Binding TimeText}" Foreground="{DynamicResource WeakTextBrush}" FontSize="11" VerticalAlignment="Center"/>
-                            <StackPanel Grid.Column="1" x:Name="AssistantActions" Orientation="Horizontal" Margin="8,0,0,0">
+                            <TextBlock Text="{Binding TimeText}" Foreground="{DynamicResource WeakTextBrush}" FontSize="12" VerticalAlignment="Center"/>
+                            <StackPanel Grid.Column="1" x:Name="AssistantActions" Orientation="Horizontal" Margin="8,0,0,0" Opacity="0" IsHitTestVisible="False">
                               <Button Tag="{Binding}" Style="{StaticResource IconActionButton}" ToolTip="复制回答" Click="CopyMessageButton_OnClick">
                                 <Viewbox Width="15" Height="15"><Path Data="M8,8 H19 V19 H8 Z M5,16 H4 A2,2 0 0 1 2,14 V4 A2,2 0 0 1 4,2 H14 A2,2 0 0 1 16,4 V5" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" StrokeLineJoin="Round" Fill="Transparent"/></Viewbox>
                               </Button>
@@ -330,15 +336,22 @@
                           <Setter TargetName="MessageGroup" Property="HorizontalAlignment" Value="Right"/>
                           <Setter TargetName="MessageGroup" Property="MaxWidth" Value="700"/>
                           <Setter TargetName="MessageHeader" Property="HorizontalAlignment" Value="Right"/>
+                          <Setter TargetName="MessageBubble" Property="Padding" Value="18,14"/>
                           <Setter TargetName="MessageBubble" Property="Background" Value="{DynamicResource UserMessageBrush}"/>
                           <Setter TargetName="MessageBubble" Property="BorderBrush" Value="{DynamicResource UserMessageBorderBrush}"/>
                           <Setter TargetName="MessageSender" Property="Foreground" Value="{DynamicResource LinkBrush}"/>
                           <Setter TargetName="MessageAvatar" Property="Background" Value="{DynamicResource AccentBrush}"/>
                           <Setter TargetName="MessageAvatarText" Property="Text" Value="你"/>
+                          <Setter TargetName="MessageAvatar" Property="ToolTip" Value="你"/>
+                          <Setter TargetName="MessageSender" Property="Visibility" Value="Collapsed"/>
+                          <Setter TargetName="MessageActions" Property="HorizontalAlignment" Value="Right"/>
                           <Setter TargetName="AssistantActions" Property="Visibility" Value="Collapsed"/>
                         </DataTrigger>
                         <DataTrigger Binding="{Binding HasSources}" Value="False"><Setter TargetName="SourcesActionButton" Property="Visibility" Value="Collapsed"/></DataTrigger>
-                        <Trigger SourceName="MessageGroup" Property="IsMouseOver" Value="True"><Setter TargetName="MessageActions" Property="Opacity" Value="1"/></Trigger>
+                        <Trigger SourceName="MessageGroup" Property="IsMouseOver" Value="True">
+                          <Setter TargetName="AssistantActions" Property="Opacity" Value="1"/>
+                          <Setter TargetName="AssistantActions" Property="IsHitTestVisible" Value="True"/>
+                        </Trigger>
                       </DataTemplate.Triggers>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
@@ -349,7 +362,7 @@
               <Border Grid.Row="3" MaxWidth="1040" HorizontalAlignment="Stretch" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="18" Margin="32,10,32,20" Padding="12,10">
                 <Grid>
                   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                  <TextBox x:Name="ChatInput" MinHeight="62" MaxHeight="180" AcceptsReturn="True" TextWrapping="Wrap" Tag="输入消息，Enter 发送，Shift+Enter 换行…"
+                  <TextBox x:Name="ChatInput" MinHeight="50" MaxHeight="190" AcceptsReturn="True" TextWrapping="Wrap" Tag="输入消息，Enter 发送，Shift+Enter 换行…"
                            Style="{StaticResource WatermarkTextBox}" VerticalScrollBarVisibility="Auto" BorderThickness="0" Background="Transparent" Padding="8,6"
                            PreviewKeyDown="ChatInput_OnPreviewKeyDown" TextChanged="ChatInput_OnTextChanged"/>
                   <Grid Grid.Row="1" Margin="2,7,2,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -360,15 +373,14 @@
                           <TextBlock x:Name="ProjectPickerLabel" Text="选择项目" VerticalAlignment="Center"/>
                         </StackPanel>
                       </Button>
-                      <Border x:Name="ProjectReadOnlyBadge" Visibility="Collapsed" Padding="7,4" CornerRadius="8" Margin="0,0,8,0" Background="{DynamicResource SecondarySurfaceBrush}"
-                              ToolTip="仅读取受支持的文本文件；相关内容会发送给 GPT，不会修改本地文件">
-                        <TextBlock Text="只读项目上下文" Foreground="{DynamicResource SecondaryForegroundBrush}" FontSize="11"/>
-                      </Border>
-                      <Border Padding="8,4" CornerRadius="8" Background="{DynamicResource SecondarySurfaceBrush}"><TextBlock Text="联网搜索默认开启" Foreground="{DynamicResource SecondaryForegroundBrush}" FontSize="12"/></Border>
-                      <TextBlock Text="聊天记录仅保存在本机" Foreground="{DynamicResource WeakTextBrush}" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                      <Button x:Name="WebSearchToggleButton" MinHeight="32" Padding="9,5" Style="{StaticResource SecondaryButton}" ToolTip="点击关闭联网搜索" Click="WebSearchToggleButton_OnClick">
+                        <StackPanel Orientation="Horizontal">
+                          <Viewbox Width="15" Height="15" Margin="0,0,6,0"><Path Data="M12,2 A10,10 0 1 1 12,22 A10,10 0 0 1 12,2 M2,12 H22 M12,2 C16,6 16,18 12,22 M12,2 C8,6 8,18 12,22" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5" Fill="Transparent"/></Viewbox>
+                          <TextBlock x:Name="WebSearchToggleLabel" Text="联网开启" VerticalAlignment="Center"/>
+                        </StackPanel>
+                      </Button>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                      <TextBlock Text="GPT-5.6" Foreground="{DynamicResource MutedBrush}" FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0"/>
                       <Button x:Name="StopGenerationButton" Visibility="Collapsed" Width="38" Height="38" MinHeight="38" Padding="10" Margin="0,0,7,0" Style="{StaticResource SecondaryButton}" ToolTip="停止生成" Click="StopGenerationButton_OnClick">
                         <Viewbox Width="14" Height="14"><Rectangle Width="12" Height="12" RadiusX="2" RadiusY="2" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/></Viewbox>
                       </Button>
@@ -378,6 +390,13 @@
                     </StackPanel>
                   </Grid>
                 </Grid>
+              </Border>
+              <Border x:Name="ChatToast" Grid.RowSpan="4" Panel.ZIndex="20" Visibility="Collapsed" IsHitTestVisible="False"
+                      HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="24,0,24,142" Padding="14,9" CornerRadius="10" Background="#E6111827">
+                <StackPanel Orientation="Horizontal">
+                  <Path Data="M4,12 L9,17 L20,6" Stroke="White" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Width="16" Height="16" Stretch="Uniform" Margin="0,0,8,0"/>
+                  <TextBlock x:Name="ChatToastText" Text="已复制到剪贴板" Foreground="White" FontSize="13" FontWeight="Medium"/>
+                </StackPanel>
               </Border>
             </Grid>
           </Grid>
