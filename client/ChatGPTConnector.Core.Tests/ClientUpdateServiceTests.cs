@@ -55,15 +55,16 @@ public sealed class ClientUpdateServiceTests
         var script = ClientUpdateService.BuildInstallerScript(@"D:\中文 目录\泺栋\data\updates\setup.exe", @"D:\中文 目录\泺栋\", 4321);
         Assert.Contains("Wait-Process -Id 4321", script);
         Assert.Contains(@"D:\中文 目录\泺栋\data\updates\setup.exe", script);
-        Assert.Contains("& $installer /S \"/D=$root\"", script);
-        Assert.Contains("$env:LUODONGCHAT_AUTOSTART = '1'", script);
+        Assert.Contains("Start-Process -FilePath $installer", script);
+        Assert.Contains("$installerProcess.WaitForExit(120000)", script);
+        Assert.DoesNotContain("LUODONGCHAT_AUTOSTART", script);
         Assert.Contains("$target = Join-Path $root 'LuodongChat.exe'", script);
         Assert.Contains("New-Object -ComObject 'Shell.Application'", script);
         Assert.Contains("$shellApplication.ShellExecute", script);
         Assert.Contains("--show-after-update", script);
         Assert.Contains("Get-Process -Name 'LuodongChat'", script);
         Assert.Contains("update.log", script);
-        Assert.Contains("for ($attempt = 0; $attempt -lt 20; $attempt++)", script);
+        Assert.Contains("for ($attempt = 0; $attempt -lt 30; $attempt++)", script);
     }
 
     private sealed class StubHandler(string json) : HttpMessageHandler

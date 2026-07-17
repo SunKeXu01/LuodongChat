@@ -141,8 +141,24 @@ jobs:
           # newly installed client and leave it running, not merely create a process.
           # Run the installer from a short-lived PowerShell parent, matching the
           # production updater. The client must survive after that parent exits.
+          Get-Process LuodongChat -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           $escapedSetup = $setup.Replace("'", "''")
-          $updateCommand = "`$env:LUODONGCHAT_AUTOSTART='1'; & '$escapedSetup' /S; exit `$LASTEXITCODE"
+          $escapedTestRoot = $testRoot.Replace("'", "''")
+          $updateCommand = @"
+          `$ErrorActionPreference = 'Stop'
+          `$installer = Start-Process -FilePath '$escapedSetup' -ArgumentList @('/S', '/D=$escapedTestRoot') -PassThru
+          if (-not `$installer.WaitForExit(60000)) {
+            try { `$installer.Kill() } catch { }
+            exit 124
+          }
+          if (`$installer.ExitCode -ne 0) { exit `$installer.ExitCode }
+          `$root = '$escapedTestRoot'
+          `$target = Join-Path `$root 'LuodongChat.exe'
+          `$shellApplication = New-Object -ComObject 'Shell.Application'
+          `$shellApplication.ShellExecute(`$target, '--show-after-update', `$root, 'open', 1)
+          [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject(`$shellApplication)
+          exit 0
+          "@
           $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($updateCommand))
           $updaterParent = Start-Process powershell.exe -ArgumentList @('-NoProfile', '-NonInteractive', '-EncodedCommand', $encodedCommand) -PassThru
           if (!$updaterParent.WaitForExit(60000)) {
@@ -150,7 +166,7 @@ jobs:
             throw "Automatic-update parent did not exit."
           }
           if ($updaterParent.ExitCode -ne 0) { throw "Automatic-update installer failed." }
-          Start-Sleep -Seconds 3
+          Start-Sleep -Seconds 5
           $autoStartedClient = Get-Process LuodongChat -ErrorAction SilentlyContinue | Select-Object -First 1
           if (!$autoStartedClient -or $autoStartedClient.HasExited) { throw "Automatic update did not leave the client running." }
           Stop-Process -Id $autoStartedClient.Id -Force

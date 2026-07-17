@@ -80,15 +80,6 @@ installFiles:
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LuodongChat" "NoModify" 1
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LuodongChat" "NoRepair" 1
 
-  # Automatic updates opt in through an inherited environment variable. This
-  # lets the installer launch the new binary itself after all files and registry
-  # entries are ready, while normal and CI silent installs remain unchanged.
-  ReadEnvStr $0 "LUODONGCHAT_AUTOSTART"
-  StrCmp $0 "1" 0 installDone
-  # ShellExecute routes the launch through the interactive Windows shell so the
-  # new client is not tied to the short-lived installer/updater process tree.
-  ExecShell "open" "$INSTDIR\LuodongChat.exe" "--show-after-update" SW_SHOWNORMAL
-installDone:
 SectionEnd
 
 Section "Uninstall"

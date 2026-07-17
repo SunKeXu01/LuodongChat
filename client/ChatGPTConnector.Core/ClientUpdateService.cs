@@ -145,22 +145,23 @@ public sealed class ClientUpdateService(HttpClient http)
             Wait-Process -Id {{currentProcessId}} -ErrorAction SilentlyContinue
             $installer = '{{escapedInstaller}}'
             $root = '{{escapedRoot}}'
-            $env:LUODONGCHAT_AUTOSTART = '1'
-            try {
-              & $installer /S "/D=$root"
-              $installerExitCode = $LASTEXITCODE
-            } finally {
-              Remove-Item Env:LUODONGCHAT_AUTOSTART -ErrorAction SilentlyContinue
+            $installerProcess = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$root") -PassThru
+            Write-UpdateLog "安装器已启动，进程 $($installerProcess.Id)。"
+            if (-not $installerProcess.WaitForExit(120000)) {
+              Write-UpdateLog '安装器运行超时。'
+              try { $installerProcess.Kill() } catch { }
+              throw '安装器运行超时。'
             }
+            $installerExitCode = $installerProcess.ExitCode
             if ($installerExitCode -ne 0) {
               Write-UpdateLog "安装器返回错误代码 $installerExitCode。"
               exit $installerExitCode
             }
-            Write-UpdateLog '安装完成，正在确认新版本是否运行。'
+            Write-UpdateLog '安装完成，正在独立启动新版本。'
             $target = Join-Path $root 'LuodongChat.exe'
             $shellApplication = New-Object -ComObject 'Shell.Application'
             $started = $false
-            for ($attempt = 0; $attempt -lt 20; $attempt++) {
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
               $running = Get-Process -Name 'LuodongChat' -ErrorAction SilentlyContinue
               if ($running) {
                 Start-Sleep -Milliseconds 750
