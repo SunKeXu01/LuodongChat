@@ -27,6 +27,8 @@ public partial class MainWindow : Window
     private readonly ClientUpdateService _updates = new(UpdateHttp);
     private readonly ChatSyncClient _chat = new(Http);
     private readonly LocalConversationStore _conversationStore = LocalConversationStore.ForApplicationDirectory();
+    private readonly ProjectContextBuilder _projectContextBuilder = new();
+    private readonly RecentProjectStore _recentProjectStore = RecentProjectStore.ForApplicationDirectory();
     private readonly ObservableCollection<ChatDisplayMessage> _chatMessages = [];
     private readonly ObservableCollection<ConversationListItem> _conversations = [];
     private readonly ICollectionView _conversationView;
@@ -42,6 +44,7 @@ public partial class MainWindow : Window
     private bool _syncingPasswordVisibility;
     private ClientUpdate? _availableUpdate;
     private AppTheme _theme;
+    private string? _selectedProjectPath;
 
     private static string? CurrentVersion
     {
@@ -75,7 +78,7 @@ public partial class MainWindow : Window
         ChatMessagesItems.ItemsSource = _chatMessages;
         _conversationView = CollectionViewSource.GetDefaultView(_conversations);
         _conversationView.Filter = FilterConversation;
-        _conversationView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(ConversationListItem.DateGroup)));
+        _conversationView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(ConversationListItem.GroupName)));
         ConversationsList.ItemsSource = _conversationView;
         FitToWorkingArea();
         InitializeTrayIcon();
@@ -476,7 +479,8 @@ public partial class MainWindow : Window
 
     private bool FilterConversation(object candidate) => candidate is ConversationListItem item
         && (string.IsNullOrWhiteSpace(ConversationSearchInput.Text)
-            || item.Title.Contains(ConversationSearchInput.Text.Trim(), StringComparison.CurrentCultureIgnoreCase));
+            || item.Title.Contains(ConversationSearchInput.Text.Trim(), StringComparison.CurrentCultureIgnoreCase)
+            || item.GroupName.Contains(ConversationSearchInput.Text.Trim(), StringComparison.CurrentCultureIgnoreCase));
 
     private void ConversationSearchInput_OnTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) =>
         _conversationView?.Refresh();
@@ -484,9 +488,36 @@ public partial class MainWindow : Window
     private void NewChatButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (_chatCancellation is not null) return;
+        var menu = new System.Windows.Controls.ContextMenu();
+        var plain = new System.Windows.Controls.MenuItem { Header = "＋  新建普通对话" };
+        plain.Click += (_, _) => StartNewConversation(null);
+        menu.Items.Add(plain);
+        foreach (var path in _recentProjectStore.Load())
+        {
+            var project = new System.Windows.Controls.MenuItem { Header = $"▱  在 {Path.GetFileName(path)} 中新建", Tag = path, ToolTip = path };
+            project.Click += (_, _) => StartNewConversation(path);
+            menu.Items.Add(project);
+        }
+        menu.Items.Add(new System.Windows.Controls.Separator());
+        var choose = new System.Windows.Controls.MenuItem { Header = "▱  选择项目目录并新建…" };
+        choose.Click += (_, _) =>
+        {
+            if (ChooseProjectFolder() is { } path) StartNewConversation(path);
+        };
+        menu.Items.Add(choose);
+        NewChatButton.ContextMenu = menu;
+        menu.PlacementTarget = NewChatButton;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.IsOpen = true;
+    }
+
+    private void StartNewConversation(string? projectPath)
+    {
         ConversationsList.SelectedIndex = -1;
         ShowConversation(null);
-        ChatNotice.Text = "已新建本地对话";
+        ApplyProjectSelection(projectPath);
+        if (_selectedProjectPath is not null) _recentProjectStore.Remember(_selectedProjectPath);
+        ChatNotice.Text = _selectedProjectPath is null ? "已新建本地对话" : $"已在项目“{Path.GetFileName(_selectedProjectPath)}”中新建对话";
         ChatInput.Focus();
     }
 
@@ -535,6 +566,7 @@ public partial class MainWindow : Window
     private void ShowConversation(LocalConversation? conversation)
     {
         _currentConversation = conversation;
+        ApplyProjectSelection(conversation?.ProjectPath);
         _chatMessages.Clear();
         if (conversation is not null)
             foreach (var message in conversation.Messages.OrderBy(item => item.ClientCreatedAt))
@@ -603,6 +635,75 @@ public partial class MainWindow : Window
         ChatMoreButton.ContextMenu.IsOpen = true;
     }
 
+    private void ProjectPickerButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var menu = new System.Windows.Controls.ContextMenu();
+        foreach (var path in _recentProjectStore.Load())
+        {
+            var item = new System.Windows.Controls.MenuItem
+            {
+                Header = $"▱  {Path.GetFileName(path)}", ToolTip = path, Tag = path,
+                IsCheckable = true, IsChecked = string.Equals(path, _selectedProjectPath, StringComparison.OrdinalIgnoreCase),
+            };
+            item.Click += async (_, _) => await SelectProjectAsync(path);
+            menu.Items.Add(item);
+        }
+        if (menu.Items.Count > 0) menu.Items.Add(new System.Windows.Controls.Separator());
+        var choose = new System.Windows.Controls.MenuItem { Header = "＋  使用现有文件夹…" };
+        choose.Click += async (_, _) =>
+        {
+            if (ChooseProjectFolder() is { } path) await SelectProjectAsync(path);
+        };
+        menu.Items.Add(choose);
+        if (_selectedProjectPath is not null)
+        {
+            menu.Items.Add(new System.Windows.Controls.Separator());
+            var clear = new System.Windows.Controls.MenuItem { Header = "移出当前项目空间" };
+            clear.Click += async (_, _) => await SelectProjectAsync(null);
+            menu.Items.Add(clear);
+        }
+        ProjectPickerButton.ContextMenu = menu;
+        menu.PlacementTarget = ProjectPickerButton;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Top;
+        menu.IsOpen = true;
+    }
+
+    private string? ChooseProjectFolder()
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "选择当前对话所属的项目目录",
+            Multiselect = false,
+            InitialDirectory = Directory.Exists(_selectedProjectPath) ? _selectedProjectPath : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+        };
+        return dialog.ShowDialog(this) == true ? dialog.FolderName : null;
+    }
+
+    private async Task SelectProjectAsync(string? path)
+    {
+        var fullPath = Directory.Exists(path) ? Path.GetFullPath(path) : null;
+        if (path is not null && fullPath is null) { ChatNotice.Text = "项目目录不存在，请重新选择。"; return; }
+        ApplyProjectSelection(fullPath);
+        if (fullPath is not null) _recentProjectStore.Remember(fullPath);
+        if (_currentConversation is not null)
+        {
+            _currentConversation = _currentConversation with { ProjectPath = fullPath, UpdatedAt = DateTimeOffset.UtcNow };
+            await SaveCurrentConversationAsync(CancellationToken.None);
+        }
+        ChatNotice.Text = fullPath is null
+            ? "当前对话已移出项目空间"
+            : "当前对话已进入项目空间。相关文本会发送给 GPT；目录保持只读，不会修改文件。";
+        ChatInput.Focus();
+    }
+
+    private void ApplyProjectSelection(string? path)
+    {
+        _selectedProjectPath = Directory.Exists(path) ? Path.GetFullPath(path) : null;
+        ProjectPickerButton.Content = _selectedProjectPath is null ? "▱  选择项目" : $"▱  {Path.GetFileName(_selectedProjectPath)}";
+        ProjectPickerButton.ToolTip = _selectedProjectPath ?? "选择项目目录";
+        ProjectReadOnlyBadge.Visibility = _selectedProjectPath is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
     private void ExportConversationMenuItem_OnClick(object sender, RoutedEventArgs e)
     {
         if (_chatMessages.Count == 0) return;
@@ -662,10 +763,22 @@ public partial class MainWindow : Window
             ChatInput.Clear();
             _chatMessages.Add(CreateDisplayMessage(user));
             _currentConversation = _currentConversation is null
-                ? new LocalConversation(conversationId, text[..Math.Min(text.Length, 40)], now, now, [user])
+                ? new LocalConversation(conversationId, text[..Math.Min(text.Length, 40)], now, now, [user], _selectedProjectPath)
                 : _currentConversation with { UpdatedAt = now, Messages = _currentConversation.Messages.Append(user).ToArray() };
             await SaveCurrentConversationAsync(cancellationToken);
-            var context = _chatMessages.Select(item => item.Source).ToArray();
+            IReadOnlyList<SyncedChatMessage> context = _chatMessages.Select(item => item.Source).ToArray();
+            if (_selectedProjectPath is not null)
+            {
+                NetworkStatusText.Text = "正在读取项目…";
+                var projectContext = await _projectContextBuilder.BuildAsync(_selectedProjectPath, text, cancellationToken);
+                if (projectContext is not null)
+                {
+                    var projectMessage = new SyncedChatMessage(
+                        Guid.NewGuid().ToString(), conversationId, "developer", projectContext.Content, DateTimeOffset.UtcNow);
+                    context = [projectMessage, .. context];
+                    ChatNotice.Text = $"项目上下文：索引 {projectContext.IndexedFileCount} 个文件，本次读取 {projectContext.IncludedFileCount} 个相关文本文件。";
+                }
+            }
             var assistant = new SyncedChatMessage(Guid.NewGuid().ToString(), conversationId, "assistant", "", DateTimeOffset.UtcNow);
             var display = CreateDisplayMessage(assistant);
             _chatMessages.Add(display);
@@ -1053,6 +1166,9 @@ public sealed record ChatDisplayImage(string FilePath, ImageSource Source)
 public sealed record ConversationListItem(LocalConversation Conversation)
 {
     public string Title => Conversation.Title;
+    public string GroupName => !string.IsNullOrWhiteSpace(Conversation.ProjectPath)
+        ? $"▱  {Path.GetFileName(Conversation.ProjectPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))}"
+        : DateGroup;
     public string UpdatedText
     {
         get

@@ -9,7 +9,8 @@ public sealed record LocalConversation(
     string Title,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    IReadOnlyList<SyncedChatMessage> Messages);
+    IReadOnlyList<SyncedChatMessage> Messages,
+    string? ProjectPath = null);
 
 public sealed class LocalConversationStore(string root)
 {

@@ -334,8 +334,14 @@
                            PreviewKeyDown="ChatInput_OnPreviewKeyDown" TextChanged="ChatInput_OnTextChanged"/>
                   <Grid Grid.Row="1" Margin="4,7,2,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                      <Button x:Name="ProjectPickerButton" Content="▱  选择项目" MinHeight="32" Padding="10,5" Margin="0,0,8,0"
+                              Style="{StaticResource SecondaryButton}" ToolTip="选择项目目录" Click="ProjectPickerButton_OnClick"/>
+                      <Border x:Name="ProjectReadOnlyBadge" Visibility="Collapsed" Padding="7,4" CornerRadius="8" Margin="0,0,8,0" Background="{DynamicResource SecondarySurfaceBrush}"
+                              ToolTip="仅读取受支持的文本文件；相关内容会发送给 GPT，不会修改本地文件">
+                        <TextBlock Text="只读项目上下文" Foreground="{DynamicResource SecondaryForegroundBrush}" FontSize="11"/>
+                      </Border>
                       <Border Padding="8,4" CornerRadius="8" Background="{DynamicResource SecondarySurfaceBrush}"><TextBlock Text="联网自动开启" Foreground="{DynamicResource SecondaryForegroundBrush}" FontSize="12"/></Border>
-                      <TextBlock Text="聊天记录仅保存在本机" Foreground="{DynamicResource WeakTextBrush}" FontSize="11" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                      <TextBlock Text="聊天记录仅保存在本机" Foreground="{DynamicResource WeakTextBrush}" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"/>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal">
                       <TextBlock Text="GPT-5.6" Foreground="{DynamicResource MutedBrush}" FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0"/>
