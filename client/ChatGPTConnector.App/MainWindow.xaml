@@ -286,6 +286,25 @@
                           </StackPanel>
                           <Border x:Name="MessageBubble" Width="{Binding BubbleWidth}" HorizontalAlignment="Left" Background="{DynamicResource MessageSurfaceBrush}" BorderBrush="{DynamicResource MessageBorderBrush}" BorderThickness="1" CornerRadius="8,16,16,16" Padding="20,16">
                             <StackPanel>
+                            <ItemsControl ItemsSource="{Binding Attachments}" Margin="0,0,0,8">
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                  <Button Tag="{Binding FilePath}" ToolTip="{Binding Name}" HorizontalContentAlignment="Stretch" Padding="0" Margin="0,0,0,7" Background="Transparent" BorderThickness="0" Click="OpenMessageAttachment_OnClick">
+                                    <Grid>
+                                      <Border Width="220" Height="140" CornerRadius="12" ClipToBounds="True" HorizontalAlignment="Left" Visibility="{Binding ImageVisibility}" Background="{DynamicResource SecondarySurfaceBrush}">
+                                        <Image Source="{Binding Preview}" Stretch="UniformToFill"/>
+                                      </Border>
+                                      <Border MinWidth="250" MaxWidth="420" Height="64" Padding="10" CornerRadius="11" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Background="{DynamicResource SecondarySurfaceBrush}" Visibility="{Binding FileVisibility}">
+                                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="44"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                          <Border Width="38" Height="38" CornerRadius="8" Background="{DynamicResource SurfaceBrush}"><TextBlock Text="{Binding IconText}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource LinkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                          <StackPanel Grid.Column="1" Margin="9,0,0,0" VerticalAlignment="Center"><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold"/><TextBlock Text="{Binding DetailText}" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,3,0,0"/></StackPanel>
+                                        </Grid>
+                                      </Border>
+                                    </Grid>
+                                  </Button>
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                             <local:MarkdownViewer MarkdownText="{Binding Content}" FontSize="15.5" FontWeight="Normal" Foreground="{DynamicResource TextBrush}" Background="Transparent"/>
                             <ItemsControl ItemsSource="{Binding Images}" Margin="0,10,0,0">
                               <ItemsControl.ItemTemplate>
@@ -370,14 +389,54 @@
               </ScrollViewer>
 
               <TextBlock x:Name="ChatNotice" Grid.Row="2" MaxWidth="1040" HorizontalAlignment="Stretch" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" Margin="32,3,32,0"/>
-              <Border Grid.Row="3" MaxWidth="1040" HorizontalAlignment="Stretch" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="18" Margin="32,10,32,20" Padding="12,10">
+              <Border x:Name="ChatComposer" Grid.Row="3" MaxWidth="1040" HorizontalAlignment="Stretch" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="22" Margin="32,10,32,20" Padding="12,10"
+                      AllowDrop="True" DragEnter="ChatComposer_OnDragEnter" DragOver="ChatComposer_OnDragOver" DragLeave="ChatComposer_OnDragLeave" Drop="ChatComposer_OnDrop">
                 <Grid>
-                  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                  <TextBox x:Name="ChatInput" MinHeight="50" MaxHeight="190" AcceptsReturn="True" TextWrapping="Wrap" Tag="输入消息，Enter 发送，Shift+Enter 换行…"
+                  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                  <ScrollViewer x:Name="AttachmentPreviewScroll" Visibility="Collapsed" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Margin="2,0,2,8" MaxHeight="106">
+                    <ItemsControl x:Name="AttachmentPreviewItems">
+                      <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Grid Margin="0,0,10,0">
+                            <Border x:Name="ImageAttachmentCard" Width="78" Height="78" CornerRadius="14" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Background="{DynamicResource SecondarySurfaceBrush}" ClipToBounds="True" Visibility="{Binding ImageVisibility}">
+                              <Grid>
+                                <Image Source="{Binding Preview}" Visibility="{Binding PreviewVisibility}" Stretch="UniformToFill" Cursor="Hand" ToolTip="{Binding Name}" Tag="{Binding}" MouseLeftButtonUp="AttachmentPreview_OnClick"/>
+                                <StackPanel Visibility="{Binding PreviewPlaceholderVisibility}" HorizontalAlignment="Center" VerticalAlignment="Center"><TextBlock Text="▧" FontSize="20" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Center"/><TextBlock Text="无法预览" FontSize="10" Foreground="{DynamicResource MutedBrush}"/></StackPanel>
+                              </Grid>
+                            </Border>
+                            <Border x:Name="FileAttachmentCard" Width="300" Height="78" CornerRadius="14" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Background="{DynamicResource SecondarySurfaceBrush}" Visibility="{Binding FileVisibility}" Padding="10">
+                              <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition/><ColumnDefinition Width="26"/></Grid.ColumnDefinitions>
+                                <Border Width="46" Height="46" CornerRadius="10" Background="{DynamicResource SurfaceBrush}" VerticalAlignment="Center">
+                                  <TextBlock Text="{Binding IconText}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource LinkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <StackPanel Grid.Column="1" Margin="10,0,8,0" VerticalAlignment="Center">
+                                  <TextBlock Text="{Binding Name}" ToolTip="{Binding Name}" FontSize="13.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+                                  <TextBlock Text="{Binding DetailText}" FontSize="11.5" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,0"/>
+                                  <TextBlock Text="{Binding StatusText}" Visibility="{Binding ErrorVisibility}" FontSize="11" Foreground="{DynamicResource ErrorBrush}" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                              </Grid>
+                            </Border>
+                            <Button Tag="{Binding}" Width="24" Height="24" Padding="5" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-5,-5,0"
+                                    Background="#D91F2937" BorderThickness="0" ToolTip="删除附件" AutomationProperties.Name="{Binding Name, StringFormat=删除附件：{0}}" Click="RemoveAttachmentButton_OnClick">
+                              <Viewbox Width="10" Height="10"><Path Data="M4,4 L20,20 M20,4 L4,20" Stroke="White" StrokeThickness="2.2" StrokeStartLineCap="Round"/></Viewbox>
+                            </Button>
+                            <ProgressBar Height="3" Margin="8,0,8,5" VerticalAlignment="Bottom" Minimum="0" Maximum="100" Value="{Binding Progress}" Visibility="{Binding ProgressVisibility}" Foreground="{DynamicResource AccentBrush}" Background="Transparent"/>
+                            <Button Tag="{Binding}" Content="重试" MinHeight="26" Padding="8,3" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,6,5" Visibility="{Binding ErrorVisibility}" Style="{StaticResource SecondaryButton}" Click="RetryAttachmentButton_OnClick"/>
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </ScrollViewer>
+                  <TextBox x:Name="ChatInput" Grid.Row="1" MinHeight="50" MaxHeight="190" AcceptsReturn="True" TextWrapping="Wrap" Tag="向 AI 发送消息……"
                            Style="{StaticResource WatermarkTextBox}" VerticalScrollBarVisibility="Auto" BorderThickness="0" Background="Transparent" Padding="8,6"
                            PreviewKeyDown="ChatInput_OnPreviewKeyDown" TextChanged="ChatInput_OnTextChanged"/>
-                  <Grid Grid.Row="1" Margin="2,7,2,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                  <Grid Grid.Row="2" Margin="2,7,2,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                      <Button x:Name="AttachmentUploadButton" Width="34" Height="34" MinHeight="34" Padding="8" Margin="0,0,8,0" Style="{StaticResource SecondaryButton}" ToolTip="添加附件" AutomationProperties.Name="添加附件" Click="AttachmentUploadButton_OnClick">
+                        <Viewbox Width="16" Height="16"><Path Data="M8,12.5 L16.8,3.7 A4,4 0 0 1 22.5,9.3 L11.6,20.2 A6,6 0 0 1 3.1,11.7 L13.3,1.5 M8.4,7.2 L16.1,14.9" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Fill="Transparent"/></Viewbox>
+                      </Button>
                       <Button x:Name="ProjectPickerButton" MinHeight="32" Padding="9,5" Margin="0,0,8,0" Style="{StaticResource SecondaryButton}" ToolTip="选择项目目录" Click="ProjectPickerButton_OnClick">
                         <StackPanel Orientation="Horizontal">
                           <Viewbox Width="15" Height="15" Margin="0,0,6,0"><Path Data="M3,6 H9 L11,8 H21 V19 A2,2 0 0 1 19,21 H3 A2,2 0 0 1 1,19 V8 A2,2 0 0 1 3,6 Z" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.7" StrokeLineJoin="Round" Fill="Transparent"/></Viewbox>
@@ -400,6 +459,12 @@
                       </Button>
                     </StackPanel>
                   </Grid>
+                  <Border x:Name="AttachmentDropOverlay" Grid.RowSpan="3" Visibility="Collapsed" Panel.ZIndex="30" CornerRadius="17" Background="#EAF7F5" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="2" Opacity="0.97" IsHitTestVisible="False">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                      <Viewbox Width="30" Height="30" HorizontalAlignment="Center"><Path Data="M12,3 V17 M6,9 L12,3 L18,9 M4,19 V21 H20 V19" Stroke="{DynamicResource LinkBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Fill="Transparent"/></Viewbox>
+                      <TextBlock Text="松开以上传文件" Margin="0,8,0,0" FontWeight="SemiBold" Foreground="{DynamicResource LinkBrush}"/>
+                    </StackPanel>
+                  </Border>
                 </Grid>
               </Border>
               <Border x:Name="ChatToast" Grid.RowSpan="4" Panel.ZIndex="20" Visibility="Collapsed" IsHitTestVisible="False"
@@ -414,22 +479,58 @@
         </TabItem>
 
         <TabItem Header="个人">
-          <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="34" Width="460" HorizontalAlignment="Center">
-              <Button Content="← 返回聊天" Style="{StaticResource LinkButton}" HorizontalAlignment="Left" Margin="-4,0,0,18" Click="BackToChatButton_OnClick"/>
-              <TextBlock Text="个人资料" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,24"/>
-              <Border Width="96" Height="96" CornerRadius="48" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" HorizontalAlignment="Left" ClipToBounds="True">
-                <Image x:Name="AvatarImage" Stretch="UniformToFill"/>
+          <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{DynamicResource SecondarySurfaceBrush}">
+            <StackPanel Margin="32,34,32,44" MaxWidth="740" HorizontalAlignment="Center">
+              <Button Content="← 返回聊天" Style="{StaticResource LinkButton}" HorizontalAlignment="Left" Margin="-4,0,0,20" Click="BackToChatButton_OnClick"/>
+              <TextBlock Text="个人资料" FontSize="28" FontWeight="SemiBold"/>
+              <TextBlock Text="管理你的头像和账号信息" FontSize="14" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,22"/>
+              <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="16" Padding="32">
+                <StackPanel>
+                  <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="104"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                    <Button x:Name="AvatarPreviewButton" Width="88" Height="88" Padding="0" HorizontalAlignment="Left" VerticalAlignment="Top" Background="Transparent" BorderThickness="0" ToolTip="更换头像" Click="UploadAvatarButton_OnClick">
+                      <Border Width="88" Height="88" CornerRadius="44" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" ClipToBounds="True" Background="{DynamicResource SecondarySurfaceBrush}">
+                        <Grid><TextBlock x:Name="ProfileAvatarFallbackText" Text="我" FontSize="24" FontWeight="SemiBold" Foreground="{DynamicResource LinkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/><Image x:Name="AvatarImage" Stretch="UniformToFill"/><Border VerticalAlignment="Bottom" Height="26" Background="#990B1220"><TextBlock Text="更换" Foreground="White" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border></Grid>
+                      </Border>
+                    </Button>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                      <TextBlock x:Name="ProfileNicknameHeading" Text="用户" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                      <TextBlock x:Name="ProfileEmailText" FontSize="13.5" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,10" TextTrimming="CharacterEllipsis"/>
+                      <StackPanel Orientation="Horizontal">
+                        <Button x:Name="UploadAvatarButton" Content="更换头像" MinHeight="34" Padding="12,5" HorizontalAlignment="Left" Style="{StaticResource SecondaryButton}" Click="UploadAvatarButton_OnClick"/>
+                        <TextBlock Text="支持 JPG、PNG、WebP，最大 5 MB" FontSize="12" Foreground="{DynamicResource WeakTextBrush}" Margin="12,0,0,0" VerticalAlignment="Center"/>
+                      </StackPanel>
+                    </StackPanel>
+                  </Grid>
+                  <Border Height="1" Background="{DynamicResource BorderBrush}" Margin="0,26,0,24"/>
+                  <TextBlock Text="基本信息" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,18"/>
+                  <Grid Margin="0,0,0,17"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <TextBlock Text="昵称" Style="{StaticResource FieldLabel}" Margin="0"/>
+                    <TextBlock x:Name="NicknameCharacterCount" Grid.Column="1" Text="0/20" FontSize="12" Foreground="{DynamicResource WeakTextBrush}" VerticalAlignment="Center"/>
+                  </Grid>
+                  <TextBox x:Name="NicknameInput" Height="46" MaxLength="20" TextChanged="NicknameInput_OnTextChanged"/>
+                  <TextBlock x:Name="NicknameValidationText" Visibility="Collapsed" Foreground="{DynamicResource ErrorBrush}" FontSize="12" Margin="2,6,0,0"/>
+                  <TextBlock Text="邮箱" Style="{StaticResource FieldLabel}" Margin="0,18,0,7"/>
+                  <Border Height="46" CornerRadius="10" Background="{DynamicResource SecondarySurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Padding="13,0">
+                    <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock x:Name="ProfileEmailReadonlyText" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/><TextBlock Grid.Column="1" Text="只读" FontSize="11" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/></Grid>
+                  </Border>
+                  <TextBlock Text="邮箱暂不支持修改" FontSize="12" Foreground="{DynamicResource WeakTextBrush}" Margin="2,6,0,0"/>
+                  <Border x:Name="ProfileToast" Visibility="Collapsed" HorizontalAlignment="Right" Background="{DynamicResource SecondarySurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="11,7" Margin="2,16,0,-8">
+                    <TextBlock x:Name="ProfileStatusText" FontSize="12.5" Foreground="{DynamicResource LinkBrush}"/>
+                  </Border>
+                  <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,26,0,0">
+                    <Button x:Name="CancelProfileButton" Content="取消" MinWidth="78" Height="40" Style="{StaticResource SecondaryButton}" Click="CancelProfileButton_OnClick"/>
+                    <Button x:Name="SaveProfileButton" Content="保存更改" MinWidth="104" Height="40" Margin="10,0,0,0" IsEnabled="False" Click="SaveProfileButton_OnClick"/>
+                  </StackPanel>
+                </StackPanel>
               </Border>
-              <Button x:Name="UploadAvatarButton" Content="更换头像" Width="110" Margin="0,10,0,12" HorizontalAlignment="Left"
-                      Style="{StaticResource SecondaryButton}" Click="UploadAvatarButton_OnClick"/>
-              <TextBlock Text="邮箱" Style="{StaticResource FieldLabel}"/>
-              <TextBlock x:Name="ProfileEmailText" FontSize="15" Margin="0,2,0,8" TextWrapping="Wrap"/>
-              <TextBlock Text="网名" Style="{StaticResource FieldLabel}"/>
-              <TextBox x:Name="NicknameInput" MaxLength="20"/>
-              <Button x:Name="SaveProfileButton" Content="保存" Height="42" Margin="0,16,0,0" Click="SaveProfileButton_OnClick"/>
-              <Button x:Name="LogoutButton" Content="退出登录" Height="42" Margin="0,12,0,0"
-                      Background="{DynamicResource DangerSurfaceBrush}" Foreground="{DynamicResource DangerTextBrush}" Click="LogoutButton_OnClick"/>
+              <TextBlock Text="账号操作" FontSize="16" FontWeight="SemiBold" Margin="2,26,0,11"/>
+              <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="16" Padding="22,18">
+                <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                  <StackPanel><TextBlock Text="退出当前账号" FontWeight="SemiBold"/><TextBlock Text="退出后需要重新登录才能继续使用" FontSize="12.5" Foreground="{DynamicResource MutedBrush}" Margin="0,4,12,0"/></StackPanel>
+                  <Button x:Name="LogoutButton" Grid.Column="1" Content="退出登录" MinWidth="88" Height="38" Padding="13,5" Background="Transparent" BorderBrush="{DynamicResource DangerTextBrush}" Foreground="{DynamicResource DangerTextBrush}" Click="LogoutButton_OnClick"/>
+                </Grid>
+              </Border>
             </StackPanel>
           </ScrollViewer>
         </TabItem>

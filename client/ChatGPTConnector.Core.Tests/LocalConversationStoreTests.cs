@@ -41,6 +41,31 @@ public sealed class LocalConversationStoreTests : IDisposable
         Assert.False(File.Exists(path));
     }
 
+    [Fact]
+    public async Task StoresMultipleMessageAttachmentsWithUniqueLocalPathsAndDeletesThemWithTheConversation()
+    {
+        var store = new LocalConversationStore(_root);
+        var conversationId = Guid.NewGuid().ToString();
+        var messageId = Guid.NewGuid().ToString();
+        var firstSource = Path.Combine(_root, "first.txt");
+        var secondSource = Path.Combine(_root, "second.txt");
+        Directory.CreateDirectory(_root);
+        await File.WriteAllTextAsync(firstSource, "first");
+        await File.WriteAllTextAsync(secondSource, "second");
+
+        var first = await store.SaveAttachmentAsync("account-a", conversationId, messageId, firstSource, "first.txt", "text/plain", 5, "document");
+        var second = await store.SaveAttachmentAsync("account-a", conversationId, messageId, secondSource, "second.txt", "text/plain", 6, "document");
+
+        Assert.NotEqual(first.RelativePath, second.RelativePath);
+        var firstPath = store.GetAttachmentPath("account-a", first.RelativePath);
+        var secondPath = store.GetAttachmentPath("account-a", second.RelativePath);
+        Assert.Equal("first", await File.ReadAllTextAsync(firstPath));
+        Assert.Equal("second", await File.ReadAllTextAsync(secondPath));
+        await store.DeleteAsync("account-a", conversationId);
+        Assert.False(File.Exists(firstPath));
+        Assert.False(File.Exists(secondPath));
+    }
+
     [Theory]
     [InlineData("请生成一张夜空图片")]
     [InlineData("Draw an image of a mountain")]

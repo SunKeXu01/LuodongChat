@@ -77,12 +77,44 @@ public sealed class LocalConversationStore(string root)
         return new GeneratedChatImage(relativePath.Replace(Path.DirectorySeparatorChar, '/'), image.MediaType);
     }
 
+    public async Task<LocalChatAttachment> SaveAttachmentAsync(
+        string accountId, string conversationId, string messageId, string sourcePath,
+        string name, string mimeType, long size, string category, CancellationToken cancellationToken = default)
+    {
+        if (!Guid.TryParse(conversationId, out _) || !Guid.TryParse(messageId, out _))
+            throw new ArgumentException("Conversation and message IDs must be UUIDs.");
+        var extension = Path.GetExtension(name).ToLowerInvariant();
+        if (extension.Length > 12 || extension.Any(character => !char.IsLetterOrDigit(character) && character != '.')) extension = ".bin";
+        var relativePath = Path.Combine("attachments", conversationId, $"{messageId}-{Guid.NewGuid():N}" + extension);
+        var target = GetAttachmentPath(accountId, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        var temporary = target + $".{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await using var input = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, true);
+            await using var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024, true);
+            await input.CopyToAsync(output, cancellationToken);
+            File.Move(temporary, target, true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        return new LocalChatAttachment(relativePath.Replace(Path.DirectorySeparatorChar, '/'), name, mimeType, size, category);
+    }
+
     public string GetImagePath(string accountId, string relativePath)
     {
         var accountDirectory = Path.GetFullPath(AccountDirectory(accountId));
         var path = Path.GetFullPath(Path.Combine(accountDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar)));
         if (!path.StartsWith(accountDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("图片路径无效。");
+        return path;
+    }
+
+    public string GetAttachmentPath(string accountId, string relativePath)
+    {
+        var accountDirectory = Path.GetFullPath(AccountDirectory(accountId));
+        var path = Path.GetFullPath(Path.Combine(accountDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        if (!path.StartsWith(accountDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("附件路径无效。");
         return path;
     }
 
@@ -93,6 +125,8 @@ public sealed class LocalConversationStore(string root)
         if (File.Exists(path)) File.Delete(path);
         var imageDirectory = Path.Combine(AccountDirectory(accountId), "images", conversationId);
         if (Directory.Exists(imageDirectory)) Directory.Delete(imageDirectory, true);
+        var attachmentDirectory = Path.Combine(AccountDirectory(accountId), "attachments", conversationId);
+        if (Directory.Exists(attachmentDirectory)) Directory.Delete(attachmentDirectory, true);
         return Task.CompletedTask;
     }
 

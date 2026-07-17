@@ -9,6 +9,7 @@ import type { GatewayConfig } from "../src/config.js";
 import { createGatewayServer } from "../src/server.js";
 import { InMemoryRequestLedger } from "../src/ledger.js";
 import type { EnrollmentService } from "../src/self-service.js";
+import { AttachmentStore } from "../src/attachments.js";
 
 async function listen(server: ReturnType<typeof createServer>): Promise<number> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -167,6 +168,72 @@ test("authenticates and proxies a Responses request", async (t) => {
   assert.equal(recorded?.status, "completed");
   assert.equal(recorded?.attempts, 1);
   assert.equal(JSON.stringify({ requests: [...ledger.requests.values()], attempts: ledger.attempts }).includes("hello"), false);
+});
+
+test("uploads an account attachment and injects it into the latest user message", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "connector-attachments-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const upstream = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString()) as {
+      attachment_ids?: unknown; input: { role: string; content: { type: string; filename?: string; file_data?: string; text?: string }[] }[];
+    };
+    assert.equal(body.attachment_ids, undefined);
+    const content = body.input.at(-1)?.content ?? [];
+    assert.equal(content[0]?.type, "input_text");
+    assert.equal(content[1]?.type, "input_file");
+    assert.equal(content[1]?.filename, "notes.pdf");
+    assert.match(content[1]?.file_data ?? "", /^data:application\/pdf;base64,/);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end('{"status":"completed"}');
+  });
+  const upstreamPort = await listen(upstream);
+  t.after(() => upstream.close());
+  const config: GatewayConfig = {
+    port: 0, upstreamBaseUrl: `http://127.0.0.1:${upstreamPort}`, upstreamApiKey: "upstream-secret", upstreamApiKeys: ["upstream-secret"],
+    upstreamResponsesPath: "/responses", gatewayKeyHashes: new Set(), requestsPerMinute: 10, maxConcurrentRequests: 2, upstreamTimeoutMs: 5_000,
+  };
+  const enrollmentService = { authenticate: async (token: string) => token === "usr_test" ? { id: "account-1" } : null, getRequestLimits: () => ({ requestsPerMinute: 10, maxConcurrentRequests: 2, dailyLimit: null }) } as unknown as EnrollmentService;
+  const gateway = createGatewayServer(config, { enrollmentService, attachmentStore: new AttachmentStore(directory) });
+  const gatewayPort = await listen(gateway);
+  t.after(() => gateway.close());
+
+  const form = new FormData();
+  form.append("file", new Blob([Buffer.from("%PDF-1.4\nattachment marker")], { type: "application/pdf" }), "notes.pdf");
+  const upload = await fetch(`http://127.0.0.1:${gatewayPort}/v1/attachments`, { method: "POST", headers: { authorization: "Bearer usr_test" }, body: form });
+  assert.equal(upload.status, 201);
+  const uploaded = await upload.json() as { id: string };
+  assert.match(uploaded.id, /^att_[a-f\d]{32}$/);
+
+  const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/responses`, {
+    method: "POST", headers: { authorization: "Bearer usr_test", "content-type": "application/json" },
+    body: JSON.stringify({ model: "gpt-5.6", input: [{ role: "user", content: "请总结附件" }], attachment_ids: [uploaded.id] }),
+  });
+  assert.equal(response.status, 200);
+});
+
+test("rejects unsupported and signature-mismatched attachments", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "connector-attachments-invalid-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const config: GatewayConfig = {
+    port: 0, upstreamBaseUrl: "https://upstream.invalid", upstreamApiKey: "unused", upstreamApiKeys: ["unused"],
+    upstreamResponsesPath: "/responses", gatewayKeyHashes: new Set(), requestsPerMinute: 10, maxConcurrentRequests: 2, upstreamTimeoutMs: 5_000,
+  };
+  const enrollmentService = { authenticate: async () => ({ id: "account-1" }) } as unknown as EnrollmentService;
+  const gateway = createGatewayServer(config, { enrollmentService, attachmentStore: new AttachmentStore(directory) });
+  const port = await listen(gateway);
+  t.after(() => gateway.close());
+  for (const [name, type, data, expected] of [
+    ["malware.exe", "application/octet-stream", "MZ", "attachment_type_not_allowed"],
+    ["fake.png", "image/png", "not a png", "attachment_signature_mismatch"],
+  ] satisfies [string, string, string, string][]) {
+    const form = new FormData();
+    form.append("file", new Blob([data], { type }), name);
+    const response = await fetch(`http://127.0.0.1:${port}/v1/attachments`, { method: "POST", headers: { authorization: "Bearer usr_test" }, body: form });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json() as { error: { code: string } }).error.code, expected);
+  }
 });
 
 test("uses an authenticated account session without exposing a gateway key", async (t) => {

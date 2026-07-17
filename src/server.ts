@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { AttachmentStore, MAX_ATTACHMENT_BYTES, attachmentCategory, type ResolvedAttachment } from "./attachments.js";
 import {
   extractBearerKey,
   hashGatewayKey,
@@ -37,15 +38,60 @@ function json(res: ServerResponse, status: number, body: unknown): void {
 }
 
 async function readBody(req: IncomingMessage): Promise<Buffer> {
+  return readBodyLimited(req, MAX_REQUEST_BYTES);
+}
+
+async function readBodyLimited(req: IncomingMessage, maximum: number): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > MAX_REQUEST_BYTES) throw new Error("request_too_large");
+    if (size > maximum) throw new Error("request_too_large");
     chunks.push(buffer);
   }
   return Buffer.concat(chunks);
+}
+
+async function readMultipartFile(req: IncomingMessage): Promise<{ name: string; mimeType: string; data: Buffer }> {
+  const contentType = req.headers["content-type"]?.toString() ?? "";
+  if (!contentType.toLowerCase().startsWith("multipart/form-data;")) throw new Error("attachment_multipart_required");
+  const body = await readBodyLimited(req, MAX_ATTACHMENT_BYTES + 1024 * 1024);
+  const form = await new Response(new Uint8Array(body), { headers: { "content-type": contentType } }).formData();
+  const value = form.get("file");
+  if (!value || typeof value === "string" || typeof value.arrayBuffer !== "function") throw new Error("attachment_file_required");
+  return { name: value.name, mimeType: value.type, data: Buffer.from(await value.arrayBuffer()) };
+}
+
+function withResolvedAttachments(body: Buffer, attachments: ResolvedAttachment[]): Buffer {
+  if (attachments.length === 0) return body;
+  const value: unknown = JSON.parse(body.toString("utf8"));
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_json");
+  const record = value as Record<string, unknown>;
+  const input = record.input;
+  if (!Array.isArray(input)) throw new Error("attachment_input_invalid");
+  let target: Record<string, unknown> | undefined;
+  for (let index = input.length - 1; index >= 0; index -= 1) {
+    const item = input[index];
+    if (item && typeof item === "object" && !Array.isArray(item) && (item as Record<string, unknown>).role === "user") {
+      target = item as Record<string, unknown>;
+      break;
+    }
+  }
+  if (!target) throw new Error("attachment_input_invalid");
+  const current = target.content;
+  const content: Record<string, unknown>[] = typeof current === "string"
+    ? current.trim() ? [{ type: "input_text", text: current }] : []
+    : Array.isArray(current) ? current.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item)) : [];
+  for (const attachment of attachments) {
+    const encoded = attachment.data.toString("base64");
+    content.push(attachment.mimeType.startsWith("image/")
+      ? { type: "input_image", image_url: `data:${attachment.mimeType};base64,${encoded}`, detail: "auto" }
+      : { type: "input_file", filename: attachment.name, file_data: `data:${attachment.mimeType};base64,${encoded}` });
+  }
+  target.content = content;
+  delete record.attachment_ids;
+  return Buffer.from(JSON.stringify(record));
 }
 
 async function readJsonObject(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -86,6 +132,16 @@ function latestUserPrompt(body: Buffer): string {
     if (!item || typeof item !== "object" || (item as Record<string, unknown>).role !== "user") continue;
     const content = (item as Record<string, unknown>).content;
     if (typeof content === "string" && content.trim()) return content.trim();
+    if (Array.isArray(content)) {
+      for (let contentIndex = content.length - 1; contentIndex >= 0; contentIndex -= 1) {
+        const part = content[contentIndex];
+        if (part && typeof part === "object" && !Array.isArray(part)
+          && (part as Record<string, unknown>).type === "input_text"
+          && typeof (part as Record<string, unknown>).text === "string"
+          && ((part as Record<string, unknown>).text as string).trim())
+          return ((part as Record<string, unknown>).text as string).trim();
+      }
+    }
   }
   throw new Error("invalid_image_request");
 }
@@ -122,6 +178,7 @@ export interface GatewayServerOptions {
   adminRepository?: AdminRepository;
   adminLoginProtector?: AdminLoginProtector;
   enrollmentService?: EnrollmentService;
+  attachmentStore?: AttachmentStore;
 }
 
 export function createGatewayServer(config: GatewayConfig, options: GatewayServerOptions = {}) {
@@ -146,13 +203,49 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
   const ledger = options.ledger ?? new InMemoryRequestLedger();
   const keyVerifier = options.keyVerifier ?? new StaticGatewayKeyVerifier(config.gatewayKeyHashes);
   const adminLoginGuard = options.adminLoginProtector ?? new AdminLoginGuard();
+  const attachmentStore = options.attachmentStore ?? new AttachmentStore();
 
-  return createServer(async (req, res) => {
+  const server = createServer(async (req, res) => {
     const requestId = req.headers["x-request-id"]?.toString() || randomUUID();
     res.setHeader("x-request-id", requestId);
 
     if (req.method === "GET" && req.url === "/healthz") {
       return json(res, 200, { status: "ok", version: config.version ?? "unknown" });
+    }
+    if (req.url === "/v1/attachments" || req.url?.startsWith("/v1/attachments/")) {
+      res.setHeader("cache-control", "no-store");
+      const accessToken = extractBearerKey(req.headers.authorization);
+      const account = accessToken?.startsWith("usr_") && options.enrollmentService
+        ? await options.enrollmentService.authenticate(accessToken) : null;
+      if (!account) return json(res, 401, { error: { code: "login_required", message: "请先登录" } });
+      try {
+        if (req.method === "POST" && req.url === "/v1/attachments") {
+          const upload = await readMultipartFile(req);
+          const item = await attachmentStore.add(account.id, upload.name, upload.mimeType, upload.data);
+          return json(res, 201, {
+            id: item.id, name: item.name, extension: item.extension, size: item.size, mimeType: item.mimeType,
+            category: attachmentCategory(item.mimeType, item.extension), expiresAt: new Date(item.expiresAt).toISOString(),
+          });
+        }
+        const match = /^\/v1\/attachments\/(att_[a-f\d]{32})$/.exec(req.url ?? "");
+        if (req.method === "DELETE" && match) {
+          const removed = await attachmentStore.remove(account.id, match[1]!);
+          return removed ? json(res, 200, { status: "deleted" }) : json(res, 404, { error: { code: "attachment_not_found", message: "附件不存在或已过期" } });
+        }
+        return json(res, 404, { error: { code: "not_found", message: "Route not found" } });
+      } catch (error) {
+        const code = error instanceof Error ? error.message : "attachment_upload_failed";
+        const status = code === "request_too_large" || code === "attachment_too_large" ? 413
+          : code === "attachment_count_exceeded" ? 409 : 400;
+        const messages: Record<string, string> = {
+          request_too_large: "附件不能超过 20 MB", attachment_too_large: "附件不能超过 20 MB",
+          attachment_count_exceeded: "最多只能保留 10 个待发送附件", attachment_type_not_allowed: "不支持该文件扩展名",
+          attachment_duplicate: "该附件已经添加，请勿重复上传",
+          attachment_mime_not_allowed: "不支持该文件类型", attachment_signature_mismatch: "文件内容与扩展名或类型不一致",
+          attachment_empty: "不能上传空文件", attachment_multipart_required: "上传格式不正确", attachment_file_required: "没有找到上传文件",
+        };
+        return json(res, status, { error: { code, message: messages[code] ?? "附件上传失败" } });
+      }
     }
     if (req.method === "GET" && req.url === "/assets/landing.js") {
       res.writeHead(200, {
@@ -327,13 +420,13 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
         const dataBase64 = typeof input.dataBase64 === "string" ? input.dataBase64.replace(/\s/g, "") : "";
         let avatar: Buffer | null = null;
         try { avatar = Buffer.from(dataBase64, "base64"); } catch { }
-        const signatureValid = avatar && avatar.length > 0 && avatar.length <= 512 * 1024 && (
+        const signatureValid = avatar && avatar.length > 0 && avatar.length <= 5 * 1024 * 1024 && (
           (mediaType === "image/jpeg" && avatar[0] === 0xff && avatar[1] === 0xd8 && avatar[2] === 0xff)
           || (mediaType === "image/png" && avatar.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])))
           || (mediaType === "image/webp" && avatar.subarray(0, 4).toString("ascii") === "RIFF" && avatar.subarray(8, 12).toString("ascii") === "WEBP")
         );
         if (!signatureValid || !/^[A-Za-z0-9+/]+={0,2}$/.test(dataBase64)) {
-          return json(res, 400, { error: { code: "invalid_avatar", message: "头像必须是小于 512 KB 的 JPG、PNG 或 WebP 图片" } });
+          return json(res, 400, { error: { code: "invalid_avatar", message: "头像必须是小于 5 MB 的 JPG、PNG 或 WebP 图片" } });
         }
         const profile = await options.enrollmentService.updateAvatar(accessToken, mediaType, dataBase64);
         return profile ? json(res, 200, profile) : json(res, 401, { error: { code: "session_expired" } });
@@ -536,7 +629,30 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
     try {
       await ledger.startRequest({ requestId, gatewayKeyHash: keyHash, userId: requestUserId, startedAt: new Date(startedAt) });
       ledgerStarted = true;
-      const body = await readBody(req);
+      let body = await readBody(req);
+      let resolvedAttachments: ResolvedAttachment[] = [];
+      try {
+        const parsed: unknown = JSON.parse(body.toString("utf8"));
+        const ids = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? (parsed as Record<string, unknown>).attachment_ids : undefined;
+        if (Array.isArray(ids)) {
+          if (!requestUserId) throw new Error("attachment_login_required");
+          if (!ids.every((id) => typeof id === "string" && /^att_[a-f\d]{32}$/.test(id))) throw new Error("attachment_id_invalid");
+          resolvedAttachments = await attachmentStore.resolveMany(requestUserId, ids as string[]);
+          const total = resolvedAttachments.reduce((sum, item) => sum + item.size, 0);
+          if (total > 50 * 1024 * 1024) throw new Error("attachment_total_too_large");
+          body = withResolvedAttachments(body, resolvedAttachments);
+        }
+      } catch (error) {
+        const code = error instanceof Error ? error.message : "attachment_invalid";
+        if (code.startsWith("attachment_")) {
+          await ledger.finishRequest({ requestId, status: "failed", endedAt: new Date(), attempts: 0, errorClass: code });
+          return json(res, code === "attachment_not_found" ? 410 : 400, {
+            error: { code, message: code === "attachment_not_found" ? "附件已过期，请重新添加" : code === "attachment_total_too_large" ? "单次发送的附件总大小不能超过 50 MB" : "附件数据无效" },
+          });
+        }
+        throw error;
+      }
       const requiresWebSearch = requestsWebSearch(body);
       const requiresImageGeneration = requestsImageGeneration(body);
       if (requiresImageGeneration && config.imageGeneration) {
@@ -705,6 +821,15 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
       await permit.release();
     }
   });
+  const attachmentCleanupTimer = setInterval(() => {
+    attachmentStore.cleanup().catch((error) => console.warn(JSON.stringify({ event: "attachment_cleanup_failed", error: error instanceof Error ? error.name : "unknown" })));
+  }, 5 * 60 * 1000);
+  attachmentCleanupTimer.unref();
+  server.once("close", () => {
+    clearInterval(attachmentCleanupTimer);
+    attachmentStore.close().catch(() => undefined);
+  });
+  return server;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

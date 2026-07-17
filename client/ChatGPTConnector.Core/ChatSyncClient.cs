@@ -9,7 +9,8 @@ namespace ChatGPTConnector.Core;
 public sealed record SyncedChatMessage(
     string Id, string ConversationId, string Role, string Content, DateTimeOffset ClientCreatedAt,
     DateTimeOffset? UpdatedAt = null, IReadOnlyList<ChatCitation>? Citations = null,
-    IReadOnlyList<GeneratedChatImage>? Images = null);
+    IReadOnlyList<GeneratedChatImage>? Images = null, IReadOnlyList<LocalChatAttachment>? Attachments = null);
+public sealed record LocalChatAttachment(string RelativePath, string Name, string MimeType, long Size, string Category);
 public sealed record ChatCitation(string Title, string Url);
 public sealed record GeneratedChatImage(string RelativePath, string MediaType);
 public sealed record GeneratedImageData(string Base64, string MediaType);
@@ -22,24 +23,25 @@ public sealed class ChatSyncClient(HttpClient http)
     public async Task<ChatStreamResult> StreamResponseAsync(
         Uri gateway, string token, IReadOnlyList<SyncedChatMessage> messages,
         IProgress<string>? progress = null, CancellationToken cancellationToken = default,
-        bool enableWebSearch = false, bool enableImageGeneration = false)
+        bool enableWebSearch = false, bool enableImageGeneration = false, IReadOnlyList<string>? attachmentIds = null)
     {
         try
         {
-            return await StreamOnceAsync(gateway, token, messages, progress, cancellationToken, enableWebSearch, enableImageGeneration);
+            return await StreamOnceAsync(gateway, token, messages, progress, cancellationToken, enableWebSearch, enableImageGeneration, attachmentIds);
         }
         catch (ResponseRequestException error) when (enableWebSearch && error.StatusCode is
             HttpStatusCode.BadRequest or HttpStatusCode.NotFound or HttpStatusCode.UnprocessableEntity or
             HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout)
         {
-            var fallback = await StreamOnceAsync(gateway, token, messages, progress, cancellationToken, false, enableImageGeneration);
+            var fallback = await StreamOnceAsync(gateway, token, messages, progress, cancellationToken, false, enableImageGeneration, attachmentIds);
             return fallback with { WebSearchUnavailable = true };
         }
     }
 
     private async Task<ChatStreamResult> StreamOnceAsync(
         Uri gateway, string token, IReadOnlyList<SyncedChatMessage> messages,
-        IProgress<string>? progress, CancellationToken cancellationToken, bool enableWebSearch, bool enableImageGeneration)
+        IProgress<string>? progress, CancellationToken cancellationToken, bool enableWebSearch, bool enableImageGeneration,
+        IReadOnlyList<string>? attachmentIds)
     {
         using var request = Authorized(HttpMethod.Post, new Uri(gateway, "/v1/responses"), token);
         request.Headers.Accept.ParseAdd("text/event-stream");
@@ -49,6 +51,7 @@ public sealed class ChatSyncClient(HttpClient http)
             ["stream"] = true,
             ["input"] = messages.Select(message => new { role = message.Role, content = message.Content }),
         };
+        if (attachmentIds is { Count: > 0 }) payload["attachment_ids"] = attachmentIds;
         var tools = new List<object>();
         if (enableWebSearch)
             tools.Add(new { type = "web_search", search_context_size = "medium" });

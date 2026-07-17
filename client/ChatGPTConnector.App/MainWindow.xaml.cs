@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private readonly SecureSessionStore _sessionStore = SecureSessionStore.ForApplicationDirectory();
     private readonly ClientUpdateService _updates = new(UpdateHttp);
     private readonly ChatSyncClient _chat = new(Http);
+    private readonly AttachmentUploadClient _attachmentClient = new(Http);
     private readonly LocalConversationStore _conversationStore = LocalConversationStore.ForApplicationDirectory();
     private readonly ProjectContextBuilder _projectContextBuilder = new();
     private readonly RecentProjectStore _recentProjectStore = RecentProjectStore.ForApplicationDirectory();
@@ -39,6 +40,7 @@ public partial class MainWindow : Window
     private readonly SemaphoreSlim _operationGate = new(1, 1);
     private readonly DispatcherTimer _sessionTimer = new() { Interval = TimeSpan.FromMinutes(5) };
     private readonly DispatcherTimer _chatToastTimer = new() { Interval = TimeSpan.FromSeconds(1.8) };
+    private readonly DispatcherTimer _profileToastTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private CancellationTokenSource? _chatCancellation;
     private readonly CancellationTokenSource _updateCancellation = new();
     private bool _chatScrollPending;
@@ -47,6 +49,10 @@ public partial class MainWindow : Window
     private AppTheme _theme;
     private string? _selectedProjectPath;
     private bool _webSearchEnabled = true;
+    private readonly AttachmentComposerController _attachments;
+    private int _composerDragDepth;
+    private string _savedNickname = "";
+    private bool _profileSaveBusy;
 
     private static string? CurrentVersion
     {
@@ -70,6 +76,11 @@ public partial class MainWindow : Window
     {
         _theme = initialTheme;
         InitializeComponent();
+        _attachments = new AttachmentComposerController(_attachmentClient, GatewayUri, () => _session?.AccessToken);
+        AttachmentPreviewItems.ItemsSource = _attachments.Items;
+        _attachments.StateChanged += (_, _) => Dispatcher.Invoke(UpdateComposerState);
+        _attachments.ValidationFailed += (_, message) => Dispatcher.Invoke(() => ShowChatToast(message, true));
+        DataObject.AddPastingHandler(ChatInput, ChatInput_OnPaste);
         if (CurrentVersion is { } currentVersion)
         {
             CurrentVersionText.Text = $"v{currentVersion}";
@@ -78,6 +89,7 @@ public partial class MainWindow : Window
         }
         UpdateThemeButton();
         _chatToastTimer.Tick += (_, _) => { _chatToastTimer.Stop(); ChatToast.Visibility = Visibility.Collapsed; };
+        _profileToastTimer.Tick += (_, _) => { _profileToastTimer.Stop(); ProfileToast.Visibility = Visibility.Collapsed; };
         ChatMessagesItems.ItemsSource = _chatMessages;
         _conversationView = CollectionViewSource.GetDefaultView(_conversations);
         _conversationView.Filter = FilterConversation;
@@ -86,6 +98,7 @@ public partial class MainWindow : Window
         FitToWorkingArea();
         InitializeTrayIcon();
         Closing += MainWindow_OnClosing;
+        Closed += (_, _) => _attachments.Dispose();
         Application.Current.SessionEnding += (_, _) => _allowExit = true;
         _sessionTimer.Tick += async (_, _) => await RunExclusiveAsync(ValidateSessionAsync);
         if (skipStartupChecks) return;
@@ -421,10 +434,52 @@ public partial class MainWindow : Window
     private async void SaveProfileButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (_session is null) return;
+        var nickname = NicknameInput.Text.Trim();
+        if (nickname.Length is < 2 or > 20) { UpdateProfileFormState(); return; }
+        _profileSaveBusy = true;
+        SaveProfileButton.Content = "正在保存…";
+        UpdateProfileFormState();
         await RunExclusiveAsync(async () => {
-            try { UpdateProfile(await _accounts.UpdateProfileAsync(GatewayUri, _session.AccessToken, NicknameInput.Text.Trim())); }
-            catch (Exception error) { MessageBox.Show(error.Message, "保存失败", MessageBoxButton.OK, MessageBoxImage.Warning); }
+            try
+            {
+                UpdateProfile(await _accounts.UpdateProfileAsync(GatewayUri, _session.AccessToken, nickname));
+                ProfileStatusText.Text = "个人资料已更新";
+                ProfileStatusText.Foreground = (Brush)FindResource("LinkBrush");
+                ProfileToast.Visibility = Visibility.Visible;
+                _profileToastTimer.Stop(); _profileToastTimer.Start();
+            }
+            catch (Exception error)
+            {
+                ProfileStatusText.Text = error.Message;
+                ProfileStatusText.Foreground = (Brush)FindResource("ErrorBrush");
+                ProfileToast.Visibility = Visibility.Visible;
+                _profileToastTimer.Stop(); _profileToastTimer.Start();
+            }
         });
+        _profileSaveBusy = false;
+        SaveProfileButton.Content = "保存更改";
+        UpdateProfileFormState();
+    }
+
+    private void NicknameInput_OnTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) => UpdateProfileFormState();
+
+    private void UpdateProfileFormState()
+    {
+        if (NicknameCharacterCount is null || SaveProfileButton is null) return;
+        var value = NicknameInput.Text.Trim();
+        NicknameCharacterCount.Text = $"{NicknameInput.Text.Length}/20";
+        var valid = value.Length is >= 2 and <= 20;
+        NicknameValidationText.Text = valid || NicknameInput.Text.Length == 0 ? "" : "昵称应为 2 至 20 个字符";
+        NicknameValidationText.Visibility = string.IsNullOrEmpty(NicknameValidationText.Text) ? Visibility.Collapsed : Visibility.Visible;
+        SaveProfileButton.IsEnabled = !_profileSaveBusy && valid && !string.Equals(value, _savedNickname, StringComparison.Ordinal);
+        CancelProfileButton.IsEnabled = !_profileSaveBusy && !string.Equals(value, _savedNickname, StringComparison.Ordinal);
+    }
+
+    private void CancelProfileButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        NicknameInput.Text = _savedNickname;
+        ProfileToast.Visibility = Visibility.Collapsed;
+        UpdateProfileFormState();
     }
 
     private async void UploadAvatarButton_OnClick(object sender, RoutedEventArgs e)
@@ -434,7 +489,7 @@ public partial class MainWindow : Window
         if (picker.ShowDialog() != true) return;
         await RunExclusiveAsync(async () => {
             var data = await File.ReadAllBytesAsync(picker.FileName);
-            if (data.Length > 512 * 1024) { MessageBox.Show("头像不能超过 512 KB。"); return; }
+            if (data.Length > 5 * 1024 * 1024) { MessageBox.Show("头像不能超过 5 MB。"); return; }
             var extension = Path.GetExtension(picker.FileName).ToLowerInvariant();
             var mediaType = extension is ".jpg" or ".jpeg" ? "image/jpeg" : extension == ".png" ? "image/png" : "image/webp";
             try { UpdateProfile(await _accounts.UpdateAvatarAsync(GatewayUri, _session.AccessToken, mediaType, Convert.ToBase64String(data))); }
@@ -445,6 +500,8 @@ public partial class MainWindow : Window
     private async void LogoutButton_OnClick(object sender, RoutedEventArgs e)
     {
         await RunExclusiveAsync(async () => {
+            if (MessageBox.Show("确定要退出登录吗？\n\n退出后需要重新登录才能继续使用。", "退出当前账号", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+            await _attachments.CompleteSendAsync();
             if (_session is not null) await _accounts.LogoutAsync(GatewayUri, _session.AccessToken).ContinueWith(_ => { });
             _sessionStore.Clear();
             _session = null;
@@ -463,6 +520,7 @@ public partial class MainWindow : Window
         }
         catch { return; }
         _sessionStore.Clear();
+        await _attachments.CompleteSendAsync();
         _session = null;
         _sessionTimer.Stop();
         ShowLogin();
@@ -601,9 +659,10 @@ public partial class MainWindow : Window
         ShowChatToast("消息已复制到剪贴板");
     }
 
-    private void ShowChatToast(string text)
+    private void ShowChatToast(string text, bool error = false)
     {
         ChatToastText.Text = text;
+        ChatToast.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(error ? "#E6B42318" : "#E6111827"));
         ChatToast.Visibility = Visibility.Visible;
         _chatToastTimer.Stop();
         _chatToastTimer.Start();
@@ -809,14 +868,101 @@ public partial class MainWindow : Window
         await SendChatAsync();
     }
 
-    private void ChatInput_OnTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) =>
-        ChatSendButton.IsEnabled = _chatCancellation is null && !string.IsNullOrWhiteSpace(ChatInput.Text);
+    private void ChatInput_OnTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) => UpdateComposerState();
+
+    private void UpdateComposerState()
+    {
+        AttachmentPreviewScroll.Visibility = _attachments.HasItems ? Visibility.Visible : Visibility.Collapsed;
+        var hasContent = !string.IsNullOrWhiteSpace(ChatInput.Text) || _attachments.HasItems;
+        ChatSendButton.IsEnabled = _chatCancellation is null && hasContent && (!_attachments.HasItems || _attachments.IsReady);
+        ChatSendButton.ToolTip = _attachments.BlockingReason ?? "发送消息";
+    }
+
+    private async void AttachmentUploadButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "选择要发送给 AI 的附件", Multiselect = true, CheckFileExists = true,
+            Filter = "支持的文件|*.png;*.jpg;*.jpeg;*.webp;*.gif;*.pdf;*.doc;*.docx;*.rtf;*.odt;*.ppt;*.pptx;*.xls;*.xlsx;*.csv;*.tsv;*.txt;*.md;*.json;*.xml;*.html;*.mp4;*.mov;*.webm;*.mp3;*.wav;*.m4a;*.ogg;*.zip;*.rar;*.7z;*.tar;*.gz;*.cs;*.xaml;*.ts;*.tsx;*.js;*.jsx;*.py;*.java;*.kt;*.go;*.rs;*.c;*.cpp;*.h;*.hpp;*.sql;*.sh;*.ps1;*.yml;*.yaml;*.toml;*.css;*.scss|所有文件|*.*",
+        };
+        if (dialog.ShowDialog() == true) await _attachments.AddFilesAsync(dialog.FileNames);
+    }
+
+    private async void ChatInput_OnPaste(object sender, DataObjectPastingEventArgs e)
+    {
+        var data = e.SourceDataObject;
+        var paths = data.GetDataPresent(DataFormats.FileDrop) ? data.GetData(DataFormats.FileDrop) as string[] : null;
+        var bitmap = data.GetDataPresent(DataFormats.Bitmap) ? data.GetData(DataFormats.Bitmap) as BitmapSource : null;
+        if (paths is null && bitmap is null) return;
+        var text = data.GetDataPresent(DataFormats.UnicodeText) ? data.GetData(DataFormats.UnicodeText) as string : null;
+        e.CancelCommand();
+        if (!string.IsNullOrEmpty(text))
+        {
+            ChatInput.SelectedText = text;
+            ChatInput.CaretIndex += text.Length;
+        }
+        if (paths is { Length: > 0 }) await _attachments.AddFilesAsync(paths);
+        if (bitmap is not null) await _attachments.AddClipboardImageAsync(bitmap);
+    }
+
+    private void ChatComposer_OnDragEnter(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+        _composerDragDepth++;
+        AttachmentDropOverlay.Visibility = Visibility.Visible;
+        e.Effects = DragDropEffects.Copy;
+        e.Handled = true;
+    }
+
+    private void ChatComposer_OnDragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void ChatComposer_OnDragLeave(object sender, DragEventArgs e)
+    {
+        _composerDragDepth = Math.Max(0, _composerDragDepth - 1);
+        if (_composerDragDepth == 0) AttachmentDropOverlay.Visibility = Visibility.Collapsed;
+        e.Handled = true;
+    }
+
+    private async void ChatComposer_OnDrop(object sender, DragEventArgs e)
+    {
+        _composerDragDepth = 0;
+        AttachmentDropOverlay.Visibility = Visibility.Collapsed;
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] paths) await _attachments.AddFilesAsync(paths);
+        e.Handled = true;
+    }
+
+    private async void RemoveAttachmentButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button { Tag: ComposerAttachment item }) await _attachments.RemoveAsync(item);
+    }
+
+    private async void RetryAttachmentButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button { Tag: ComposerAttachment item }) await _attachments.RetryAsync(item);
+    }
+
+    private void AttachmentPreview_OnClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Image { Tag: ComposerAttachment item } || !File.Exists(item.FilePath)) return;
+        try { Process.Start(new ProcessStartInfo(item.FilePath) { UseShellExecute = true }); }
+        catch (Exception error) { ShowChatToast($"无法打开附件：{error.Message}", true); }
+    }
 
     private async Task SendChatAsync()
     {
         if (_session is null || _chatCancellation is not null) return;
         var text = ChatInput.Text.Trim();
-        if (text.Length == 0) return;
+        var attachmentSnapshot = _attachments.Snapshot();
+        if (text.Length == 0 && attachmentSnapshot.Count == 0) return;
+        if (attachmentSnapshot.Count > 0 && !_attachments.IsReady)
+        {
+            ShowChatToast(_attachments.BlockingReason ?? "附件尚未准备完成", true);
+            return;
+        }
         _chatCancellation = new CancellationTokenSource();
         var cancellationToken = _chatCancellation.Token;
         ChatSendButton.IsEnabled = false;
@@ -826,11 +972,18 @@ public partial class MainWindow : Window
         {
             var now = DateTimeOffset.UtcNow;
             var conversationId = _currentConversation?.Id ?? Guid.NewGuid().ToString();
-            var user = new SyncedChatMessage(Guid.NewGuid().ToString(), conversationId, "user", text, DateTimeOffset.UtcNow);
+            var messageId = Guid.NewGuid().ToString();
+            var storedAttachments = new List<LocalChatAttachment>();
+            foreach (var attachment in attachmentSnapshot)
+                storedAttachments.Add(await _conversationStore.SaveAttachmentAsync(
+                    _session.Profile.Id, conversationId, messageId, attachment.FilePath, attachment.Name,
+                    attachment.MimeType, attachment.Size, attachment.Category, cancellationToken));
+            var user = new SyncedChatMessage(messageId, conversationId, "user", text, DateTimeOffset.UtcNow, Attachments: storedAttachments);
             ChatInput.Clear();
             _chatMessages.Add(CreateDisplayMessage(user));
+            var titleSource = text.Length > 0 ? text : attachmentSnapshot[0].Name;
             _currentConversation = _currentConversation is null
-                ? new LocalConversation(conversationId, text[..Math.Min(text.Length, 40)], now, now, [user], _selectedProjectPath)
+                ? new LocalConversation(conversationId, titleSource[..Math.Min(titleSource.Length, 40)], now, now, [user], _selectedProjectPath)
                 : _currentConversation with { UpdatedAt = now, Messages = _currentConversation.Messages.Append(user).ToArray() };
             await SaveCurrentConversationAsync(cancellationToken);
             IReadOnlyList<SyncedChatMessage> context = _chatMessages.Select(item => item.Source).ToArray();
@@ -860,7 +1013,8 @@ public partial class MainWindow : Window
                 if (wantsImage) ChatNotice.Text = "正在生成图片，请稍候…";
                 var result = await _chat.StreamResponseAsync(
                     GatewayUri, _session.AccessToken, context, progress, cancellationToken,
-                    enableWebSearch: _webSearchEnabled, enableImageGeneration: wantsImage);
+                    enableWebSearch: _webSearchEnabled, enableImageGeneration: wantsImage,
+                    attachmentIds: attachmentSnapshot.Select(item => item.ServerFileId!).ToArray());
                 var storedImages = new List<GeneratedChatImage>();
                 foreach (var image in result.Images)
                     storedImages.Add(await _conversationStore.SaveGeneratedImageAsync(
@@ -877,6 +1031,7 @@ public partial class MainWindow : Window
                 display.Images = ResolveImages(assistant);
                 _currentConversation = _currentConversation with { UpdatedAt = DateTimeOffset.UtcNow, Messages = _currentConversation.Messages.Append(assistant).ToArray() };
                 await SaveCurrentConversationAsync(cancellationToken);
+                await _attachments.CompleteSendAsync();
                 ChatNotice.Text = result.WebSearchUnavailable
                     ? "当前上游暂不支持联网搜索，本次已自动使用普通对话。" : "";
                 NetworkStatusText.Text = !_webSearchEnabled ? "联网搜索已关闭" : result.WebSearchUnavailable
@@ -908,7 +1063,7 @@ public partial class MainWindow : Window
         {
             _chatCancellation.Dispose();
             _chatCancellation = null;
-            ChatSendButton.IsEnabled = !string.IsNullOrWhiteSpace(ChatInput.Text);
+            UpdateComposerState();
             StopGenerationButton.Visibility = Visibility.Collapsed;
             ChatInput.Focus();
         }
@@ -960,7 +1115,7 @@ public partial class MainWindow : Window
     }
 
     private ChatDisplayMessage CreateDisplayMessage(SyncedChatMessage message) =>
-        ChatDisplayMessage.From(message, ResolveImages(message));
+        ChatDisplayMessage.From(message, ResolveImages(message), ResolveAttachments(message));
 
     private IReadOnlyList<ChatDisplayImage> ResolveImages(SyncedChatMessage message)
     {
@@ -970,6 +1125,27 @@ public partial class MainWindow : Window
             try { return ChatDisplayImage.TryCreate(_conversationStore.GetImagePath(_session.Profile.Id, image.RelativePath)); }
             catch { return null; }
         }).Where(image => image is not null).Cast<ChatDisplayImage>().ToArray();
+    }
+
+    private IReadOnlyList<ChatDisplayAttachment> ResolveAttachments(SyncedChatMessage message)
+    {
+        if (_session is null || message.Attachments is null) return [];
+        return message.Attachments.Select(item =>
+        {
+            try
+            {
+                var path = _conversationStore.GetAttachmentPath(_session.Profile.Id, item.RelativePath);
+                return File.Exists(path) ? ChatDisplayAttachment.Create(path, item) : null;
+            }
+            catch { return null; }
+        }).Where(item => item is not null).Cast<ChatDisplayAttachment>().ToArray();
+    }
+
+    private void OpenMessageAttachment_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button { Tag: string path } || !File.Exists(path)) return;
+        try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }
+        catch (Exception error) { ShowChatToast($"无法打开附件：{error.Message}", true); }
     }
 
     private void ScrollChatToEnd()
@@ -1022,11 +1198,17 @@ public partial class MainWindow : Window
     {
         if (_session is not null) { _session = _session with { Profile = profile }; _sessionStore.Save(_session); }
         ProfileEmailText.Text = profile.Email;
+        ProfileEmailReadonlyText.Text = profile.Email;
+        ProfileNicknameHeading.Text = string.IsNullOrWhiteSpace(profile.Nickname) ? "用户" : profile.Nickname;
+        _savedNickname = profile.Nickname;
         NicknameInput.Text = profile.Nickname;
+        UpdateProfileFormState();
         SidebarProfileName.Text = string.IsNullOrWhiteSpace(profile.Nickname) ? profile.Email : profile.Nickname;
         SidebarProfileEmail.Text = profile.Email;
         var avatar = DecodeAvatar(profile.AvatarBase64);
         AvatarImage.Source = avatar;
+        ProfileAvatarFallbackText.Text = ProfileInitial(profile);
+        ProfileAvatarFallbackText.Visibility = avatar is null ? Visibility.Visible : Visibility.Collapsed;
         SidebarAvatarImage.Source = avatar;
         SidebarAvatarImage.Visibility = avatar is null ? Visibility.Collapsed : Visibility.Visible;
         SidebarAvatarFallbackText.Visibility = avatar is null ? Visibility.Visible : Visibility.Collapsed;
@@ -1184,6 +1366,7 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
         {
             var natural = CalculateBubbleWidth(_content, IsUser);
             if (_images.Count > 0) natural = Math.Max(natural, 600);
+            if (_attachments.Count > 0) natural = Math.Max(natural, _attachments.Any(item => item.ImageVisibility == Visibility.Visible) ? 260 : 360);
             if (HasSources) natural = Math.Max(natural, 420);
             return natural;
         }
@@ -1192,6 +1375,8 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
     public Visibility SourcesVisibility { get => _sourcesVisibility; set { if (_sourcesVisibility == value) return; _sourcesVisibility = value; PropertyChanged?.Invoke(this, new(nameof(SourcesVisibility))); } }
     private IReadOnlyList<ChatDisplayImage> _images = [];
     public IReadOnlyList<ChatDisplayImage> Images { get => _images; set { _images = value; PropertyChanged?.Invoke(this, new(nameof(Images))); PropertyChanged?.Invoke(this, new(nameof(BubbleWidth))); } }
+    private IReadOnlyList<ChatDisplayAttachment> _attachments = [];
+    public IReadOnlyList<ChatDisplayAttachment> Attachments { get => _attachments; set { _attachments = value; PropertyChanged?.Invoke(this, new(nameof(Attachments))); PropertyChanged?.Invoke(this, new(nameof(BubbleWidth))); } }
     public SyncedChatMessage Source
     {
         get => _source;
@@ -1209,8 +1394,8 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
     }
     public string Content { get => _content; set { if (_content == value) return; _content = value; PropertyChanged?.Invoke(this, new(nameof(Content))); PropertyChanged?.Invoke(this, new(nameof(BubbleWidth))); } }
     private ChatDisplayMessage(SyncedChatMessage source) { _source = source; _content = source.Content; }
-    public static ChatDisplayMessage From(SyncedChatMessage source, IReadOnlyList<ChatDisplayImage>? images = null) =>
-        new(source) { Sender = source.Role == "user" ? "我" : "GPT-5.6", Images = images ?? [] };
+    public static ChatDisplayMessage From(SyncedChatMessage source, IReadOnlyList<ChatDisplayImage>? images = null, IReadOnlyList<ChatDisplayAttachment>? attachments = null) =>
+        new(source) { Sender = source.Role == "user" ? "我" : "GPT-5.6", Images = images ?? [], Attachments = attachments ?? [] };
     private static double CalculateBubbleWidth(string content, bool isUser)
     {
         if (string.IsNullOrEmpty(content)) return isUser ? 80 : 72;
@@ -1221,6 +1406,22 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
         return Math.Min(isUser ? 560 : 820, Math.Max(isUser ? 80 : 58, natural));
     }
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+}
+
+public sealed record ChatDisplayAttachment(
+    string FilePath, string Name, string DetailText, string IconText, ImageSource? Preview, Visibility ImageVisibility, Visibility FileVisibility)
+{
+    public static ChatDisplayAttachment Create(string path, LocalChatAttachment item)
+    {
+        var extension = Path.GetExtension(item.Name).TrimStart('.').ToUpperInvariant();
+        var size = item.Size >= 1024 * 1024 ? $"{item.Size / 1024d / 1024d:0.#} MB" : item.Size >= 1024 ? $"{item.Size / 1024d:0.#} KB" : $"{item.Size} B";
+        var icon = item.Category switch { "video" => "▶", "audio" => "♪", "archive" => "ZIP", "code" => "</>", _ => extension is "PDF" or "DOC" or "DOCX" or "XLS" or "XLSX" or "PPT" or "PPTX" ? extension : "FILE" };
+        ImageSource? preview = null;
+        if (item.Category == "image") preview = ChatDisplayImage.TryCreate(path)?.Source;
+        return new(path, item.Name, $"{extension} · {size}", icon, preview,
+            item.Category == "image" ? Visibility.Visible : Visibility.Collapsed,
+            item.Category == "image" ? Visibility.Collapsed : Visibility.Visible);
+    }
 }
 
 public sealed record ChatDisplayImage(string FilePath, ImageSource Source)
