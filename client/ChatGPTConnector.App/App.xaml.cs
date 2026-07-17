@@ -36,8 +36,22 @@ public partial class App : Application
             var theme = AppThemeManager.Load();
             AppThemeManager.Apply(this, theme);
             var smokeTest = e.Args.Contains("--smoke-test", StringComparer.OrdinalIgnoreCase);
+            var showAfterUpdate = e.Args.Contains("--show-after-update", StringComparer.OrdinalIgnoreCase);
             var window = new MainWindow(skipStartupChecks: smokeTest, initialTheme: theme);
             window.Show();
+            if (showAfterUpdate)
+            {
+                _ = window.Dispatcher.InvokeAsync(() =>
+                {
+                    window.ShowInTaskbar = true;
+                    window.WindowState = WindowState.Normal;
+                    window.Show();
+                    window.Topmost = true;
+                    window.Activate();
+                    window.Topmost = false;
+                    window.Focus();
+                }, DispatcherPriority.ApplicationIdle);
+            }
             if (smokeTest)
             {
                 window.PrepareForExit();

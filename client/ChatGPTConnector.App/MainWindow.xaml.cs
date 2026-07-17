@@ -364,7 +364,17 @@ public partial class MainWindow : Window
 
     private void ThemeToggleButton_OnClick(object sender, RoutedEventArgs e)
     {
-        _theme = _theme == AppTheme.Light ? AppTheme.Dark : AppTheme.Light;
+        if (ThemeToggleButton.ContextMenu is null) return;
+        ThemeToggleButton.ContextMenu.PlacementTarget = ThemeToggleButton;
+        ThemeToggleButton.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        ThemeToggleButton.ContextMenu.IsOpen = true;
+    }
+
+    private void SkinMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.MenuItem { Tag: string value }
+            || !Enum.TryParse<AppTheme>(value, true, out var theme)) return;
+        _theme = theme;
         AppThemeManager.Apply(Application.Current, _theme);
         AppThemeManager.Save(_theme);
         UpdateThemeButton();
@@ -372,12 +382,15 @@ public partial class MainWindow : Window
 
     private void UpdateThemeButton()
     {
-        var switchLabel = _theme == AppTheme.Light ? "切换至暗黑模式" : "切换至浅色模式";
-        ThemeToggleButton.ToolTip = switchLabel;
-        AutomationProperties.SetName(ThemeToggleButton, switchLabel);
-        ThemeIconPath.Data = Geometry.Parse(_theme == AppTheme.Light
-            ? "M 20.5,15.2 A 8.5,8.5 0 0 1 8.8,3.5 A 9,9 0 1 0 20.5,15.2 Z"
-            : "M 12,3 L 12,1 M 12,23 L 12,21 M 3,12 L 1,12 M 23,12 L 21,12 M 5.64,5.64 L 4.22,4.22 M 19.78,19.78 L 18.36,18.36 M 18.36,5.64 L 19.78,4.22 M 4.22,19.78 L 5.64,18.36 M 12,7 A 5,5 0 1 1 12,17 A 5,5 0 1 1 12,7");
+        var label = $"选择界面皮肤，当前为{AppThemeManager.DisplayName(_theme)}";
+        ThemeToggleButton.ToolTip = label;
+        AutomationProperties.SetName(ThemeToggleButton, label);
+        ThemeIconPath.Data = Geometry.Parse("M 12,3 A 9,9 0 1 0 12,21 C 14,21 14.5,19.5 13.5,18.5 C 12.5,17.5 13.2,16 15,16 L 17,16 C 19.2,16 21,14.2 21,12 A 9,9 0 0 0 12,3 Z M 7.5,11 A 1,1 0 1 1 7.5,9 A 1,1 0 1 1 7.5,11 M 10,7.5 A 1,1 0 1 1 10,5.5 A 1,1 0 1 1 10,7.5 M 15,8 A 1,1 0 1 1 15,6 A 1,1 0 1 1 15,8 M 18,11.5 A 1,1 0 1 1 18,9.5 A 1,1 0 1 1 18,11.5");
+        LightSkinMenuItem.IsChecked = _theme == AppTheme.Light;
+        DarkSkinMenuItem.IsChecked = _theme == AppTheme.Dark;
+        OceanSkinMenuItem.IsChecked = _theme == AppTheme.Ocean;
+        VioletSkinMenuItem.IsChecked = _theme == AppTheme.Violet;
+        RoseSkinMenuItem.IsChecked = _theme == AppTheme.Rose;
     }
 
     private async Task CompleteLoginAsync(AccountSession session)

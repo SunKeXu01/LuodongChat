@@ -139,16 +139,17 @@ jobs:
           }
           # The exact silent installer used by automatic updates must launch the
           # newly installed client and leave it running, not merely create a process.
-          $env:LUODONGCHAT_AUTOSTART = '1'
-          try {
-            $autoStartUpgrade = Start-Process $setup -ArgumentList '/S' -PassThru
-            if (!$autoStartUpgrade.WaitForExit(60000)) {
-              Stop-Process -Id $autoStartUpgrade.Id -Force -ErrorAction SilentlyContinue
-              throw "Automatic-update installer did not exit."
-            }
+          # Run the installer from a short-lived PowerShell parent, matching the
+          # production updater. The client must survive after that parent exits.
+          $escapedSetup = $setup.Replace("'", "''")
+          $updateCommand = "`$env:LUODONGCHAT_AUTOSTART='1'; & '$escapedSetup' /S; exit `$LASTEXITCODE"
+          $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($updateCommand))
+          $updaterParent = Start-Process powershell.exe -ArgumentList @('-NoProfile', '-NonInteractive', '-EncodedCommand', $encodedCommand) -PassThru
+          if (!$updaterParent.WaitForExit(60000)) {
+            Stop-Process -Id $updaterParent.Id -Force -ErrorAction SilentlyContinue
+            throw "Automatic-update parent did not exit."
           }
-          finally { Remove-Item Env:LUODONGCHAT_AUTOSTART -ErrorAction SilentlyContinue }
-          if ($autoStartUpgrade.ExitCode -ne 0) { throw "Automatic-update installer failed." }
+          if ($updaterParent.ExitCode -ne 0) { throw "Automatic-update installer failed." }
           Start-Sleep -Seconds 3
           $autoStartedClient = Get-Process LuodongChat -ErrorAction SilentlyContinue | Select-Object -First 1
           if (!$autoStartedClient -or $autoStartedClient.HasExited) { throw "Automatic update did not leave the client running." }

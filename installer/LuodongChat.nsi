@@ -85,7 +85,9 @@ installFiles:
   # entries are ready, while normal and CI silent installs remain unchanged.
   ReadEnvStr $0 "LUODONGCHAT_AUTOSTART"
   StrCmp $0 "1" 0 installDone
-  Exec '"$INSTDIR\LuodongChat.exe"'
+  # ShellExecute routes the launch through the interactive Windows shell so the
+  # new client is not tied to the short-lived installer/updater process tree.
+  ExecShell "open" "$INSTDIR\LuodongChat.exe" "--show-after-update" SW_SHOWNORMAL
 installDone:
 SectionEnd
 

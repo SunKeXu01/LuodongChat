@@ -22,8 +22,8 @@ android {
         applicationId = "com.skx.chatgptconnector"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1130
-        versionName = "1.13"
+        versionCode = 1140
+        versionName = "1.14"
     }
 
     buildFeatures { compose = true; buildConfig = true }

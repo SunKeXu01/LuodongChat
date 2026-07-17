@@ -158,6 +158,7 @@ public sealed class ClientUpdateService(HttpClient http)
             }
             Write-UpdateLog '安装完成，正在确认新版本是否运行。'
             $target = Join-Path $root 'LuodongChat.exe'
+            $shellApplication = New-Object -ComObject 'Shell.Application'
             $started = $false
             for ($attempt = 0; $attempt -lt 20; $attempt++) {
               $running = Get-Process -Name 'LuodongChat' -ErrorAction SilentlyContinue
@@ -166,11 +167,12 @@ public sealed class ClientUpdateService(HttpClient http)
                 $running = Get-Process -Name 'LuodongChat' -ErrorAction SilentlyContinue
                 if ($running) { $started = $true; break }
               }
-              if ((Test-Path -LiteralPath $target) -and -not $running) {
+              if ((Test-Path -LiteralPath $target) -and -not $running -and ($attempt % 4 -eq 0)) {
                 try {
-                  $process = Start-Process -FilePath $target -WorkingDirectory $root -PassThru
-                  Start-Sleep -Milliseconds 1000
-                  if (-not $process.HasExited) { $started = $true; break }
+                  # Launch via the interactive shell rather than as a child of
+                  # this updater; some Windows launchers terminate their entire
+                  # child process tree when the update process exits.
+                  $shellApplication.ShellExecute($target, '--show-after-update', $root, 'open', 1)
                 } catch { }
               }
               Start-Sleep -Milliseconds 500
@@ -180,6 +182,7 @@ public sealed class ClientUpdateService(HttpClient http)
               throw '更新已经安装，但客户端未能自动启动。'
             }
             Write-UpdateLog '新版本已自动启动。'
+            [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shellApplication)
             Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
             """;
@@ -209,19 +212,27 @@ public sealed class ClientUpdateService(HttpClient http)
               exit 1
             }
             $root = Split-Path -Parent $target
+            $shellApplication = New-Object -ComObject 'Shell.Application'
             $started = $false
             for ($attempt = 0; $attempt -lt 20; $attempt++) {
-              try {
-                $process = Start-Process -FilePath $target -WorkingDirectory $root -PassThru
-                Start-Sleep -Milliseconds 1000
-                if (-not $process.HasExited) { $started = $true; break }
-              } catch { Start-Sleep -Milliseconds 500 }
+              $running = Get-Process -Name 'LuodongChat' -ErrorAction SilentlyContinue
+              if ($running) {
+                Start-Sleep -Milliseconds 750
+                $running = Get-Process -Name 'LuodongChat' -ErrorAction SilentlyContinue
+                if ($running) { $started = $true; break }
+              }
+              if (-not $running -and ($attempt % 4 -eq 0)) {
+                try { $shellApplication.ShellExecute($target, '--show-after-update', $root, 'open', 1) }
+                catch { }
+              }
+              Start-Sleep -Milliseconds 500
             }
             if (-not $started) {
               Write-UpdateLog '便携版更新完成，但客户端自动启动失败。'
               throw '更新已经安装，但客户端未能自动启动。'
             }
             Write-UpdateLog '便携版新版本已自动启动。'
+            [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shellApplication)
             Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
             """;

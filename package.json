@@ -1,6 +1,6 @@
 {
   "name": "luodong-chat",
-  "version": "1.13.0",
+  "version": "1.14.0",
   "private": true,
   "packageManager": "pnpm@10.14.0",
   "type": "module",

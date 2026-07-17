@@ -36,8 +36,18 @@
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
           <Button x:Name="ThemeToggleButton" Style="{StaticResource ThemeToggleButton}" Margin="0,0,8,0"
-                  ToolTip="切换至暗黑模式" AutomationProperties.Name="切换至暗黑模式"
+                  ToolTip="选择界面皮肤" AutomationProperties.Name="选择界面皮肤"
                   Click="ThemeToggleButton_OnClick">
+            <Button.ContextMenu>
+              <ContextMenu>
+                <MenuItem x:Name="LightSkinMenuItem" Header="经典浅色" Tag="Light" IsCheckable="True" Click="SkinMenuItem_OnClick"/>
+                <MenuItem x:Name="DarkSkinMenuItem" Header="深夜模式" Tag="Dark" IsCheckable="True" Click="SkinMenuItem_OnClick"/>
+                <Separator/>
+                <MenuItem x:Name="OceanSkinMenuItem" Header="静谧海蓝" Tag="Ocean" IsCheckable="True" Click="SkinMenuItem_OnClick"/>
+                <MenuItem x:Name="VioletSkinMenuItem" Header="暮色紫" Tag="Violet" IsCheckable="True" Click="SkinMenuItem_OnClick"/>
+                <MenuItem x:Name="RoseSkinMenuItem" Header="柔雾玫瑰" Tag="Rose" IsCheckable="True" Click="SkinMenuItem_OnClick"/>
+              </ContextMenu>
+            </Button.ContextMenu>
             <Viewbox Width="18" Height="18">
               <Path x:Name="ThemeIconPath" Stroke="{DynamicResource ThemeIconBrush}" StrokeThickness="2"
                     StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>

@@ -8,7 +8,10 @@ namespace ChatGPTConnector.App;
 public enum AppTheme
 {
     Light,
-    Dark
+    Dark,
+    Ocean,
+    Violet,
+    Rose
 }
 
 public static class AppThemeManager
@@ -19,9 +22,8 @@ public static class AppThemeManager
     {
         try
         {
-            return string.Equals(File.ReadAllText(PreferencePath).Trim(), "dark", StringComparison.OrdinalIgnoreCase)
-                ? AppTheme.Dark
-                : AppTheme.Light;
+            return Enum.TryParse<AppTheme>(File.ReadAllText(PreferencePath).Trim(), true, out var theme)
+                ? theme : AppTheme.Light;
         }
         catch
         {
@@ -34,7 +36,7 @@ public static class AppThemeManager
         try
         {
             ApplicationDirectories.EnsureWritable();
-            File.WriteAllText(PreferencePath, theme == AppTheme.Dark ? "dark" : "light");
+            File.WriteAllText(PreferencePath, theme.ToString().ToLowerInvariant());
         }
         catch
         {
@@ -44,12 +46,28 @@ public static class AppThemeManager
 
     public static void Apply(Application application, AppTheme theme)
     {
-        var colors = theme == AppTheme.Dark ? DarkColors : LightColors;
+        var colors = theme switch
+        {
+            AppTheme.Dark => DarkColors,
+            AppTheme.Ocean => OceanColors,
+            AppTheme.Violet => VioletColors,
+            AppTheme.Rose => RoseColors,
+            _ => LightColors,
+        };
         foreach (var (key, value) in colors)
         {
             application.Resources[key] = new SolidColorBrush((Color)ColorConverter.ConvertFromString(value));
         }
     }
+
+    public static string DisplayName(AppTheme theme) => theme switch
+    {
+        AppTheme.Dark => "深夜模式",
+        AppTheme.Ocean => "静谧海蓝",
+        AppTheme.Violet => "暮色紫",
+        AppTheme.Rose => "柔雾玫瑰",
+        _ => "经典浅色",
+    };
 
     private static readonly IReadOnlyDictionary<string, string> LightColors = new Dictionary<string, string>
     {
@@ -120,4 +138,52 @@ public static class AppThemeManager
         ["DangerSurfaceBrush"] = "#4C1D2B",
         ["DangerTextBrush"] = "#FDA4AF"
     };
+
+    private static readonly IReadOnlyDictionary<string, string> OceanColors = Merge(DarkColors, new Dictionary<string, string>
+    {
+        ["PageBackgroundBrush"] = "#071522", ["TopBarBackgroundBrush"] = "#0A2030",
+        ["SurfaceBrush"] = "#0D2638", ["InputBackgroundBrush"] = "#0A1D2C",
+        ["BorderBrush"] = "#24465B", ["AccentBrush"] = "#38BDF8",
+        ["BrandBrush"] = "#DDF4FF", ["BrandHoverBrush"] = "#C4EAFE",
+        ["LinkBrush"] = "#67E8F9", ["SecondarySurfaceBrush"] = "#103A4E",
+        ["SecondaryForegroundBrush"] = "#A5F3FC", ["SidebarBrush"] = "#091C2A",
+        ["MessageSurfaceBrush"] = "#102B3D", ["UserMessageBrush"] = "#123E59",
+        ["UserMessageBorderBrush"] = "#256A8D", ["ThemeButtonBrush"] = "#123247",
+        ["ThemeIconBrush"] = "#BAE6FD", ["LeftPanelBrush"] = "#08263A",
+    });
+
+    private static readonly IReadOnlyDictionary<string, string> VioletColors = Merge(LightColors, new Dictionary<string, string>
+    {
+        ["PageBackgroundBrush"] = "#F6F3FB", ["TopBarBackgroundBrush"] = "#FFFCFF",
+        ["SurfaceBrush"] = "#FFFCFF", ["InputBackgroundBrush"] = "#FFFCFF",
+        ["BorderBrush"] = "#DDD4EA", ["AccentBrush"] = "#8B5CF6",
+        ["BrandBrush"] = "#352A52", ["BrandHoverBrush"] = "#493A70",
+        ["LinkBrush"] = "#6D3FD1", ["SecondarySurfaceBrush"] = "#EEE8FB",
+        ["SecondaryForegroundBrush"] = "#6541A5", ["SidebarBrush"] = "#F2EEF8",
+        ["MessageSurfaceBrush"] = "#FAF7FD", ["UserMessageBrush"] = "#EEE7FB",
+        ["UserMessageBorderBrush"] = "#D8C8F2", ["ThemeButtonBrush"] = "#EEE8F7",
+        ["ThemeIconBrush"] = "#684F88", ["LeftPanelBrush"] = "#2E2548",
+    });
+
+    private static readonly IReadOnlyDictionary<string, string> RoseColors = Merge(LightColors, new Dictionary<string, string>
+    {
+        ["PageBackgroundBrush"] = "#FBF5F6", ["TopBarBackgroundBrush"] = "#FFFBFB",
+        ["SurfaceBrush"] = "#FFFBFB", ["InputBackgroundBrush"] = "#FFFCFC",
+        ["BorderBrush"] = "#E8D7DB", ["AccentBrush"] = "#D66A82",
+        ["BrandBrush"] = "#4A2731", ["BrandHoverBrush"] = "#643743",
+        ["LinkBrush"] = "#B54761", ["SecondarySurfaceBrush"] = "#F8E8EC",
+        ["SecondaryForegroundBrush"] = "#A33F58", ["SidebarBrush"] = "#F8EFF1",
+        ["MessageSurfaceBrush"] = "#FCF8F9", ["UserMessageBrush"] = "#F8E7EB",
+        ["UserMessageBorderBrush"] = "#EBCBD3", ["ThemeButtonBrush"] = "#F7E9EC",
+        ["ThemeIconBrush"] = "#81515D", ["LeftPanelBrush"] = "#402631",
+    });
+
+    private static IReadOnlyDictionary<string, string> Merge(
+        IReadOnlyDictionary<string, string> source,
+        IReadOnlyDictionary<string, string> overrides)
+    {
+        var result = new Dictionary<string, string>(source);
+        foreach (var (key, value) in overrides) result[key] = value;
+        return result;
+    }
 }
