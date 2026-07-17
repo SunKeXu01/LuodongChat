@@ -129,10 +129,20 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
   const configuredUpstreams = config.upstreams ?? config.upstreamApiKeys;
   const webSearchUpstreamIndex = config.webSearchUpstreamIndex ?? Math.max(0, configuredUpstreams.length - 1);
   const imageGenerationUpstreamIndex = config.imageGenerationUpstreamIndex ?? Math.max(0, configuredUpstreams.length - 1);
+  const selectedSearchUpstream = configuredUpstreams[webSearchUpstreamIndex];
+  const sharedSearchBaseUrl = typeof selectedSearchUpstream === "object"
+    && selectedSearchUpstream.baseUrl.replace(/\/$/, "") !== config.upstreamBaseUrl.replace(/\/$/, "")
+    ? selectedSearchUpstream.baseUrl.replace(/\/$/, "")
+    : undefined;
   const upstreamPool = new UpstreamPool(configuredUpstreams.map((item, index) =>
     typeof item === "string"
       ? { apiKey: item, supportsWebSearch: index === webSearchUpstreamIndex, supportsImageGeneration: index === imageGenerationUpstreamIndex }
-      : { ...item, supportsWebSearch: index === webSearchUpstreamIndex, supportsImageGeneration: index === imageGenerationUpstreamIndex }));
+      : {
+          ...item,
+          supportsWebSearch: index === webSearchUpstreamIndex
+            || (sharedSearchBaseUrl !== undefined && item.baseUrl.replace(/\/$/, "") === sharedSearchBaseUrl),
+          supportsImageGeneration: index === imageGenerationUpstreamIndex,
+        }));
   const ledger = options.ledger ?? new InMemoryRequestLedger();
   const keyVerifier = options.keyVerifier ?? new StaticGatewayKeyVerifier(config.gatewayKeyHashes);
   const adminLoginGuard = options.adminLoginProtector ?? new AdminLoginGuard();

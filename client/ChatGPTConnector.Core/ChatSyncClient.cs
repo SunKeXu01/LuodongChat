@@ -45,7 +45,7 @@ public sealed class ChatSyncClient(HttpClient http)
         request.Headers.Accept.ParseAdd("text/event-stream");
         var payload = new Dictionary<string, object?>
         {
-            ["model"] = "gpt-5.6-sol",
+            ["model"] = enableWebSearch ? "gpt-5.6" : "gpt-5.6-sol",
             ["stream"] = true,
             ["input"] = messages.Select(message => new { role = message.Role, content = message.Content }),
         };

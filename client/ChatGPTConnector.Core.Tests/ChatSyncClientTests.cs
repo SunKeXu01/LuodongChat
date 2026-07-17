@@ -45,9 +45,11 @@ public sealed class ChatSyncClientTests
         Assert.Equal("普通回答", result.Text);
         Assert.Equal(2, handler.Bodies.Count);
         using var first = JsonDocument.Parse(handler.Bodies[0]);
+        Assert.Equal("gpt-5.6", first.RootElement.GetProperty("model").GetString());
         Assert.Equal("web_search", first.RootElement.GetProperty("tools")[0].GetProperty("type").GetString());
         Assert.Equal("medium", first.RootElement.GetProperty("tools")[0].GetProperty("search_context_size").GetString());
         using var second = JsonDocument.Parse(handler.Bodies[1]);
+        Assert.Equal("gpt-5.6-sol", second.RootElement.GetProperty("model").GetString());
         Assert.False(second.RootElement.TryGetProperty("tools", out _));
     }
 

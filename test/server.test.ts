@@ -492,6 +492,56 @@ test("routes web search requests to the verified capable upstream", async (t) =>
   assert.equal((await response.json() as { output: { type: string }[] }).output[0]?.type, "web_search_call");
 });
 
+test("fails over across credentials on the same web-search provider", async (t) => {
+  const ordinary = createServer(async (req, res) => {
+    for await (const _chunk of req) { /* consume request */ }
+    res.writeHead(500).end();
+  });
+  const search = createServer(async (req, res) => {
+    for await (const _chunk of req) { /* consume request */ }
+    if (req.headers.authorization === "Bearer rejected-search-key") {
+      res.writeHead(403, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { message: "model forbidden" } }));
+      return;
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ output: [{ type: "web_search_call", status: "completed" }] }));
+  });
+  const ordinaryPort = await listen(ordinary);
+  const searchPort = await listen(search);
+  t.after(() => { ordinary.close(); search.close(); });
+  const searchBaseUrl = `http://127.0.0.1:${searchPort}`;
+  const config: GatewayConfig = {
+    port: 0,
+    upstreamBaseUrl: `http://127.0.0.1:${ordinaryPort}`,
+    upstreamApiKey: "ordinary-key",
+    upstreamApiKeys: ["ordinary-key"],
+    upstreamResponsesPath: "/responses",
+    upstreams: [
+      { baseUrl: `http://127.0.0.1:${ordinaryPort}`, responsesPath: "/responses", apiKey: "ordinary-key" },
+      { baseUrl: searchBaseUrl, responsesPath: "/responses", apiKey: "rejected-search-key" },
+      { baseUrl: searchBaseUrl, responsesPath: "/responses", apiKey: "working-search-key" },
+    ],
+    webSearchUpstreamIndex: 2,
+    gatewayKeyHashes: new Set([hashGatewayKey("gw_search_failover")]),
+    requestsPerMinute: 10,
+    maxConcurrentRequests: 2,
+    upstreamTimeoutMs: 5_000,
+  };
+  const gateway = createGatewayServer(config);
+  const gatewayPort = await listen(gateway);
+  t.after(() => gateway.close());
+
+  const response = await fetch(`http://127.0.0.1:${gatewayPort}/responses`, {
+    method: "POST",
+    headers: { authorization: "Bearer gw_search_failover", "content-type": "application/json" },
+    body: JSON.stringify({ model: "gpt-5.6", tools: [{ type: "web_search" }], input: "latest" }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal((await response.json() as { output: { type: string }[] }).output[0]?.type, "web_search_call");
+});
+
 test("routes image generation requests to the verified capable upstream", async (t) => {
   let ordinaryCalls = 0;
   const ordinary = createServer(async (req, res) => {

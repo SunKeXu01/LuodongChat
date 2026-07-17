@@ -20,7 +20,8 @@
     <SolidColorBrush x:Key="SecondarySurfaceBrush" Color="#EAF8F6"/>
     <SolidColorBrush x:Key="SecondaryForegroundBrush" Color="#08786C"/>
     <SolidColorBrush x:Key="SidebarBrush" Color="#F7F7F8"/>
-    <SolidColorBrush x:Key="MessageSurfaceBrush" Color="#F8FAFC"/>
+    <SolidColorBrush x:Key="MessageSurfaceBrush" Color="#F7F9FC"/>
+    <SolidColorBrush x:Key="MessageBorderBrush" Color="#E8EDF3"/>
     <SolidColorBrush x:Key="UserMessageBrush" Color="#E8F2FF"/>
     <SolidColorBrush x:Key="UserMessageBorderBrush" Color="#C7DCFA"/>
     <SolidColorBrush x:Key="VersionPillBrush" Color="#EEF3F8"/>

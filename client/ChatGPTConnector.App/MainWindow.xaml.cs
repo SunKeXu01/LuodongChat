@@ -1177,6 +1177,7 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
     public IReadOnlyList<ChatCitation> Sources => _source.Citations ?? [];
     public bool HasSources => Sources.Count > 0;
     public string TimeText => _source.ClientCreatedAt.ToLocalTime().ToString("HH:mm");
+    public Thickness MessageMargin => IsUser ? new Thickness(0, 0, 0, 28) : new Thickness(0, 0, 0, 44);
     public double BubbleWidth
     {
         get
@@ -1202,6 +1203,7 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
             PropertyChanged?.Invoke(this, new(nameof(IsUser)));
             PropertyChanged?.Invoke(this, new(nameof(HasSources)));
             PropertyChanged?.Invoke(this, new(nameof(TimeText)));
+            PropertyChanged?.Invoke(this, new(nameof(MessageMargin)));
             PropertyChanged?.Invoke(this, new(nameof(BubbleWidth)));
         }
     }
@@ -1211,12 +1213,12 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
         new(source) { Sender = source.Role == "user" ? "我" : "GPT-5.6", Images = images ?? [] };
     private static double CalculateBubbleWidth(string content, bool isUser)
     {
-        if (string.IsNullOrEmpty(content)) return isUser ? 52 : 72;
+        if (string.IsNullOrEmpty(content)) return isUser ? 80 : 72;
         var lines = content.Replace("\r", "").Split('\n');
         var longest = lines.Max(line => line.Sum(character => character > 255 ? 15.5 : 8.2));
         var natural = longest + (isUser ? 38 : 42);
-        if (content.Length > 160 && longest < 360) natural = Math.Max(natural, isUser ? 430 : 620);
-        return Math.Min(isUser ? 700 : 840, Math.Max(isUser ? 48 : 58, natural));
+        if (content.Length > 160 && longest < 360) natural = Math.Max(natural, isUser ? 400 : 620);
+        return Math.Min(isUser ? 560 : 820, Math.Max(isUser ? 80 : 58, natural));
     }
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
 }
