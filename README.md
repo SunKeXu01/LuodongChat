@@ -1,6 +1,6 @@
 # 泺栋chat
 
-泺栋chat 是面向 Windows 10/11 x64 与 Android 10+ 的独立 GPT-5.6 对话客户端。用户只需安装泺栋chat并使用邮箱账号登录，无需安装官方 ChatGPT、配置 API 密钥或修改本机 Codex 文件。
+泺栋chat 是以 Windows 10/11 x64 为主要平台的独立 GPT-5.6 对话客户端。用户只需安装泺栋chat并使用邮箱账号登录，无需安装官方 ChatGPT、配置 API 密钥或修改本机 Codex 文件。Android 版本当前暂停维护。
 
 ## 主要功能
 
@@ -9,23 +9,22 @@
 - 无效邮箱不会请求发送验证码
 - GPT-5.6 流式回复，按问题自动联网搜索并展示可点击来源，无需用户配置
 - 在普通对话中直接说“生成一张……图片”即可生图，图片直接显示在回复中并保存在本机
-- 微信式左右消息气泡，消息文字可自由选择和复制
+- 居中的微信式左右消息气泡，支持 Markdown、代码块、可点击链接、逐条复制和重新生成
 - Windows 窗口支持最大化与高 DPI 缩放，长回答可完整滚动和选择
 - Windows 多会话历史仅保存在本机，可从侧栏切换并右键删除
 - 账号在服务端绑定独立内部凭据，密钥不会展示或下发给用户
 - 个人资料支持网名、完整邮箱和头像
 - Windows 系统托盘与客户端自动更新
 - Windows 支持六套内置皮肤（包含护眼绿），登录前后即时切换并记住选择
-- Android 新版检测、哈希校验和系统覆盖安装
 - 不读取、不修改、不映射 `.codex/config.toml`、`auth.json` 或 `CODEX_HOME`
 
 ## 下载
 
 - [OSS 高速下载最新版 Windows 安装程序](https://luodongchat-app.oss-cn-beijing.aliyuncs.com/latest/LuodongChat-Setup.exe)
 - [GitHub Releases（含历史版本）](https://github.com/SunKeXu01/LuodongChat/releases)
-- Android APK 请从 [GitHub Releases](https://github.com/SunKeXu01/LuodongChat/releases/latest) 下载
+- [Android 最后一个稳定版](https://oss.520skx.com/latest/LuodongChat.apk)（暂停维护）
 
-GitHub Release 和 OSS 文件均包含版本号，例如 `LuodongChat-1.14-win-x64-setup.exe`、`LuodongChat-1.14-win-x64-portable.zip` 与 `LuodongChat-1.14-android.apk`，并同时提供 SHA-256 校验文件。OSS 还保留不带版本号的固定地址用于自动更新，并且只存储最新版，不积累历史安装包。
+GitHub Release 和 OSS 文件均包含版本号，例如 `LuodongChat-1.15-win-x64-setup.exe` 与 `LuodongChat-1.15-win-x64-portable.zip`，并同时提供 SHA-256 校验文件。OSS 还保留不带版本号的固定地址用于自动更新，并且只存储最新版，不积累历史安装包。Android 当前暂停维护，保留最后一个稳定版的固定下载地址。
 
 当前 Windows 版尚未进行代码签名。如果系统显示“Windows 已保护你的电脑”，请确认安装包来自本仓库或上述下载地址，然后点击“更多信息”→“仍要运行”。Android 版使用固定发布证书签名，更新时会覆盖旧版本并保留账号数据。
 
@@ -41,13 +40,13 @@ GitHub Release 和 OSS 文件均包含版本号，例如 `LuodongChat-1.14-win-x
 
 安装版只在所选的 `LuodongChat` 目录中存放程序和数据，目录内包含 `Uninstall.exe`，并为当前用户创建桌面快捷方式；卸载时会自动删除该快捷方式。ZIP 版解压即用，登录状态、日志、对话历史与更新缓存统一保存在解压目录下的 `data` 子目录。对话正文不会保存在泺栋chat服务器。程序不会把运行数据写入其他用户目录。
 
-## Android 使用方式
+## Android 历史稳定版
 
-Android 版采用 Kotlin 与 Jetpack Compose，登录账号后可直接流式对话并自动使用联网搜索。消息支持长按选择复制，搜索来源可直接点击；顶部同时提供“复制当前对话”按钮。当前阶段不提供历史记录列表。发现新版时，登录页和聊天页都会显示更新提醒，下载并校验 APK 后交由 Android 系统覆盖安装。
+Android 历史稳定版采用 Kotlin 与 Jetpack Compose，登录账号后可直接流式对话并自动使用联网搜索。该版本当前暂停维护，后续恢复开发时再继续发布新版 APK。
 
 ## 自动更新
 
-Windows 与 Android 客户端启动时都会自动检查新版本。Windows 在后台限速下载并校验 SHA-256，下载完成后才询问是否更新；选择暂不更新后，下次启动再次询问。安装版通过新版安装程序在原目录覆盖升级，ZIP 便携版原地替换主程序；两者均保留 `data`。Android 由系统安装器覆盖旧版本。
+Windows 客户端启动时会自动检查新版本，在后台限速下载并校验 SHA-256，下载完成后才询问是否更新；选择暂不更新后，下次启动再次询问。安装版通过新版安装程序在原目录覆盖升级，ZIP 便携版原地替换主程序；两者均保留 `data`。
 
 ## 服务信息
 

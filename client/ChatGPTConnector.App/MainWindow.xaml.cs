@@ -9,6 +9,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using System.Windows.Automation;
 using System.Collections.ObjectModel;
+using System.Windows.Data;
 using ChatGPTConnector.Core;
 using Microsoft.Win32;
 using Application = System.Windows.Application;
@@ -28,6 +29,7 @@ public partial class MainWindow : Window
     private readonly LocalConversationStore _conversationStore = LocalConversationStore.ForApplicationDirectory();
     private readonly ObservableCollection<ChatDisplayMessage> _chatMessages = [];
     private readonly ObservableCollection<ConversationListItem> _conversations = [];
+    private readonly ICollectionView _conversationView;
     private AccountSession? _session;
     private LocalConversation? _currentConversation;
     private TrayIconService? _trayIcon;
@@ -71,7 +73,10 @@ public partial class MainWindow : Window
         }
         UpdateThemeButton();
         ChatMessagesItems.ItemsSource = _chatMessages;
-        ConversationsList.ItemsSource = _conversations;
+        _conversationView = CollectionViewSource.GetDefaultView(_conversations);
+        _conversationView.Filter = FilterConversation;
+        _conversationView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(ConversationListItem.DateGroup)));
+        ConversationsList.ItemsSource = _conversationView;
         FitToWorkingArea();
         InitializeTrayIcon();
         Closing += MainWindow_OnClosing;
@@ -469,6 +474,13 @@ public partial class MainWindow : Window
         ChatNotice.Text = "";
     }
 
+    private bool FilterConversation(object candidate) => candidate is ConversationListItem item
+        && (string.IsNullOrWhiteSpace(ConversationSearchInput.Text)
+            || item.Title.Contains(ConversationSearchInput.Text.Trim(), StringComparison.CurrentCultureIgnoreCase));
+
+    private void ConversationSearchInput_OnTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) =>
+        _conversationView?.Refresh();
+
     private void NewChatButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (_chatCancellation is not null) return;
@@ -485,7 +497,13 @@ public partial class MainWindow : Window
 
     private async void DeleteConversationMenuItem_OnClick(object sender, RoutedEventArgs e)
     {
-        if (_session is null || _chatCancellation is not null || sender is not System.Windows.Controls.MenuItem { CommandParameter: ConversationListItem item }) return;
+        if (sender is not System.Windows.Controls.MenuItem { CommandParameter: ConversationListItem item }) return;
+        await DeleteConversationAsync(item);
+    }
+
+    private async Task DeleteConversationAsync(ConversationListItem item)
+    {
+        if (_session is null || _chatCancellation is not null) return;
         if (MessageBox.Show($"确定删除本机对话“{item.Title}”吗？此操作不会影响服务器，因为聊天内容从未上传。", "删除本地对话", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         await _conversationStore.DeleteAsync(_session.Profile.Id, item.Conversation.Id);
         var index = _conversations.IndexOf(item);
@@ -496,6 +514,22 @@ public partial class MainWindow : Window
             else ConversationsList.SelectedIndex = Math.Min(index, _conversations.Count - 1);
         }
         ChatNotice.Text = "本地对话已删除";
+    }
+
+    private async void RenameConversationMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_session is null || _chatCancellation is not null
+            || sender is not System.Windows.Controls.MenuItem { CommandParameter: ConversationListItem item }) return;
+        var title = PromptForText("重命名会话", "输入新的会话名称", item.Title);
+        if (string.IsNullOrWhiteSpace(title)) return;
+        var renamed = item.Conversation with { Title = title.Trim()[..Math.Min(title.Trim().Length, 60)], UpdatedAt = DateTimeOffset.UtcNow };
+        await _conversationStore.SaveAsync(_session.Profile.Id, renamed);
+        var index = _conversations.IndexOf(item);
+        var replacement = ConversationListItem.From(renamed);
+        _conversations[index] = replacement;
+        if (_currentConversation?.Id == renamed.Id) _currentConversation = renamed;
+        ConversationsList.SelectedItem = replacement;
+        ChatNotice.Text = "会话已重命名";
     }
 
     private void ShowConversation(LocalConversation? conversation)
@@ -516,6 +550,87 @@ public partial class MainWindow : Window
         ChatNotice.Text = "当前对话已复制到剪贴板";
     }
 
+    private void CopyMessageButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button { Tag: ChatDisplayMessage message }) return;
+        Clipboard.SetText(message.Content);
+        ChatNotice.Text = "消息已复制到剪贴板";
+    }
+
+    private async void RegenerateMessageButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_chatCancellation is not null || _currentConversation is null
+            || sender is not System.Windows.Controls.Button { Tag: ChatDisplayMessage message }) return;
+        var index = _chatMessages.IndexOf(message);
+        if (index != _chatMessages.Count - 1)
+        {
+            ChatNotice.Text = "目前仅支持重新生成最后一条回复";
+            return;
+        }
+        var userMessage = _chatMessages.Take(Math.Max(0, index)).LastOrDefault(item => item.IsUser);
+        if (userMessage is null || string.IsNullOrWhiteSpace(userMessage.Content)) return;
+        var removedIds = new HashSet<string>([userMessage.Source.Id, message.Source.Id]);
+        _currentConversation = _currentConversation with
+        {
+            Messages = _currentConversation.Messages.Where(item => !removedIds.Contains(item.Id)).ToArray(),
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        _chatMessages.Remove(message);
+        _chatMessages.Remove(userMessage);
+        await SaveCurrentConversationAsync(CancellationToken.None);
+        ChatInput.Text = userMessage.Content;
+        ChatNotice.Text = "正在根据上一条问题重新生成";
+        await SendChatAsync();
+    }
+
+    private void RateMessageButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button button) return;
+        ChatNotice.Text = button.Content?.ToString() == "赞" ? "感谢你的反馈" : "已记录反馈，我们会继续改进";
+    }
+
+    private void ToggleSourcesButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button { Tag: ChatDisplayMessage message }) return;
+        message.SourcesVisibility = message.SourcesVisibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void ChatMoreButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (ChatMoreButton.ContextMenu is null) return;
+        ChatMoreButton.ContextMenu.PlacementTarget = ChatMoreButton;
+        ChatMoreButton.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        ChatMoreButton.ContextMenu.IsOpen = true;
+    }
+
+    private void ExportConversationMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_chatMessages.Count == 0) return;
+        var dialog = new SaveFileDialog { Title = "导出当前对话", FileName = $"{_currentConversation?.Title ?? "泺栋 Chat 对话"}.md", Filter = "Markdown 文件|*.md|文本文件|*.txt", DefaultExt = ".md" };
+        if (dialog.ShowDialog() != true) return;
+        var content = string.Join(Environment.NewLine + Environment.NewLine, _chatMessages.Select(message => $"## {message.Sender}\n\n{message.Content}"));
+        File.WriteAllText(dialog.FileName, content);
+        ChatNotice.Text = $"对话已导出到：{dialog.FileName}";
+    }
+
+    private async void ClearConversationMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_session is null || _currentConversation is null || _chatCancellation is not null) return;
+        if (MessageBox.Show("确定清空当前对话内容吗？", "清空对话", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        _currentConversation = _currentConversation with { Messages = [], UpdatedAt = DateTimeOffset.UtcNow };
+        _chatMessages.Clear();
+        await SaveCurrentConversationAsync(CancellationToken.None);
+        ChatNotice.Text = "当前对话已清空";
+    }
+
+    private async void DeleteCurrentConversationMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_currentConversation is null) return;
+        var item = _conversations.FirstOrDefault(candidate => candidate.Conversation.Id == _currentConversation.Id);
+        if (item is null) return;
+        await DeleteConversationAsync(item);
+    }
+
     private async void ChatSendButton_OnClick(object sender, RoutedEventArgs e) => await SendChatAsync();
 
     private async void ChatInput_OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -526,6 +641,9 @@ public partial class MainWindow : Window
         await SendChatAsync();
     }
 
+    private void ChatInput_OnTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) =>
+        ChatSendButton.IsEnabled = _chatCancellation is null && !string.IsNullOrWhiteSpace(ChatInput.Text);
+
     private async Task SendChatAsync()
     {
         if (_session is null || _chatCancellation is not null) return;
@@ -535,6 +653,7 @@ public partial class MainWindow : Window
         var cancellationToken = _chatCancellation.Token;
         ChatSendButton.IsEnabled = false;
         StopGenerationButton.Visibility = Visibility.Visible;
+        NetworkStatusText.Text = "正在联网和生成…";
         try
         {
             var now = DateTimeOffset.UtcNow;
@@ -580,6 +699,7 @@ public partial class MainWindow : Window
                 await SaveCurrentConversationAsync(cancellationToken);
                 ChatNotice.Text = result.WebSearchUnavailable
                     ? "当前上游暂不支持联网搜索，本次已自动使用普通对话。" : "";
+                NetworkStatusText.Text = result.WebSearchUnavailable ? "联网不可用 · 可重试" : "联网可用";
                 ScrollChatToEnd();
             }
             catch (OperationCanceledException)
@@ -593,18 +713,20 @@ public partial class MainWindow : Window
                     await SaveCurrentConversationAsync(CancellationToken.None);
                 }
                 ChatNotice.Text = "已停止生成";
+                NetworkStatusText.Text = "联网可用";
             }
             catch (Exception error)
             {
                 _chatMessages.Remove(display);
                 ChatNotice.Text = $"发送失败：{error.Message}";
+                NetworkStatusText.Text = "连接失败 · 请重试";
             }
         }
         finally
         {
             _chatCancellation.Dispose();
             _chatCancellation = null;
-            ChatSendButton.IsEnabled = true;
+            ChatSendButton.IsEnabled = !string.IsNullOrWhiteSpace(ChatInput.Text);
             StopGenerationButton.Visibility = Visibility.Collapsed;
             ChatInput.Focus();
         }
@@ -690,6 +812,9 @@ public partial class MainWindow : Window
         ConversationsList.SelectedItem = replacement;
     }
 
+    private void ProfileSidebarButton_OnClick(object sender, RoutedEventArgs e) => AccountPanel.SelectedIndex = 1;
+    private void BackToChatButton_OnClick(object sender, RoutedEventArgs e) => AccountPanel.SelectedIndex = 0;
+
     private void StopGenerationButton_OnClick(object sender, RoutedEventArgs e) => _chatCancellation?.Cancel();
 
     private void ShowLogin()
@@ -716,7 +841,32 @@ public partial class MainWindow : Window
         if (_session is not null) { _session = _session with { Profile = profile }; _sessionStore.Save(_session); }
         ProfileEmailText.Text = profile.Email;
         NicknameInput.Text = profile.Nickname;
+        SidebarProfileName.Text = string.IsNullOrWhiteSpace(profile.Nickname) ? profile.Email : profile.Nickname;
         AvatarImage.Source = DecodeAvatar(profile.AvatarBase64);
+    }
+
+    private string? PromptForText(string title, string message, string initialValue)
+    {
+        var input = new System.Windows.Controls.TextBox { Text = initialValue, Height = 46, MaxLength = 60, Margin = new Thickness(0, 8, 0, 18) };
+        input.SelectAll();
+        var cancel = new System.Windows.Controls.Button { Content = "取消", Style = (Style)FindResource("SecondaryButton"), Width = 82, Margin = new Thickness(0, 0, 8, 0) };
+        var confirm = new System.Windows.Controls.Button { Content = "保存", Width = 82 };
+        var actions = new System.Windows.Controls.StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        actions.Children.Add(cancel); actions.Children.Add(confirm);
+        var panel = new System.Windows.Controls.StackPanel { Margin = new Thickness(26) };
+        panel.Children.Add(new System.Windows.Controls.TextBlock { Text = message, FontSize = 15, FontWeight = FontWeights.SemiBold });
+        panel.Children.Add(input); panel.Children.Add(actions);
+        var dialog = new Window
+        {
+            Title = title, Owner = this, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Width = 430, Height = 210, MinWidth = 380, MinHeight = 200, ResizeMode = ResizeMode.NoResize,
+            Content = panel, ShowInTaskbar = false,
+        };
+        cancel.Click += (_, _) => dialog.DialogResult = false;
+        confirm.Click += (_, _) => { if (!string.IsNullOrWhiteSpace(input.Text)) dialog.DialogResult = true; };
+        input.KeyDown += (_, args) => { if (args.Key == System.Windows.Input.Key.Enter && !string.IsNullOrWhiteSpace(input.Text)) dialog.DialogResult = true; };
+        dialog.Loaded += (_, _) => input.Focus();
+        return dialog.ShowDialog() == true ? input.Text : null;
     }
 
     private static ImageSource? DecodeAvatar(string? base64)
@@ -855,6 +1005,10 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
     public string Sender { get; init; } = "";
     public bool IsUser => _source.Role == "user";
     public IReadOnlyList<ChatCitation> Sources => _source.Citations ?? [];
+    public bool HasSources => Sources.Count > 0;
+    public string TimeText => _source.ClientCreatedAt.ToLocalTime().ToString("HH:mm");
+    private Visibility _sourcesVisibility = Visibility.Collapsed;
+    public Visibility SourcesVisibility { get => _sourcesVisibility; set { if (_sourcesVisibility == value) return; _sourcesVisibility = value; PropertyChanged?.Invoke(this, new(nameof(SourcesVisibility))); } }
     private IReadOnlyList<ChatDisplayImage> _images = [];
     public IReadOnlyList<ChatDisplayImage> Images { get => _images; set { _images = value; PropertyChanged?.Invoke(this, new(nameof(Images))); } }
     public SyncedChatMessage Source
@@ -866,6 +1020,8 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
             PropertyChanged?.Invoke(this, new(nameof(Source)));
             PropertyChanged?.Invoke(this, new(nameof(Sources)));
             PropertyChanged?.Invoke(this, new(nameof(IsUser)));
+            PropertyChanged?.Invoke(this, new(nameof(HasSources)));
+            PropertyChanged?.Invoke(this, new(nameof(TimeText)));
         }
     }
     public string Content { get => _content; set { if (_content == value) return; _content = value; PropertyChanged?.Invoke(this, new(nameof(Content))); } }
@@ -897,6 +1053,25 @@ public sealed record ChatDisplayImage(string FilePath, ImageSource Source)
 public sealed record ConversationListItem(LocalConversation Conversation)
 {
     public string Title => Conversation.Title;
-    public string UpdatedText => Conversation.UpdatedAt.ToLocalTime().ToString("MM-dd HH:mm");
+    public string UpdatedText
+    {
+        get
+        {
+            var local = Conversation.UpdatedAt.ToLocalTime();
+            var today = DateTimeOffset.Now.Date;
+            if (local.Date == today) return local.ToString("HH:mm");
+            if (local.Date == today.AddDays(-1)) return "昨天";
+            return local.ToString("MM-dd");
+        }
+    }
+    public string DateGroup
+    {
+        get
+        {
+            var date = Conversation.UpdatedAt.ToLocalTime().Date;
+            var today = DateTimeOffset.Now.Date;
+            return date == today ? "今天" : date == today.AddDays(-1) ? "昨天" : "更早";
+        }
+    }
     public static ConversationListItem From(LocalConversation conversation) => new(conversation);
 }
