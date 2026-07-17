@@ -247,7 +247,7 @@
                   <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="GPT-5.6" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/>
                     <Border Margin="12,0,0,0" Padding="9,4" CornerRadius="999" Background="{DynamicResource SecondarySurfaceBrush}">
-                      <StackPanel Orientation="Horizontal"><Ellipse Width="7" Height="7" Fill="{DynamicResource AccentBrush}" Margin="0,0,6,0"/><TextBlock x:Name="NetworkStatusText" Text="联网可用" Foreground="{DynamicResource SecondaryForegroundBrush}" FontSize="12"/></StackPanel>
+                      <StackPanel Orientation="Horizontal"><Ellipse Width="7" Height="7" Fill="{DynamicResource AccentBrush}" Margin="0,0,6,0"/><TextBlock x:Name="NetworkStatusText" Text="联网搜索已开启" Foreground="{DynamicResource SecondaryForegroundBrush}" FontSize="12"/></StackPanel>
                     </Border>
                   </StackPanel>
                   <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -364,7 +364,7 @@
                               ToolTip="仅读取受支持的文本文件；相关内容会发送给 GPT，不会修改本地文件">
                         <TextBlock Text="只读项目上下文" Foreground="{DynamicResource SecondaryForegroundBrush}" FontSize="11"/>
                       </Border>
-                      <Border Padding="8,4" CornerRadius="8" Background="{DynamicResource SecondarySurfaceBrush}"><TextBlock Text="联网自动开启" Foreground="{DynamicResource SecondaryForegroundBrush}" FontSize="12"/></Border>
+                      <Border Padding="8,4" CornerRadius="8" Background="{DynamicResource SecondarySurfaceBrush}"><TextBlock Text="联网搜索默认开启" Foreground="{DynamicResource SecondaryForegroundBrush}" FontSize="12"/></Border>
                       <TextBlock Text="聊天记录仅保存在本机" Foreground="{DynamicResource WeakTextBrush}" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"/>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">

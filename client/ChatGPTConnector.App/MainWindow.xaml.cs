@@ -754,7 +754,7 @@ public partial class MainWindow : Window
         var cancellationToken = _chatCancellation.Token;
         ChatSendButton.IsEnabled = false;
         StopGenerationButton.Visibility = Visibility.Visible;
-        NetworkStatusText.Text = "正在联网和生成…";
+        NetworkStatusText.Text = "正在判断是否需要搜索…";
         try
         {
             var now = DateTimeOffset.UtcNow;
@@ -812,7 +812,9 @@ public partial class MainWindow : Window
                 await SaveCurrentConversationAsync(cancellationToken);
                 ChatNotice.Text = result.WebSearchUnavailable
                     ? "当前上游暂不支持联网搜索，本次已自动使用普通对话。" : "";
-                NetworkStatusText.Text = result.WebSearchUnavailable ? "联网不可用 · 可重试" : "联网可用";
+                NetworkStatusText.Text = result.WebSearchUnavailable
+                    ? "联网不可用 · 可重试"
+                    : result.WebSearchPerformed ? "已联网并检索来源" : "联网搜索已开启 · 本次未调用";
                 ScrollChatToEnd();
             }
             catch (OperationCanceledException)
@@ -826,7 +828,7 @@ public partial class MainWindow : Window
                     await SaveCurrentConversationAsync(CancellationToken.None);
                 }
                 ChatNotice.Text = "已停止生成";
-                NetworkStatusText.Text = "联网可用";
+                NetworkStatusText.Text = "联网搜索已开启";
             }
             catch (Exception error)
             {

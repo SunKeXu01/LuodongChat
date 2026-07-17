@@ -46,8 +46,28 @@ public sealed class ChatSyncClientTests
         Assert.Equal(2, handler.Bodies.Count);
         using var first = JsonDocument.Parse(handler.Bodies[0]);
         Assert.Equal("web_search", first.RootElement.GetProperty("tools")[0].GetProperty("type").GetString());
+        Assert.Equal("medium", first.RootElement.GetProperty("tools")[0].GetProperty("search_context_size").GetString());
         using var second = JsonDocument.Parse(handler.Bodies[1]);
         Assert.False(second.RootElement.TryGetProperty("tools", out _));
+    }
+
+    [Fact]
+    public async Task ReportsOnlyARealWebSearchCallAsPerformed()
+    {
+        var events = """
+            data: {"type":"response.output_item.done","item":{"type":"web_search_call","status":"completed"}}
+
+            data: {"type":"response.completed","response":{"output":[{"type":"web_search_call","status":"completed"},{"type":"message","content":[{"type":"output_text","text":"联网回答","annotations":[{"type":"url_citation","url":"https://example.com/live","title":"实时来源"}]}]}]}}
+
+            data: [DONE]
+
+            """;
+        var result = await new ChatSyncClient(new HttpClient(new CapturingHandler(events))).StreamResponseAsync(
+            new Uri("https://gateway.example"), "usr_test", [], enableWebSearch: true);
+
+        Assert.True(result.WebSearchPerformed);
+        Assert.False(result.WebSearchUnavailable);
+        Assert.Equal(new ChatCitation("实时来源", "https://example.com/live"), Assert.Single(result.Citations));
     }
 
     [Fact]

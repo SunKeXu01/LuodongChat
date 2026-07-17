@@ -7,7 +7,7 @@
 - 邮箱注册、密码登录、验证码登录与密码重置
 - 已注册邮箱再次注册时明确提醒用户直接登录
 - 无效邮箱不会请求发送验证码
-- GPT-5.6 流式回复，按问题自动联网搜索并展示可点击来源，无需用户配置
+- GPT-5.6 流式回复，默认提供 Responses API 联网搜索工具，使用平衡型搜索上下文并展示可点击来源，无需用户配置
 - 在普通对话中直接说“生成一张……图片”即可生图，图片直接显示在回复中并保存在本机
 - 居中的微信式左右消息气泡，支持 Markdown、代码块、可点击链接、逐条复制和重新生成
 - Windows 对话界面采用紧凑侧栏和轻量工具栏，常用操作使用统一矢量图标，侧栏账号区显示用户头像
@@ -26,7 +26,7 @@
 - [GitHub Releases（含历史版本）](https://github.com/SunKeXu01/LuodongChat/releases)
 - [Android 最后一个稳定版](https://oss.520skx.com/latest/LuodongChat.apk)（暂停维护）
 
-GitHub Release 和 OSS 文件均包含版本号，例如 `LuodongChat-1.17-win-x64-setup.exe` 与 `LuodongChat-1.17-win-x64-portable.zip`，并同时提供 SHA-256 校验文件。OSS 还保留不带版本号的固定地址用于自动更新，并且只存储最新版，不积累历史安装包。Android 当前暂停维护，保留最后一个稳定版的固定下载地址。
+GitHub Release 和 OSS 文件均包含版本号，例如 `LuodongChat-1.18-win-x64-setup.exe` 与 `LuodongChat-1.18-win-x64-portable.zip`，并同时提供 SHA-256 校验文件。OSS 还保留不带版本号的固定地址用于自动更新，并且只存储最新版，不积累历史安装包。Android 当前暂停维护，保留最后一个稳定版的固定下载地址。
 
 当前 Windows 版尚未进行代码签名。如果系统显示“Windows 已保护你的电脑”，请确认安装包来自本仓库或上述下载地址，然后点击“更多信息”→“仍要运行”。Android 版使用固定发布证书签名，更新时会覆盖旧版本并保留账号数据。
 

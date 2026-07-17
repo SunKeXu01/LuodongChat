@@ -15,7 +15,7 @@ public sealed record GeneratedChatImage(string RelativePath, string MediaType);
 public sealed record GeneratedImageData(string Base64, string MediaType);
 public sealed record ChatStreamResult(
     string Text, IReadOnlyList<ChatCitation> Citations, IReadOnlyList<GeneratedImageData> Images,
-    bool WebSearchUnavailable = false);
+    bool WebSearchUnavailable = false, bool WebSearchPerformed = false);
 
 public sealed class ChatSyncClient(HttpClient http)
 {
@@ -51,7 +51,7 @@ public sealed class ChatSyncClient(HttpClient http)
         };
         var tools = new List<object>();
         if (enableWebSearch)
-            tools.Add(new { type = "web_search", search_context_size = "low" });
+            tools.Add(new { type = "web_search", search_context_size = "medium" });
         if (enableImageGeneration)
             tools.Add(new { type = "image_generation", action = "generate", size = "auto", quality = "auto" });
         if (tools.Count > 0)
@@ -67,6 +67,7 @@ public sealed class ChatSyncClient(HttpClient http)
         var result = new StringBuilder();
         var citations = new Dictionary<string, ChatCitation>(StringComparer.OrdinalIgnoreCase);
         var images = new List<GeneratedImageData>();
+        var webSearchPerformed = false;
         while (await reader.ReadLineAsync(cancellationToken) is { } line)
         {
             if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
@@ -82,21 +83,34 @@ public sealed class ChatSyncClient(HttpClient http)
                     result.Append(delta);
                     progress?.Report(delta);
                 }
-                if (type.GetString() == "response.completed") ExtractCompletedOutput(root, citations, images);
+                var eventType = type.GetString();
+                if (eventType?.StartsWith("response.web_search_call.", StringComparison.Ordinal) == true)
+                    webSearchPerformed = true;
+                if (root.TryGetProperty("item", out var item)
+                    && item.TryGetProperty("type", out var itemType) && itemType.GetString() == "web_search_call")
+                    webSearchPerformed = true;
+                if (eventType == "response.completed")
+                    webSearchPerformed |= ExtractCompletedOutput(root, citations, images);
             }
             catch (JsonException) { }
         }
-        return new ChatStreamResult(result.ToString(), citations.Values.ToArray(), images);
+        return new ChatStreamResult(result.ToString(), citations.Values.ToArray(), images, WebSearchPerformed: webSearchPerformed);
     }
 
-    private static void ExtractCompletedOutput(
+    private static bool ExtractCompletedOutput(
         JsonElement root, IDictionary<string, ChatCitation> citations, ICollection<GeneratedImageData> images)
     {
         if (!root.TryGetProperty("response", out var response)
-            || !response.TryGetProperty("output", out var output) || output.ValueKind != JsonValueKind.Array) return;
+            || !response.TryGetProperty("output", out var output) || output.ValueKind != JsonValueKind.Array) return false;
+        var webSearchPerformed = false;
         foreach (var item in output.EnumerateArray())
         {
-            if (item.TryGetProperty("type", out var itemType) && itemType.GetString() == "image_generation_call"
+            if (item.TryGetProperty("type", out var itemType) && itemType.GetString() == "web_search_call")
+            {
+                webSearchPerformed = true;
+                continue;
+            }
+            if (item.TryGetProperty("type", out itemType) && itemType.GetString() == "image_generation_call"
                 && item.TryGetProperty("result", out var imageResult)
                 && imageResult.GetString() is { Length: > 0 } base64)
             {
@@ -117,6 +131,7 @@ public sealed class ChatSyncClient(HttpClient http)
                 }
             }
         }
+        return webSearchPerformed;
     }
 
     private static HttpRequestMessage Authorized(HttpMethod method, Uri uri, string token) =>
