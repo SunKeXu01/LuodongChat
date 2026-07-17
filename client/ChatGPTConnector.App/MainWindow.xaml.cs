@@ -391,6 +391,7 @@ public partial class MainWindow : Window
         OceanSkinMenuItem.IsChecked = _theme == AppTheme.Ocean;
         VioletSkinMenuItem.IsChecked = _theme == AppTheme.Violet;
         RoseSkinMenuItem.IsChecked = _theme == AppTheme.Rose;
+        EyeCareSkinMenuItem.IsChecked = _theme == AppTheme.EyeCare;
     }
 
     private async Task CompleteLoginAsync(AccountSession session)

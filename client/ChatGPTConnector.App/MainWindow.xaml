@@ -46,6 +46,7 @@
                 <MenuItem x:Name="OceanSkinMenuItem" Header="静谧海蓝" Tag="Ocean" IsCheckable="True" Click="SkinMenuItem_OnClick"/>
                 <MenuItem x:Name="VioletSkinMenuItem" Header="暮色紫" Tag="Violet" IsCheckable="True" Click="SkinMenuItem_OnClick"/>
                 <MenuItem x:Name="RoseSkinMenuItem" Header="柔雾玫瑰" Tag="Rose" IsCheckable="True" Click="SkinMenuItem_OnClick"/>
+                <MenuItem x:Name="EyeCareSkinMenuItem" Header="护眼绿" Tag="EyeCare" IsCheckable="True" Click="SkinMenuItem_OnClick"/>
               </ContextMenu>
             </Button.ContextMenu>
             <Viewbox Width="18" Height="18">

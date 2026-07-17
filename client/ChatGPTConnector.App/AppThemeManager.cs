@@ -11,7 +11,8 @@ public enum AppTheme
     Dark,
     Ocean,
     Violet,
-    Rose
+    Rose,
+    EyeCare
 }
 
 public static class AppThemeManager
@@ -52,6 +53,7 @@ public static class AppThemeManager
             AppTheme.Ocean => OceanColors,
             AppTheme.Violet => VioletColors,
             AppTheme.Rose => RoseColors,
+            AppTheme.EyeCare => EyeCareColors,
             _ => LightColors,
         };
         foreach (var (key, value) in colors)
@@ -66,6 +68,7 @@ public static class AppThemeManager
         AppTheme.Ocean => "静谧海蓝",
         AppTheme.Violet => "暮色紫",
         AppTheme.Rose => "柔雾玫瑰",
+        AppTheme.EyeCare => "护眼绿",
         _ => "经典浅色",
     };
 
@@ -176,6 +179,21 @@ public static class AppThemeManager
         ["MessageSurfaceBrush"] = "#FCF8F9", ["UserMessageBrush"] = "#F8E7EB",
         ["UserMessageBorderBrush"] = "#EBCBD3", ["ThemeButtonBrush"] = "#F7E9EC",
         ["ThemeIconBrush"] = "#81515D", ["LeftPanelBrush"] = "#402631",
+    });
+
+    private static readonly IReadOnlyDictionary<string, string> EyeCareColors = Merge(LightColors, new Dictionary<string, string>
+    {
+        ["PageBackgroundBrush"] = "#F1F5EC", ["TopBarBackgroundBrush"] = "#FAFCF7",
+        ["SurfaceBrush"] = "#FAFCF7", ["InputBackgroundBrush"] = "#FCFDF9",
+        ["TextBrush"] = "#223127", ["MutedBrush"] = "#647269",
+        ["WeakTextBrush"] = "#89968C", ["BorderBrush"] = "#D6E0D2",
+        ["AccentBrush"] = "#5A8F63", ["BrandBrush"] = "#294A33",
+        ["BrandHoverBrush"] = "#365E42", ["LinkBrush"] = "#477D55",
+        ["SecondarySurfaceBrush"] = "#E3EEE1", ["SecondaryForegroundBrush"] = "#3F704B",
+        ["SidebarBrush"] = "#EDF3E9", ["MessageSurfaceBrush"] = "#F6F9F2",
+        ["UserMessageBrush"] = "#E1ECDA", ["UserMessageBorderBrush"] = "#C7D9BE",
+        ["ThemeButtonBrush"] = "#E5EEE1", ["ThemeIconBrush"] = "#4E6955",
+        ["LeftPanelBrush"] = "#294537",
     });
 
     private static IReadOnlyDictionary<string, string> Merge(
