@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -8,11 +9,91 @@ namespace ChatGPTConnector.Core;
 
 public sealed record LocalToolCall(string CallId, string Name, string Arguments);
 
+public enum WorkspaceAccessMode
+{
+    RequestApproval,
+    RiskBased,
+    FullAccess,
+    Custom,
+}
+
+public enum WorkspacePermissionDecision { Allow, Ask, Deny }
+
+public sealed record WorkspaceCustomPermissions(
+    WorkspacePermissionDecision Read = WorkspacePermissionDecision.Allow,
+    WorkspacePermissionDecision Write = WorkspacePermissionDecision.Ask,
+    WorkspacePermissionDecision Network = WorkspacePermissionDecision.Ask,
+    WorkspacePermissionDecision Destructive = WorkspacePermissionDecision.Ask);
+
+public enum WorkspaceOperationRisk
+{
+    Read,
+    Write,
+    Network,
+    Destructive,
+    System,
+}
+
 public sealed record WorkspaceToolPlan(
     string Name,
     string Summary,
     bool RequiresApproval,
-    IReadOnlyList<string> AffectedPaths);
+    IReadOnlyList<string> AffectedPaths,
+    WorkspaceOperationRisk Risk = WorkspaceOperationRisk.Read,
+    bool AllowsPersistentApproval = true,
+    string? ApprovalBinding = null);
+
+public static class WorkspaceAccessPolicy
+{
+    public static WorkspacePermissionDecision Decide(
+        WorkspaceAccessMode mode,
+        WorkspaceToolPlan plan,
+        WorkspaceCustomPermissions? custom = null) => mode switch
+    {
+        _ when plan.Risk == WorkspaceOperationRisk.System => WorkspacePermissionDecision.Deny,
+        WorkspaceAccessMode.RequestApproval => plan.RequiresApproval
+            ? WorkspacePermissionDecision.Ask : WorkspacePermissionDecision.Allow,
+        // A command can execute project-provided build hooks or interpreters even when its
+        // text looks harmless. Without a separate sandboxed auto-reviewer, ask on every
+        // command miss and let FullAccess remain the user's explicit no-prompt choice.
+        WorkspaceAccessMode.RiskBased => plan.Name is "run_command" or "launch_application"
+            || plan.Risk >= WorkspaceOperationRisk.Destructive
+            ? WorkspacePermissionDecision.Ask : WorkspacePermissionDecision.Allow,
+        WorkspaceAccessMode.FullAccess => WorkspacePermissionDecision.Allow,
+        WorkspaceAccessMode.Custom => CustomDecision(custom ?? new WorkspaceCustomPermissions(), plan.Risk),
+        _ => WorkspacePermissionDecision.Ask,
+    };
+
+    public static bool RequiresApproval(WorkspaceAccessMode mode, WorkspaceToolPlan plan) =>
+        Decide(mode, plan) == WorkspacePermissionDecision.Ask;
+
+    public static string DisplayName(WorkspaceAccessMode mode) => mode switch
+    {
+        WorkspaceAccessMode.RequestApproval => "请求批准",
+        WorkspaceAccessMode.RiskBased => "替我审批",
+        WorkspaceAccessMode.FullAccess => "完全访问",
+        WorkspaceAccessMode.Custom => "自定义",
+        _ => "请求批准",
+    };
+
+    public static string Description(WorkspaceAccessMode mode) => mode switch
+    {
+        WorkspaceAccessMode.RequestApproval => "编辑文件、运行命令或使用互联网时逐次询问",
+        WorkspaceAccessMode.RiskBased => "自动执行常规项目文件操作，运行命令、删除或发布前询问",
+        WorkspaceAccessMode.FullAccess => "不再逐次询问，可访问互联网并执行项目命令",
+        WorkspaceAccessMode.Custom => "分别设置文件读取、写入、联网和危险操作权限",
+        _ => "编辑文件、运行命令或使用互联网时逐次询问",
+    };
+
+    private static WorkspacePermissionDecision CustomDecision(WorkspaceCustomPermissions custom, WorkspaceOperationRisk risk) => risk switch
+    {
+        WorkspaceOperationRisk.Read => custom.Read,
+        WorkspaceOperationRisk.Write => custom.Write,
+        WorkspaceOperationRisk.Network => custom.Network,
+        WorkspaceOperationRisk.Destructive => custom.Destructive,
+        _ => WorkspacePermissionDecision.Deny,
+    };
+}
 
 public sealed class WorkspaceFileTools(string workspaceRoot)
 {
@@ -25,6 +106,8 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
     { ".git", ".svn", ".hg", ".idea", ".vs", "node_modules", "bin", "obj", "dist", "build", "out", "target", "vendor", "coverage" };
     private static readonly HashSet<string> SensitiveDirectories = new(StringComparer.OrdinalIgnoreCase)
     { ".ssh", ".gnupg", ".aws", ".azure", ".kube" };
+    private static readonly HashSet<string> LaunchableOutputDirectories = new(StringComparer.OrdinalIgnoreCase)
+    { "bin", "build", "dist", "out", "target" };
     private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".txt", ".md", ".json", ".jsonl", ".xml", ".html", ".htm", ".css", ".scss", ".less",
@@ -111,7 +194,7 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
             properties = new { path = new { type = "string", description = "相对于项目根目录的路径。" } },
             required = new[] { "path" }, additionalProperties = false,
         }),
-        Function("run_command", "在用户选择的项目目录中运行一条前台开发命令，用于构建、测试、格式化、静态检查或查看版本控制状态。每次执行都必须由用户确认；不要用它删除文件、修改系统设置、提权或发布到远程服务。", new
+        Function("run_command", "在用户选择的项目目录中运行一条前台命令，可用于构建、测试、联网下载或其他项目任务。是否询问由用户选择的访问权限决定；禁止提权和修改关键系统设置。", new
         {
             type = "object",
             properties = new
@@ -122,6 +205,27 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
                 timeout_seconds = new { type = "integer", minimum = 5, maximum = 600, description = "超时时间，5 到 600 秒。" },
             },
             required = new[] { "command", "working_directory", "shell", "timeout_seconds" }, additionalProperties = false,
+        }),
+        Function("launch_application", "启动项目目录中的 Windows EXE 程序并保持运行。只能启动用户所选项目内的程序，启动前受项目权限和用户批准控制。", new
+        {
+            type = "object",
+            properties = new
+            {
+                path = new { type = "string", description = "相对于项目根目录的 .exe 文件路径。" },
+                arguments = new { type = "array", items = new { type = "string" }, maxItems = 32, description = "逐项传递给程序的参数，不要拼接 Shell 命令。" },
+                working_directory = new { type = "string", description = "相对于项目根目录的工作目录；通常使用程序所在目录。" },
+            },
+            required = new[] { "path", "arguments", "working_directory" }, additionalProperties = false,
+        }),
+        Function("list_launched_applications", "列出当前项目中由泺栋 Chat 启动且仍在运行的程序。", new
+        {
+            type = "object", properties = new { }, required = Array.Empty<string>(), additionalProperties = false,
+        }),
+        Function("stop_launched_application", "停止当前项目中由泺栋 Chat 启动的指定程序及其子进程。", new
+        {
+            type = "object",
+            properties = new { process_id = new { type = "integer", minimum = 1, description = "launch_application 或 list_launched_applications 返回的进程 ID。" } },
+            required = new[] { "process_id" }, additionalProperties = false,
         }),
     ];
 
@@ -138,17 +242,30 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
             "replace_in_file" => WritePlan(call.Name, "修改文件", args, "path"),
             "create_directory" => WritePlan(call.Name, "创建目录", args, "path"),
             "move_path" => new WorkspaceToolPlan(call.Name, $"移动或重命名 {Relative(args, "source")} → {Relative(args, "destination")}", true,
-                [Relative(args, "source"), Relative(args, "destination")]),
-            "delete_path" => WritePlan(call.Name, "删除文件或空目录", args, "path"),
+                [Relative(args, "source"), Relative(args, "destination")], WorkspaceOperationRisk.Write),
+            "delete_path" => WritePlan(call.Name, "删除文件或空目录", args, "path") with { Risk = WorkspaceOperationRisk.Destructive },
             "run_command" => CommandPlan(args),
+            "launch_application" => LaunchApplicationPlan(args),
+            "list_launched_applications" => new WorkspaceToolPlan(call.Name, "查看由泺栋 Chat 启动的项目程序", false, [], WorkspaceOperationRisk.Read),
+            "stop_launched_application" => new WorkspaceToolPlan(call.Name,
+                $"停止项目程序 PID {PositiveProcessId(args)}", true, [$"PID {PositiveProcessId(args)}"], WorkspaceOperationRisk.Destructive),
             _ => throw new InvalidOperationException("模型请求了未知的本地工具。"),
         };
     }
 
-    public async Task<string> ExecuteAsync(LocalToolCall call, CancellationToken cancellationToken = default)
+    public async Task<string> ExecuteAsync(
+        LocalToolCall call,
+        CancellationToken cancellationToken = default,
+        WorkspaceToolPlan? approvedPlan = null)
     {
         try
         {
+            if (approvedPlan is not null && call.Name is "run_command" or "launch_application")
+            {
+                var currentPlan = Describe(call);
+                if (!string.Equals(currentPlan.ApprovalBinding, approvedPlan.ApprovalBinding, StringComparison.Ordinal))
+                    throw new UnauthorizedAccessException("批准后执行内容发生变化，操作已停止，请重新确认。");
+            }
             using var document = ParseArguments(call.Arguments);
             var args = document.RootElement;
             var value = call.Name switch
@@ -162,6 +279,9 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
                 "move_path" => MovePath(args),
                 "delete_path" => DeletePath(args),
                 "run_command" => await RunCommandAsync(args, cancellationToken),
+                "launch_application" => LaunchApplication(args),
+                "list_launched_applications" => WorkspaceApplicationRegistry.List(_root),
+                "stop_launched_application" => StopLaunchedApplication(args),
                 _ => throw new InvalidOperationException("未知的本地文件工具。"),
             };
             return JsonSerializer.Serialize(new { ok = true, result = value });
@@ -330,6 +450,7 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
         SanitizeEnvironment(startInfo.Environment);
         using var process = new Process { StartInfo = startInfo };
         if (!process.Start()) throw new InvalidOperationException("无法启动命令进程。");
+        using var containment = CommandProcessContainment.Attach(process);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
         var stdoutTask = ReadBoundedAsync(process.StandardOutput, timeout.Token);
@@ -347,6 +468,7 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
                 stdout = stdout.Text,
                 stderr = stderr.Text,
                 output_truncated = stdout.Truncated || stderr.Truncated,
+                process_containment = containment.Level,
             };
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -361,12 +483,49 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
         }
     }
 
-    private string ResolvePath(string relative, bool mustExist, bool? expectDirectory)
+    private object LaunchApplication(JsonElement args)
+    {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("项目程序启动功能仅支持 Windows。");
+        var relativePath = Relative(args, "path");
+        var executable = ResolvePath(relativePath, mustExist: true, expectDirectory: false, allowBuildOutputs: true);
+        if (!string.Equals(Path.GetExtension(executable), ".exe", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("当前只允许启动项目目录中的 Windows EXE 程序。");
+        if (IsSensitiveFile(executable)) throw new UnauthorizedAccessException("不允许启动敏感路径中的程序。");
+        var workingDirectory = ResolvePath(Relative(args, "working_directory"), mustExist: true, expectDirectory: true, allowBuildOutputs: true);
+        var arguments = ApplicationArguments(args);
+        var startInfo = new ProcessStartInfo(executable)
+        {
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+        };
+        foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
+        SanitizeEnvironment(startInfo.Environment);
+        var launched = WorkspaceApplicationRegistry.Launch(_root, ToRelative(executable), arguments, startInfo);
+        return new
+        {
+            process_id = launched.ProcessId,
+            path = launched.Path,
+            arguments = launched.Arguments,
+            started_at = launched.StartedAt,
+            process_containment = launched.ProcessContainment,
+        };
+    }
+
+    private object StopLaunchedApplication(JsonElement args)
+    {
+        var processId = PositiveProcessId(args);
+        if (!WorkspaceApplicationRegistry.Stop(_root, processId))
+            throw new InvalidOperationException("没有找到当前项目中由泺栋 Chat 启动的该程序。");
+        return new { process_id = processId, stopped = true };
+    }
+
+    private string ResolvePath(string relative, bool mustExist, bool? expectDirectory, bool allowBuildOutputs = false)
     {
         if (Path.IsPathRooted(relative)) throw new UnauthorizedAccessException("只允许使用项目内的相对路径。");
         var normalized = relative.Replace('/', Path.DirectorySeparatorChar).Trim();
         if (normalized.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries)
-            .Any(part => IgnoredDirectories.Contains(part) || SensitiveDirectories.Contains(part)))
+            .Any(part => SensitiveDirectories.Contains(part)
+                || IgnoredDirectories.Contains(part) && !(allowBuildOutputs && LaunchableOutputDirectories.Contains(part))))
             throw new UnauthorizedAccessException("该目录被安全策略排除，不能由 AI 访问。");
         var full = Path.GetFullPath(Path.Combine(_root, normalized));
         if (!IsInsideRoot(full) || string.Equals(full, _root, StringComparison.OrdinalIgnoreCase) && expectDirectory == false)
@@ -452,12 +611,107 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
         return value;
     }
 
-    private static WorkspaceToolPlan CommandPlan(JsonElement args)
+    private WorkspaceToolPlan CommandPlan(JsonElement args)
     {
         var command = Command(args);
         var workingDirectory = Relative(args, "working_directory");
-        return new WorkspaceToolPlan("run_command", $"运行命令：{command}", true,
-            [workingDirectory.Length == 0 ? "项目根目录" : workingDirectory]);
+        var shell = args.GetProperty("shell").GetString() ?? "cmd";
+        var timeoutSeconds = args.GetProperty("timeout_seconds").GetInt32();
+        var scriptBinding = TryCreateScriptBinding(command, workingDirectory);
+        var affectedPaths = new List<string> { workingDirectory.Length == 0 ? "项目根目录" : workingDirectory };
+        if (scriptBinding?.RelativePath is { } scriptPath) affectedPaths.Add("脚本：" + scriptPath);
+        return new WorkspaceToolPlan("run_command", $"运行命令（{shell}，最长 {timeoutSeconds} 秒）：{command}", true,
+            affectedPaths, ClassifyCommandRisk(command),
+            AllowsPersistentApproval: !RequiresStrictInlineApproval(command),
+            ApprovalBinding: scriptBinding?.Binding);
+    }
+
+    private WorkspaceToolPlan LaunchApplicationPlan(JsonElement args)
+    {
+        var path = Relative(args, "path");
+        var workingDirectory = Relative(args, "working_directory");
+        var arguments = ApplicationArguments(args);
+        var executable = ResolvePath(path, mustExist: true, expectDirectory: false, allowBuildOutputs: true);
+        _ = ResolvePath(workingDirectory, mustExist: true, expectDirectory: true, allowBuildOutputs: true);
+        if (!string.Equals(Path.GetExtension(executable), ".exe", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("当前只允许启动项目目录中的 Windows EXE 程序。");
+        using var stream = File.OpenRead(executable);
+        var executableHash = Convert.ToHexString(SHA256.HashData(stream));
+        var renderedArguments = arguments.Count == 0 ? "无参数" : string.Join(" ", arguments);
+        return new WorkspaceToolPlan("launch_application",
+            $"启动项目程序：{path}（参数：{renderedArguments}）", true,
+            [path, workingDirectory.Length == 0 ? "项目根目录" : workingDirectory], WorkspaceOperationRisk.Write,
+            ApprovalBinding: $"executable|{ToRelative(executable)}|{executableHash}");
+    }
+
+    private sealed record ScriptBinding(string RelativePath, string Binding);
+
+    private ScriptBinding? TryCreateScriptBinding(string command, string workingDirectory)
+    {
+        var patterns = new[]
+        {
+            "(?i)\\b(?:powershell|pwsh)(?:\\.exe)?\\b[^\\r\\n]*?-(?:file|f)\\s+(?:\"(?<path>[^\"]+)\"|'(?<path>[^']+)'|(?<path>[^\\s;&|]+))",
+            "(?i)\\b(?:python|python3|node|ruby|perl|php)(?:\\.exe)?\\s+(?:\"(?<path>[^\"]+\\.(?:py|js|mjs|cjs|rb|pl|php))\"|'(?<path>[^']+\\.(?:py|js|mjs|cjs|rb|pl|php))'|(?<path>[^\\s;&|]+\\.(?:py|js|mjs|cjs|rb|pl|php)))",
+            "(?i)(?:^|[;&|]\\s*)(?:call\\s+)?(?:\"(?<path>[^\"]+\\.(?:cmd|bat|ps1))\"|'(?<path>[^']+\\.(?:cmd|bat|ps1))'|(?<path>[^\\s;&|]+\\.(?:cmd|bat|ps1)))",
+        };
+        foreach (var pattern in patterns)
+        {
+            var match = Regex.Match(command, pattern, RegexOptions.CultureInvariant);
+            if (!match.Success) continue;
+            var relativeScript = match.Groups["path"].Value.Trim();
+            if (relativeScript.Length == 0 || Path.IsPathRooted(relativeScript)) return null;
+            try
+            {
+                var baseDirectory = ResolvePath(workingDirectory, mustExist: true, expectDirectory: true);
+                var absoluteScript = Path.GetFullPath(Path.Combine(baseDirectory, relativeScript.Replace('/', Path.DirectorySeparatorChar)));
+                if (!IsInsideRoot(absoluteScript) || !File.Exists(absoluteScript) || IsReparsePoint(absoluteScript)) return null;
+                EnsureNoReparsePointEscape(absoluteScript);
+                using var stream = File.OpenRead(absoluteScript);
+                var hash = Convert.ToHexString(SHA256.HashData(stream));
+                var displayPath = ToRelative(absoluteScript);
+                return new ScriptBinding(displayPath, $"script|{displayPath}|{hash}");
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException) { return null; }
+        }
+        return null;
+    }
+
+    private static bool RequiresStrictInlineApproval(string command) => Regex.IsMatch(command,
+        @"(?ix)\b(?:
+          python(?:3)?(?:\.exe)?\s+-(?:c|m)\b |
+          node(?:\.exe)?\s+(?:--eval|-e|-p)\b |
+          ruby(?:\.exe)?\s+-e\b |
+          perl(?:\.exe)?\s+-[eE]\b |
+          php(?:\.exe)?\s+-r\b |
+          lua(?:\.exe)?\s+-e\b |
+          (?:powershell|pwsh)(?:\.exe)?\b[^\r\n]*?-(?:command|encodedcommand|enc)\b |
+          cmd(?:\.exe)?\s+/(?:c|k)\b |
+          mshta(?:\.exe)?\b |
+          rundll32(?:\.exe)?\b |
+          regsvr32(?:\.exe)?\b
+        )", RegexOptions.CultureInvariant);
+
+    private static IReadOnlyList<string> ApplicationArguments(JsonElement args)
+    {
+        var element = args.GetProperty("arguments");
+        if (element.ValueKind != JsonValueKind.Array || element.GetArrayLength() > 32)
+            throw new ArgumentException("程序参数数量无效。");
+        var result = new List<string>();
+        foreach (var item in element.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String) throw new ArgumentException("程序参数必须是文字。");
+            var value = item.GetString() ?? "";
+            if (value.Length > 1_000 || value.IndexOf('\0') >= 0) throw new ArgumentException("程序参数过长或包含无效字符。");
+            result.Add(value);
+        }
+        return result;
+    }
+
+    private static int PositiveProcessId(JsonElement args)
+    {
+        var processId = args.GetProperty("process_id").GetInt32();
+        if (processId <= 0) throw new ArgumentException("进程 ID 无效。");
+        return processId;
     }
 
     private static void ValidateCommand(string command)
@@ -466,15 +720,25 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
         {
             @"(?i)(^|[;&|]\s*)(runas|shutdown|format|diskpart|bcdedit|vssadmin|wbadmin|takeown|icacls|taskkill)(\.exe)?(\s|$)",
             @"(?i)\b(reg(\.exe)?\s+(add|delete|import|restore)|net(\.exe)?\s+(user|localgroup)|sc(\.exe)?\s+(create|delete|config)|stop-process|restart-computer|stop-computer)\b",
-            @"(?i)(^|[;&|]\s*)(del|erase|rd|rmdir|rm|remove-item)(\s|$)",
-            @"(?i)\bgit\s+(push|clean|reset\s+--hard|checkout\s+--|restore\b|remote\s+(add|set-url|remove))",
-            @"(?i)\b(gh|ssh|scp|sftp|ftp|curl|wget)(\.exe)?(\s|$)",
-            @"(?i)\b(invoke-webrequest|invoke-restmethod|start-process\b.*-verb\s+runas|npm\s+publish|dotnet\s+nuget\s+push)\b",
+            @"(?i)\bstart-process\b.*-verb\s+runas\b",
             @"(?i)\b(git\s+config\s+--(global|system)|npm\s+config\s+set|dotnet\s+nuget\s+(add|update|remove)\s+source|setx|schtasks|wmic)\b",
             @"(?i)(powershell|pwsh)(\.exe)?\b.*-(encodedcommand|enc)\b",
         };
         if (blocked.Any(pattern => Regex.IsMatch(command, pattern, RegexOptions.CultureInvariant)))
-            throw new UnauthorizedAccessException("该命令包含提权、系统修改、删除、远程访问或发布操作，已被安全策略阻止。请改用项目文件工具或在系统终端中手动执行。");
+            throw new UnauthorizedAccessException("该命令包含提权或关键系统修改操作，任何访问模式下都不会执行。");
+    }
+
+    private static WorkspaceOperationRisk ClassifyCommandRisk(string command)
+    {
+        if (Regex.IsMatch(command,
+                @"(?i)(^|[;&|]\s*)(del|erase|rd|rmdir|rm|remove-item)(\s|$)|\bgit\s+(push|clean|reset\s+--hard|checkout\s+--|restore\b|remote\s+(add|set-url|remove))|\b(npm\s+publish|dotnet\s+nuget\s+push)\b",
+                RegexOptions.CultureInvariant))
+            return WorkspaceOperationRisk.Destructive;
+        if (Regex.IsMatch(command,
+                @"(?i)\b(gh|ssh|scp|sftp|ftp|curl|wget)(\.exe)?(\s|$)|\b(invoke-webrequest|invoke-restmethod)\b|\bgit\s+(clone|fetch|pull|ls-remote|submodule\s+(update|add))\b|\b(npm|pnpm|yarn|pip|pip3)\s+(install|add|update)\b|\bdotnet\s+restore\b",
+                RegexOptions.CultureInvariant))
+            return WorkspaceOperationRisk.Network;
+        return WorkspaceOperationRisk.Write;
     }
 
     private static ProcessStartInfo CreateShellStartInfo(string shell, string command, string workingDirectory)
@@ -577,7 +841,7 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
     private static WorkspaceToolPlan WritePlan(string name, string action, JsonElement args, string property)
     {
         var path = Relative(args, property);
-        return new WorkspaceToolPlan(name, $"{action}：{path}", true, [path]);
+        return new WorkspaceToolPlan(name, $"{action}：{path}", true, [path], WorkspaceOperationRisk.Write);
     }
 
     private static object Function(string name, string description, object parameters) => new { type = "function", name, description, parameters, strict = true };

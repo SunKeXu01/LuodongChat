@@ -7,6 +7,7 @@ export interface UpstreamCredential {
   apiKey: string;
   baseUrl?: string;
   responsesPath?: string;
+  model?: string;
   supportsWebSearch?: boolean;
   supportsImageGeneration?: boolean;
 }
@@ -36,14 +37,15 @@ export class UpstreamPool {
   ) {
     if (credentials.length === 0) throw new Error("At least one upstream credential is required");
     this.credentials = credentials.map((credential) => {
-      const { apiKey, baseUrl, responsesPath, supportsWebSearch, supportsImageGeneration } = typeof credential === "string"
-        ? { apiKey: credential, baseUrl: undefined, responsesPath: undefined, supportsWebSearch: false, supportsImageGeneration: false }
+      const { apiKey, baseUrl, responsesPath, model, supportsWebSearch, supportsImageGeneration } = typeof credential === "string"
+        ? { apiKey: credential, baseUrl: undefined, responsesPath: undefined, model: undefined, supportsWebSearch: false, supportsImageGeneration: false }
         : credential;
       return {
       id: createHash("sha256").update(apiKey).digest("hex"),
       apiKey,
       baseUrl,
       responsesPath,
+      model,
       supportsWebSearch: supportsWebSearch ?? false,
       supportsImageGeneration: supportsImageGeneration ?? false,
       health: "healthy",
@@ -80,6 +82,7 @@ export class UpstreamPool {
       apiKey: selected.apiKey,
       baseUrl: selected.baseUrl,
       responsesPath: selected.responsesPath,
+      model: selected.model,
       supportsWebSearch: selected.supportsWebSearch,
       supportsImageGeneration: selected.supportsImageGeneration,
     };

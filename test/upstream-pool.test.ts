@@ -71,3 +71,15 @@ test("routes image generation only to a capable upstream", () => {
   assert.equal(selected.apiKey, "images");
   pool.recordSuccess(selected.id);
 });
+
+test("returns a provider model override without exposing it in snapshots", () => {
+  const pool = new UpstreamPool([{
+    apiKey: "secret",
+    model: "qwen3-coder",
+  }]);
+  const selected = pool.acquire();
+  assert.ok(selected);
+  assert.equal(selected.model, "qwen3-coder");
+  assert.equal(JSON.stringify(pool.snapshot()).includes("qwen3-coder"), false);
+  pool.recordSuccess(selected.id);
+});

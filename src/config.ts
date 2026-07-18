@@ -32,6 +32,16 @@ export interface UpstreamEndpoint {
   baseUrl: string;
   responsesPath: string;
   apiKey: string;
+  model?: string;
+  supportsWebSearch?: boolean;
+  supportsImageGeneration?: boolean;
+}
+
+function optionalBoolean(value: unknown, name: string): boolean | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string" && /^(true|false)$/i.test(value.trim())) return value.trim().toLowerCase() === "true";
+  throw new Error(`${name} must be true or false`);
 }
 
 function parseAdditionalUpstreams(raw: string | undefined): UpstreamEndpoint[] {
@@ -46,13 +56,23 @@ function parseAdditionalUpstreams(raw: string | undefined): UpstreamEndpoint[] {
     const baseUrl = typeof record.baseUrl === "string" ? record.baseUrl.trim().replace(/\/$/, "") : "";
     const responsesPath = typeof record.responsesPath === "string" ? record.responsesPath.trim() : "/v1/responses";
     const apiKey = typeof record.apiKey === "string" ? record.apiKey.trim() : "";
+    const model = typeof record.model === "string" ? record.model.trim() : undefined;
+    const supportsWebSearch = optionalBoolean(record.supportsWebSearch, `UPSTREAM_ENDPOINTS_JSON[${index}].supportsWebSearch`);
+    const supportsImageGeneration = optionalBoolean(record.supportsImageGeneration, `UPSTREAM_ENDPOINTS_JSON[${index}].supportsImageGeneration`);
     let parsedUrl: URL;
     try { parsedUrl = new URL(baseUrl); }
     catch { throw new Error(`UPSTREAM_ENDPOINTS_JSON[${index}].baseUrl must be an absolute URL`); }
     if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error(`UPSTREAM_ENDPOINTS_JSON[${index}].baseUrl must use HTTP or HTTPS`);
     if (!responsesPath.startsWith("/")) throw new Error(`UPSTREAM_ENDPOINTS_JSON[${index}].responsesPath must start with /`);
     if (!apiKey) throw new Error(`UPSTREAM_ENDPOINTS_JSON[${index}].apiKey is required`);
-    return { baseUrl, responsesPath, apiKey };
+    return {
+      baseUrl,
+      responsesPath,
+      apiKey,
+      ...(model ? { model } : {}),
+      ...(supportsWebSearch === undefined ? {} : { supportsWebSearch }),
+      ...(supportsImageGeneration === undefined ? {} : { supportsImageGeneration }),
+    };
   });
 }
 
@@ -76,8 +96,18 @@ export function loadConfig(): GatewayConfig {
     .map((value) => value.trim())
     .filter(Boolean);
   if (!upstreamResponsesPath.startsWith("/")) throw new Error("UPSTREAM_RESPONSES_PATH must start with /");
-  const upstreams = [
-    ...upstreamApiKeys.map((apiKey) => ({ baseUrl: upstreamBaseUrl, responsesPath: upstreamResponsesPath, apiKey })),
+  const primaryModel = process.env.UPSTREAM_MODEL?.trim();
+  const primarySupportsWebSearch = optionalBoolean(process.env.UPSTREAM_SUPPORTS_WEB_SEARCH, "UPSTREAM_SUPPORTS_WEB_SEARCH");
+  const primarySupportsImageGeneration = optionalBoolean(process.env.UPSTREAM_SUPPORTS_IMAGE_GENERATION, "UPSTREAM_SUPPORTS_IMAGE_GENERATION");
+  const upstreams: UpstreamEndpoint[] = [
+    ...upstreamApiKeys.map((apiKey) => ({
+      baseUrl: upstreamBaseUrl,
+      responsesPath: upstreamResponsesPath,
+      apiKey,
+      ...(primaryModel ? { model: primaryModel } : {}),
+      ...(primarySupportsWebSearch === undefined ? {} : { supportsWebSearch: primarySupportsWebSearch }),
+      ...(primarySupportsImageGeneration === undefined ? {} : { supportsImageGeneration: primarySupportsImageGeneration }),
+    })),
     ...parseAdditionalUpstreams(process.env.UPSTREAM_ENDPOINTS_JSON),
   ];
   const configuredWebSearchIndex = process.env.WEB_SEARCH_UPSTREAM_INDEX;

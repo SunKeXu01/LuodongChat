@@ -517,6 +517,49 @@ test("fails over between credentials hosted on different upstream endpoints", as
   assert.deepEqual(await response.json(), { id: "resp_secondary", status: "completed" });
 });
 
+test("applies the selected upstream model without changing the client request contract", async (t) => {
+  const upstream = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString()) as { model?: string; input?: string };
+    assert.equal(body.model, "qwen3-coder");
+    assert.equal(body.input, "hello");
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ id: "resp_model_override", status: "completed" }));
+  });
+  const upstreamPort = await listen(upstream);
+  t.after(() => upstream.close());
+
+  const config: GatewayConfig = {
+    port: 0,
+    upstreamBaseUrl: `http://127.0.0.1:${upstreamPort}`,
+    upstreamApiKey: "model-key",
+    upstreamApiKeys: ["model-key"],
+    upstreamResponsesPath: "/responses",
+    upstreams: [{
+      baseUrl: `http://127.0.0.1:${upstreamPort}`,
+      responsesPath: "/responses",
+      apiKey: "model-key",
+      model: "qwen3-coder",
+    }],
+    gatewayKeyHashes: new Set([hashGatewayKey("gw_model")]),
+    requestsPerMinute: 10,
+    maxConcurrentRequests: 2,
+    upstreamTimeoutMs: 5_000,
+  };
+  const gateway = createGatewayServer(config);
+  const gatewayPort = await listen(gateway);
+  t.after(() => gateway.close());
+
+  const response = await fetch(`http://127.0.0.1:${gatewayPort}/responses`, {
+    method: "POST",
+    headers: { authorization: "Bearer gw_model", "content-type": "application/json" },
+    body: JSON.stringify({ model: "gpt-5.6-sol", input: "hello" }),
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { id: "resp_model_override", status: "completed" });
+});
+
 test("routes web search requests to the verified capable upstream", async (t) => {
   let ordinaryCalls = 0;
   const ordinary = createServer(async (req, res) => {

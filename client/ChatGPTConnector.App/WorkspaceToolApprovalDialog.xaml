@@ -1,0 +1,34 @@
+<Window x:Class="ChatGPTConnector.App.WorkspaceToolApprovalDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="确认项目操作" Width="720" Height="430" MinWidth="640" MinHeight="380"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
+        Background="{DynamicResource PageBackgroundBrush}" Foreground="{DynamicResource TextBrush}"
+        ShowInTaskbar="False">
+  <Grid Margin="28">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
+    <StackPanel>
+      <TextBlock Text="GPT 请求执行本地操作" FontSize="24" FontWeight="SemiBold"/>
+      <TextBlock Text="请确认操作内容和影响范围。" Margin="0,7,0,0" FontSize="14" Foreground="{DynamicResource MutedBrush}"/>
+    </StackPanel>
+    <Border Grid.Row="1" Margin="0,22,0,14" Padding="16" CornerRadius="12"
+            Background="{DynamicResource SecondarySurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+      <StackPanel>
+        <TextBlock x:Name="OperationText" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"/>
+        <TextBlock x:Name="AffectedPathsText" Margin="0,10,0,0" FontSize="13" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
+      </StackPanel>
+    </Border>
+    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+      <TextBlock x:Name="WarningText" FontSize="13" LineHeight="21" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
+    </ScrollViewer>
+    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,22,0,0">
+      <Button Content="拒绝" MinWidth="82" Height="40" Margin="0,0,10,0" Style="{StaticResource SecondaryButton}" Click="RejectButton_OnClick"/>
+      <Button Content="仅本次允许" MinWidth="112" Height="40" Margin="0,0,10,0" Style="{StaticResource SecondaryButton}" Click="AllowOnceButton_OnClick"/>
+      <Button Content="本次会话允许" MinWidth="126" Height="40" Click="AllowSessionButton_OnClick"/>
+      <Button x:Name="AllowAlwaysButton" Content="始终允许此命令" MinWidth="142" Height="40" Margin="10,0,0,0"
+              Click="AllowAlwaysButton_OnClick"/>
+    </StackPanel>
+  </Grid>
+</Window>

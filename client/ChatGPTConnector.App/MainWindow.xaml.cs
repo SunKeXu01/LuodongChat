@@ -3,7 +3,9 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Security.Principal;
+using System.Text;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -31,6 +33,8 @@ public partial class MainWindow : Window
     private readonly LocalConversationStore _conversationStore = LocalConversationStore.ForApplicationDirectory();
     private readonly ProjectContextBuilder _projectContextBuilder = new();
     private readonly RecentProjectStore _recentProjectStore = RecentProjectStore.ForApplicationDirectory();
+    private readonly WorkspaceAccessSettingsStore _workspaceAccessStore = WorkspaceAccessSettingsStore.ForApplicationDirectory();
+    private readonly WorkspaceAuditStore _workspaceAuditStore = WorkspaceAuditStore.ForApplicationDirectory();
     private readonly ObservableCollection<ChatDisplayMessage> _chatMessages = [];
     private readonly ObservableCollection<ChatQuestionAnchor> _questionAnchors = [];
     private readonly ObservableCollection<ConversationListItem> _conversations = [];
@@ -51,6 +55,10 @@ public partial class MainWindow : Window
     private ClientUpdate? _availableUpdate;
     private AppTheme _theme;
     private string? _selectedProjectPath;
+    private WorkspaceAccessMode _workspaceAccessMode;
+    private WorkspaceCustomPermissions _workspaceCustomPermissions;
+    private readonly HashSet<string> _sessionApprovedWorkspaceOperations = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _alwaysAllowedWorkspaceCommands = new(StringComparer.Ordinal);
     private bool _webSearchEnabled = true;
     private readonly AttachmentComposerController _attachments;
     private CancellationTokenSource? _questionHighlightCancellation;
@@ -78,6 +86,10 @@ public partial class MainWindow : Window
     internal MainWindow(bool skipStartupChecks, AppTheme initialTheme = AppTheme.Light)
     {
         _theme = initialTheme;
+        var accessSettings = _workspaceAccessStore.Load();
+        _workspaceAccessMode = accessSettings.Mode;
+        _workspaceCustomPermissions = accessSettings.Custom;
+        _alwaysAllowedWorkspaceCommands.UnionWith(accessSettings.AlwaysAllowedCommandHashes ?? []);
         InitializeComponent();
         _attachments = new AttachmentComposerController(_attachmentClient, GatewayUri, () => _session?.AccessToken);
         AttachmentPreviewItems.ItemsSource = _attachments.Items;
@@ -584,7 +596,9 @@ public partial class MainWindow : Window
         ShowConversation(null);
         ApplyProjectSelection(projectPath);
         if (_selectedProjectPath is not null) _recentProjectStore.Remember(_selectedProjectPath);
-        ChatNotice.Text = _selectedProjectPath is null ? "已新建本地对话" : $"已在项目“{Path.GetFileName(_selectedProjectPath)}”中新建对话";
+        ChatNotice.Text = _selectedProjectPath is null
+            ? "已新建普通对话。需要管理本机文件或运行程序时，请先选择项目空间。"
+            : $"已在项目“{Path.GetFileName(_selectedProjectPath)}”中新建对话";
         ChatInput.Focus();
     }
 
@@ -743,6 +757,7 @@ public partial class MainWindow : Window
         if (_selectedProjectPath is not null)
         {
             menu.Items.Add(new System.Windows.Controls.Separator());
+            menu.Items.Add(CreateWorkspaceAccessMenu());
             var details = new System.Windows.Controls.MenuItem { Header = "查看项目上下文详情…" };
             details.Click += async (_, _) => await ShowProjectContextDetailsAsync();
             menu.Items.Add(details);
@@ -754,6 +769,90 @@ public partial class MainWindow : Window
         menu.PlacementTarget = ProjectPickerButton;
         menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Top;
         menu.IsOpen = true;
+    }
+
+    private void ProjectSpaceHintButton_OnClick(object sender, RoutedEventArgs e) =>
+        ProjectPickerButton_OnClick(ProjectPickerButton, e);
+
+    private void WorkspaceAccessButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var menu = new System.Windows.Controls.ContextMenu();
+        foreach (var item in CreateWorkspaceAccessMenuItems()) menu.Items.Add(item);
+        WorkspaceAccessButton.ContextMenu = menu;
+        menu.PlacementTarget = WorkspaceAccessButton;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Top;
+        menu.IsOpen = true;
+    }
+
+    private System.Windows.Controls.MenuItem CreateWorkspaceAccessMenu()
+    {
+        var access = new System.Windows.Controls.MenuItem { Header = $"访问权限 · {WorkspaceAccessPolicy.DisplayName(_workspaceAccessMode)}" };
+        foreach (var item in CreateWorkspaceAccessMenuItems()) access.Items.Add(item);
+        return access;
+    }
+
+    private IEnumerable<System.Windows.Controls.MenuItem> CreateWorkspaceAccessMenuItems()
+    {
+        foreach (var mode in Enum.GetValues<WorkspaceAccessMode>())
+        {
+            var item = new System.Windows.Controls.MenuItem
+            {
+                Header = WorkspaceAccessPolicy.DisplayName(mode),
+                ToolTip = WorkspaceAccessPolicy.Description(mode),
+                Tag = mode,
+                IsCheckable = true,
+                IsChecked = mode == _workspaceAccessMode,
+            };
+            item.Click += WorkspaceAccessModeMenuItem_OnClick;
+            yield return item;
+        }
+        if (_alwaysAllowedWorkspaceCommands.Count > 0)
+        {
+            var clear = new System.Windows.Controls.MenuItem
+            {
+                Header = $"清除始终允许的命令（{_alwaysAllowedWorkspaceCommands.Count}）",
+                ToolTip = "清除当前项目保存的命令白名单；下次执行时会重新询问",
+            };
+            clear.Click += ClearAlwaysAllowedWorkspaceCommands_OnClick;
+            yield return clear;
+        }
+    }
+
+    private void ClearAlwaysAllowedWorkspaceCommands_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_selectedProjectPath is null || _alwaysAllowedWorkspaceCommands.Count == 0) return;
+        var answer = MessageBox.Show(
+            $"确定清除当前项目 {_alwaysAllowedWorkspaceCommands.Count} 条始终允许的命令吗？\n\n清除后再次运行这些命令时会重新询问。",
+            "清除命令白名单？", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes) return;
+        _alwaysAllowedWorkspaceCommands.Clear();
+        SaveWorkspaceAccessSettings();
+        ChatNotice.Text = "已清除当前项目始终允许的命令";
+        UpdateWorkspaceAccessUi();
+    }
+
+    private void WorkspaceAccessModeMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.MenuItem { Tag: WorkspaceAccessMode mode }) return;
+        if (mode == WorkspaceAccessMode.Custom)
+        {
+            var dialog = new WorkspacePermissionSettingsDialog(_workspaceCustomPermissions) { Owner = this };
+            if (dialog.ShowDialog() != true) return;
+            _workspaceCustomPermissions = dialog.Settings;
+        }
+        else if (mode == _workspaceAccessMode) return;
+        if (mode == WorkspaceAccessMode.FullAccess)
+        {
+            var answer = MessageBox.Show(
+                "完全访问将允许 GPT 在当前项目中修改文件、联网下载并运行命令，不再逐次询问。\n\n提权和关键系统修改仍会被阻止。请仅在你信任当前任务时开启。",
+                "开启完全访问？", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+            if (answer != MessageBoxResult.Yes) return;
+        }
+        _workspaceAccessMode = mode;
+        SaveWorkspaceAccessSettings();
+        _sessionApprovedWorkspaceOperations.Clear();
+        UpdateWorkspaceAccessUi();
+        ChatNotice.Text = $"项目访问权限已切换为“{WorkspaceAccessPolicy.DisplayName(mode)}”";
     }
 
     private string? ChooseProjectFolder()
@@ -780,17 +879,36 @@ public partial class MainWindow : Window
         }
         ChatNotice.Text = fullPath is null
             ? "当前对话已移出项目空间"
-            : "当前对话已进入项目空间。GPT 可以读取文件；写入、移动、删除或运行命令都会先询问你。";
+            : $"当前对话已进入项目空间。访问权限：{WorkspaceAccessPolicy.DisplayName(_workspaceAccessMode)}。";
         ChatInput.Focus();
     }
 
     private void ApplyProjectSelection(string? path)
     {
-        _selectedProjectPath = Directory.Exists(path) ? Path.GetFullPath(path) : null;
+        var selected = Directory.Exists(path) ? Path.GetFullPath(path) : null;
+        if (!string.Equals(selected, _selectedProjectPath, StringComparison.OrdinalIgnoreCase))
+            _sessionApprovedWorkspaceOperations.Clear();
+        _selectedProjectPath = selected;
+        var accessSettings = _workspaceAccessStore.Load(_selectedProjectPath);
+        _workspaceAccessMode = accessSettings.Mode;
+        _workspaceCustomPermissions = accessSettings.Custom;
+        _alwaysAllowedWorkspaceCommands.Clear();
+        _alwaysAllowedWorkspaceCommands.UnionWith(accessSettings.AlwaysAllowedCommandHashes ?? []);
         ProjectPickerLabel.Text = _selectedProjectPath is null ? "选择项目" : Path.GetFileName(_selectedProjectPath);
         ProjectPickerButton.ToolTip = _selectedProjectPath ?? "选择项目目录";
         if (_selectedProjectPath is not null)
-            ProjectPickerButton.ToolTip = $"项目空间：{_selectedProjectPath}\n读取自动允许；修改和命令执行前询问；点击查看详情或移除";
+            ProjectPickerButton.ToolTip = $"项目空间：{_selectedProjectPath}\n{WorkspaceAccessPolicy.Description(_workspaceAccessMode)}\n点击查看详情或移除";
+        UpdateWorkspaceAccessUi();
+    }
+
+    private void UpdateWorkspaceAccessUi()
+    {
+        ProjectSpaceHint.Visibility = _selectedProjectPath is null ? Visibility.Visible : Visibility.Collapsed;
+        WorkspaceAccessButton.Visibility = _selectedProjectPath is null ? Visibility.Collapsed : Visibility.Visible;
+        WorkspaceAccessLabel.Text = WorkspaceAccessPolicy.DisplayName(_workspaceAccessMode);
+        WorkspaceAccessButton.ToolTip = $"当前权限：{WorkspaceAccessPolicy.DisplayName(_workspaceAccessMode)}\n{WorkspaceAccessPolicy.Description(_workspaceAccessMode)}\n始终允许的命令：{_alwaysAllowedWorkspaceCommands.Count} 条\n命令隔离：Windows Job Object（进程树与桌面交互限制）\n点击更改访问权限";
+        if (_selectedProjectPath is not null)
+            ProjectPickerButton.ToolTip = $"项目空间：{_selectedProjectPath}\n{WorkspaceAccessPolicy.Description(_workspaceAccessMode)}\n点击查看详情或移除";
     }
 
     private async Task ShowProjectContextDetailsAsync()
@@ -812,18 +930,121 @@ public partial class MainWindow : Window
         root.Children.Add(new System.Windows.Controls.TextBlock { Text = inspected.ProjectName, FontSize = 22, FontWeight = FontWeights.SemiBold });
         var summary = new System.Windows.Controls.TextBlock
         {
-            Text = $"访问模式：读取自动允许，修改和命令执行前询问  ·  扫描 {inspected.ScannedFileCount} 个文件  ·  可读取 {inspected.ReadableFiles.Count} 个  ·  忽略 {inspected.IgnoredFileCount} 个",
+            Text = $"访问模式：{WorkspaceAccessPolicy.DisplayName(_workspaceAccessMode)}（{WorkspaceAccessPolicy.Description(_workspaceAccessMode)}）  ·  "
+                + $"运行程序 {WorkspaceApplicationRegistry.List(_selectedProjectPath).Count} 个  ·  命令隔离：Windows Job Object（进程树与桌面交互限制）  ·  "
+                + $"扫描 {inspected.ScannedFileCount} 个文件  ·  可读取 {inspected.ReadableFiles.Count} 个  ·  忽略 {inspected.IgnoredFileCount} 个",
             Foreground = (Brush)FindResource("MutedBrush"), Margin = new Thickness(0, 8, 0, 14), TextWrapping = TextWrapping.Wrap,
         };
         System.Windows.Controls.Grid.SetRow(summary, 1); root.Children.Add(summary);
         var files = new System.Windows.Controls.ListBox { ItemsSource = inspected.ReadableFiles, BorderBrush = (Brush)FindResource("BorderBrush"), BorderThickness = new Thickness(1) };
         System.Windows.Controls.Grid.SetRow(files, 2); root.Children.Add(files);
         var actions = new System.Windows.Controls.StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 16, 0, 0) };
+        var audit = new System.Windows.Controls.Button { Content = "操作记录", Style = (Style)FindResource("SecondaryButton"), Margin = new Thickness(0, 0, 8, 0) };
+        audit.Click += (_, _) => ShowWorkspaceAuditDialog();
+        var applications = new System.Windows.Controls.Button { Content = "运行程序", Style = (Style)FindResource("SecondaryButton"), Margin = new Thickness(0, 0, 8, 0) };
+        applications.Click += (_, _) => ShowWorkspaceApplicationsDialog();
         var remove = new System.Windows.Controls.Button { Content = "移除上下文", Style = (Style)FindResource("SecondaryButton"), Margin = new Thickness(0, 0, 8, 0) };
         remove.Click += async (_, _) => { dialog.Close(); await SelectProjectAsync(null); };
         var close = new System.Windows.Controls.Button { Content = "关闭" }; close.Click += (_, _) => dialog.Close();
-        actions.Children.Add(remove); actions.Children.Add(close);
+        actions.Children.Add(applications); actions.Children.Add(audit); actions.Children.Add(remove); actions.Children.Add(close);
         System.Windows.Controls.Grid.SetRow(actions, 3); root.Children.Add(actions);
+        dialog.Content = root;
+        dialog.ShowDialog();
+    }
+
+    private void ShowWorkspaceApplicationsDialog()
+    {
+        if (_selectedProjectPath is null) return;
+        var projectPath = _selectedProjectPath;
+        var dialog = new Window
+        {
+            Title = $"运行程序 · {Path.GetFileName(projectPath)}", Owner = this, Width = 720, Height = 460,
+            MinWidth = 600, MinHeight = 380, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = (Brush)FindResource("SurfaceBrush"), Foreground = (Brush)FindResource("TextBrush"),
+        };
+        var root = new System.Windows.Controls.Grid { Margin = new Thickness(24) };
+        root.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new System.Windows.Controls.RowDefinition());
+        root.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = GridLength.Auto });
+        root.Children.Add(new System.Windows.Controls.TextBlock
+        {
+            Text = "由泺栋 Chat 启动的项目程序", FontSize = 22, FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 14),
+        });
+        var list = new System.Windows.Controls.ListBox
+        {
+            BorderBrush = (Brush)FindResource("BorderBrush"), BorderThickness = new Thickness(1),
+        };
+        IReadOnlyList<WorkspaceApplicationInfo> running = [];
+        void Reload()
+        {
+            running = WorkspaceApplicationRegistry.List(projectPath);
+            list.ItemsSource = running.Select(item =>
+                $"{item.Path}  ·  PID {item.ProcessId}\n{(string.IsNullOrWhiteSpace(item.Arguments) ? "无启动参数" : item.Arguments)}  ·  {item.StartedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}").ToArray();
+        }
+        Reload();
+        System.Windows.Controls.Grid.SetRow(list, 1); root.Children.Add(list);
+        var actions = new System.Windows.Controls.StackPanel
+        {
+            Orientation = System.Windows.Controls.Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0),
+        };
+        var stop = new System.Windows.Controls.Button
+        {
+            Content = "停止所选程序", Style = (Style)FindResource("SecondaryButton"), Margin = new Thickness(0, 0, 8, 0),
+        };
+        stop.Click += (_, _) =>
+        {
+            if (list.SelectedIndex < 0 || list.SelectedIndex >= running.Count) return;
+            var selected = running[list.SelectedIndex];
+            if (MessageBox.Show($"确定停止 {selected.Path}（PID {selected.ProcessId}）及其子进程吗？",
+                    "停止项目程序", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+            var stopped = WorkspaceApplicationRegistry.Stop(projectPath, selected.ProcessId);
+            AuditWorkspaceAction(projectPath, new WorkspaceToolPlan("stop_launched_application",
+                $"停止项目程序 PID {selected.ProcessId}", true, [selected.Path], WorkspaceOperationRisk.Destructive),
+                "用户界面", stopped ? "执行成功" : "执行失败");
+            Reload();
+        };
+        var close = new System.Windows.Controls.Button { Content = "关闭" }; close.Click += (_, _) => dialog.Close();
+        actions.Children.Add(stop); actions.Children.Add(close);
+        System.Windows.Controls.Grid.SetRow(actions, 2); root.Children.Add(actions);
+        dialog.Content = root;
+        dialog.ShowDialog();
+    }
+
+    private void ShowWorkspaceAuditDialog()
+    {
+        if (_selectedProjectPath is null) return;
+        var projectPath = _selectedProjectPath;
+        var dialog = new Window
+        {
+            Title = $"项目操作记录 · {Path.GetFileName(projectPath)}", Owner = this, Width = 820, Height = 560,
+            MinWidth = 680, MinHeight = 440, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = (Brush)FindResource("SurfaceBrush"), Foreground = (Brush)FindResource("TextBrush"),
+        };
+        var root = new System.Windows.Controls.Grid { Margin = new Thickness(24) };
+        root.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new System.Windows.Controls.RowDefinition());
+        root.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = GridLength.Auto });
+        root.Children.Add(new System.Windows.Controls.TextBlock
+        {
+            Text = "本地操作记录", FontSize = 22, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 14),
+        });
+        var list = new System.Windows.Controls.ListView { BorderBrush = (Brush)FindResource("BorderBrush"), BorderThickness = new Thickness(1) };
+        void Reload() => list.ItemsSource = _workspaceAuditStore.Load(projectPath).Select(entry =>
+            $"{entry.Timestamp.ToLocalTime():yyyy-MM-dd HH:mm:ss}  ·  {entry.Decision} / {entry.Outcome}\n{entry.Summary}").ToArray();
+        Reload();
+        System.Windows.Controls.Grid.SetRow(list, 1); root.Children.Add(list);
+        var actions = new System.Windows.Controls.StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
+        var clear = new System.Windows.Controls.Button { Content = "清空当前项目记录", Style = (Style)FindResource("SecondaryButton"), Margin = new Thickness(0, 0, 8, 0) };
+        clear.Click += (_, _) =>
+        {
+            if (MessageBox.Show("确定清空当前项目的本地操作记录吗？", "清空操作记录", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+            _workspaceAuditStore.Clear(projectPath); Reload();
+        };
+        var close = new System.Windows.Controls.Button { Content = "关闭" }; close.Click += (_, _) => dialog.Close();
+        actions.Children.Add(clear); actions.Children.Add(close);
+        System.Windows.Controls.Grid.SetRow(actions, 2); root.Children.Add(actions);
         dialog.Content = root;
         dialog.ShowDialog();
     }
@@ -1083,15 +1304,35 @@ public partial class MainWindow : Window
             IReadOnlyList<SyncedChatMessage> context = _chatMessages.Select(item => item.Source).ToArray();
             if (_selectedProjectPath is not null)
             {
-                NetworkStatusText.Text = "正在读取项目…";
-                var projectContext = await _projectContextBuilder.BuildAsync(_selectedProjectPath, text, cancellationToken);
-                if (projectContext is not null)
+                var automaticRead = WorkspaceAccessPolicy.Decide(
+                    _workspaceAccessMode,
+                    new WorkspaceToolPlan("project_context", "自动读取相关项目文件", false, ["项目相关文件"]),
+                    _workspaceCustomPermissions);
+                if (automaticRead == WorkspacePermissionDecision.Allow)
                 {
-                    var projectMessage = new SyncedChatMessage(
-                        Guid.NewGuid().ToString(), conversationId, "developer", projectContext.Content, DateTimeOffset.UtcNow);
-                    context = [projectMessage, .. context];
-                    ChatNotice.Text = $"项目上下文：索引 {projectContext.IndexedFileCount} 个文件，本次读取 {projectContext.IncludedFileCount} 个相关文本文件。";
+                    NetworkStatusText.Text = "正在读取项目…";
+                    var projectContext = await _projectContextBuilder.BuildAsync(_selectedProjectPath, text, cancellationToken);
+                    if (projectContext is not null)
+                    {
+                        var projectMessage = new SyncedChatMessage(
+                            Guid.NewGuid().ToString(), conversationId, "developer", projectContext.Content, DateTimeOffset.UtcNow);
+                        context = [projectMessage, .. context];
+                        ChatNotice.Text = $"项目上下文：索引 {projectContext.IndexedFileCount} 个文件，本次读取 {projectContext.IncludedFileCount} 个相关文本文件。";
+                    }
                 }
+                else ChatNotice.Text = automaticRead == WorkspacePermissionDecision.Deny
+                    ? "当前权限禁止自动读取项目文件；GPT 仍可回答普通问题。"
+                    : "项目读取需要批准；GPT 请求具体文件时会询问你。";
+            }
+            else
+            {
+                var workspaceNotice = new SyncedChatMessage(
+                    Guid.NewGuid().ToString(), conversationId, "developer",
+                    "当前对话尚未归属任何项目空间，因此你没有本地文件读取、文件修改、命令执行或程序启动工具。"
+                    + "如果用户要求管理电脑文件、运行命令、启动程序或进行本地编程，请明确提示用户点击输入框中的“选择项目空间”，并只授权任务所需的文件夹。"
+                    + "不要声称已经查看、修改或执行了本机内容，也不要建议用户授权整个磁盘。普通知识问答不受影响。",
+                    DateTimeOffset.UtcNow);
+                context = [workspaceNotice, .. context];
             }
             var assistant = new SyncedChatMessage(Guid.NewGuid().ToString(), conversationId, "assistant", "", DateTimeOffset.UtcNow);
             var display = CreateDisplayMessage(assistant);
@@ -1178,31 +1419,93 @@ public partial class MainWindow : Window
             {
                 return System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = error.Message });
             }
-            if (plan.RequiresApproval)
+            if (plan.Name == "run_command" && IsRunningElevated())
             {
-                var paths = string.Join("\n", plan.AffectedPaths.Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => "• " + path));
-                if (plan.Name == "run_command" && IsRunningElevated())
-                    return System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = "泺栋 Chat 当前以管理员身份运行。为避免 AI 命令获得管理员权限，请退出后以普通方式重新启动软件。" });
-                var commandWarning = plan.Name == "run_command"
-                    ? "\n\n安全提示：命令由本机 Shell 执行，可能产生项目目录之外的副作用。请确认完整命令可信；泺栋 Chat 不会自动授予管理员权限。"
-                    : "";
-                var answer = MessageBox.Show(
-                    $"GPT 请求执行以下本地操作：\n\n{plan.Summary}\n\n工作位置：\n{paths}{commandWarning}\n\n仅允许本次操作吗？",
-                    "确认项目文件操作", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
-                if (answer != MessageBoxResult.Yes)
+                AuditWorkspaceAction(projectPath, plan, "系统安全规则", "已阻止");
+                return System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = "泺栋 Chat 当前以管理员身份运行。为避免 AI 命令获得管理员权限，请退出后以普通方式重新启动软件。" });
+            }
+            var decision = WorkspaceAccessPolicy.Decide(_workspaceAccessMode, plan, _workspaceCustomPermissions);
+            if (decision == WorkspacePermissionDecision.Deny)
+            {
+                AuditWorkspaceAction(projectPath, plan, "权限规则", "已拒绝");
+                return System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    ok = false,
+                    error = $"当前项目权限已禁止此操作（{WorkspaceAccessPolicy.DisplayName(_workspaceAccessMode)}）。你可以点击输入框旁的权限按钮修改设置。",
+                });
+            }
+            var approvalKey = CreateWorkspaceApprovalKey(projectPath, plan);
+            var persistentApprovalHash = CreateWorkspaceApprovalHash(approvalKey);
+            var sessionApproved = _sessionApprovedWorkspaceOperations.Contains(approvalKey);
+            var executableOperation = plan.Name is "run_command" or "launch_application";
+            var persistentlyApproved = executableOperation && plan.AllowsPersistentApproval
+                && _alwaysAllowedWorkspaceCommands.Contains(persistentApprovalHash);
+            var requiresApproval = decision == WorkspacePermissionDecision.Ask && !sessionApproved && !persistentlyApproved;
+            var auditDecision = decision == WorkspacePermissionDecision.Allow ? "自动允许"
+                : persistentlyApproved ? "项目白名单" : sessionApproved ? "会话允许" : "本次允许";
+            if (requiresApproval)
+            {
+                var approval = new WorkspaceToolApprovalDialog(
+                    plan.Summary,
+                    plan.AffectedPaths.Where(path => !string.IsNullOrWhiteSpace(path)).ToArray(),
+                    executableOperation,
+                    plan.AllowsPersistentApproval) { Owner = this };
+                if (approval.ShowDialog() != true || approval.Choice == WorkspaceApprovalChoice.Reject)
+                {
+                    AuditWorkspaceAction(projectPath, plan, "用户选择", "已拒绝");
                     return System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = "用户拒绝了本次文件操作。" });
+                }
+                if (approval.Choice == WorkspaceApprovalChoice.AllowSession)
+                {
+                    _sessionApprovedWorkspaceOperations.Add(approvalKey);
+                    auditDecision = "会话允许";
+                }
+                else if (approval.Choice == WorkspaceApprovalChoice.AllowAlways && executableOperation && plan.AllowsPersistentApproval)
+                {
+                    _alwaysAllowedWorkspaceCommands.Add(persistentApprovalHash);
+                    SaveWorkspaceAccessSettings();
+                    auditDecision = "项目白名单";
+                    UpdateWorkspaceAccessUi();
+                }
             }
             ChatNotice.Text = plan.Summary + "…";
-            var result = await tools.ExecuteAsync(call, cancellationToken);
+            string result;
+            try { result = await tools.ExecuteAsync(call, cancellationToken, plan); }
+            catch (OperationCanceledException)
+            {
+                AuditWorkspaceAction(projectPath, plan, auditDecision, "已取消");
+                throw;
+            }
             var succeeded = false;
             try { succeeded = System.Text.Json.JsonDocument.Parse(result).RootElement.GetProperty("ok").GetBoolean(); }
             catch (System.Text.Json.JsonException) { }
+            AuditWorkspaceAction(projectPath, plan, auditDecision, succeeded ? "执行成功" : "执行失败");
             ChatNotice.Text = succeeded
                 ? plan.RequiresApproval ? plan.Summary + "已完成" : "已读取项目文件，正在继续回答…"
                 : plan.Summary + "未执行，正在让 GPT 调整方案…";
             return result;
         };
     }
+
+    private static string CreateWorkspaceApprovalKey(string projectPath, WorkspaceToolPlan plan) =>
+        string.Join("|", [Path.GetFullPath(projectPath), plan.Name, plan.Risk.ToString(), plan.Summary,
+            plan.ApprovalBinding ?? "", .. plan.AffectedPaths]);
+
+    private static string CreateWorkspaceApprovalHash(string approvalKey) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(approvalKey)));
+
+    private void SaveWorkspaceAccessSettings()
+    {
+        if (_selectedProjectPath is null) return;
+        _workspaceAccessStore.Save(_selectedProjectPath, new WorkspaceAccessSettings(
+            _workspaceAccessMode,
+            _workspaceCustomPermissions,
+            _alwaysAllowedWorkspaceCommands.Order(StringComparer.Ordinal).ToArray()));
+    }
+
+    private void AuditWorkspaceAction(string projectPath, WorkspaceToolPlan plan, string decision, string outcome) =>
+        _workspaceAuditStore.Append(new WorkspaceAuditEntry(
+            DateTimeOffset.UtcNow, Path.GetFullPath(projectPath), plan.Name, plan.Summary, plan.Risk, decision, outcome));
 
     private static bool IsRunningElevated()
     {
@@ -1579,7 +1882,7 @@ public partial class MainWindow : Window
         }
     }
     private void ExitApplication() { PrepareForExit(); Application.Current.Shutdown(); }
-    internal void PrepareForExit() { _allowExit = true; _chatCancellation?.Cancel(); _updateCancellation.Cancel(); _sessionTimer.Stop(); _trayIcon?.Dispose(); _trayIcon = null; }
+    internal void PrepareForExit() { _allowExit = true; _chatCancellation?.Cancel(); _updateCancellation.Cancel(); _sessionTimer.Stop(); WorkspaceApplicationRegistry.StopAll(); _trayIcon?.Dispose(); _trayIcon = null; }
 }
 
 public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyChanged

@@ -194,6 +194,15 @@ export interface GatewayServerOptions {
   attachmentStore?: AttachmentStore;
 }
 
+function withUpstreamModel(body: Buffer, model: string | undefined): Uint8Array<ArrayBuffer> {
+  if (!model) return new Uint8Array(body);
+  let parsed: unknown;
+  try { parsed = JSON.parse(body.toString("utf8")); }
+  catch { return new Uint8Array(body); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return new Uint8Array(body);
+  return new TextEncoder().encode(JSON.stringify({ ...(parsed as Record<string, unknown>), model }));
+}
+
 export function createGatewayServer(config: GatewayConfig, options: GatewayServerOptions = {}) {
   const limiter = options.limiter ?? new InMemoryLimiter(config.requestsPerMinute, config.maxConcurrentRequests);
   const configuredUpstreams = config.upstreams ?? config.upstreamApiKeys;
@@ -209,9 +218,9 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
       ? { apiKey: item, supportsWebSearch: index === webSearchUpstreamIndex, supportsImageGeneration: index === imageGenerationUpstreamIndex }
       : {
           ...item,
-          supportsWebSearch: index === webSearchUpstreamIndex
-            || (sharedSearchBaseUrl !== undefined && item.baseUrl.replace(/\/$/, "") === sharedSearchBaseUrl),
-          supportsImageGeneration: index === imageGenerationUpstreamIndex,
+          supportsWebSearch: item.supportsWebSearch ?? (index === webSearchUpstreamIndex
+            || (sharedSearchBaseUrl !== undefined && item.baseUrl.replace(/\/$/, "") === sharedSearchBaseUrl)),
+          supportsImageGeneration: item.supportsImageGeneration ?? index === imageGenerationUpstreamIndex,
         }));
   const ledger = options.ledger ?? new InMemoryRequestLedger();
   const keyVerifier = options.keyVerifier ?? new StaticGatewayKeyVerifier(config.gatewayKeyHashes);
@@ -713,7 +722,7 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
               "content-type": req.headers["content-type"] ?? "application/json",
               "x-request-id": requestId,
             },
-            body: new Uint8Array(body),
+            body: withUpstreamModel(body, credential.model),
             signal: AbortSignal.timeout(config.upstreamTimeoutMs),
           });
           const retryable = RETRYABLE_STATUS.has(upstream.status);
