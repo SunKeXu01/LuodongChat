@@ -245,7 +245,9 @@
               </Grid>
             </Border>
 
-            <Grid Grid.Column="1">
+            <Grid x:Name="ChatDropSurface" Grid.Column="1" AllowDrop="True"
+                  DragEnter="ChatComposer_OnDragEnter" DragOver="ChatComposer_OnDragOver"
+                  DragLeave="ChatComposer_OnDragLeave" Drop="ChatComposer_OnDrop">
               <Grid.RowDefinitions><RowDefinition Height="60"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
               <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="24,0">
                 <Grid>
@@ -274,7 +276,8 @@
 
               <ScrollViewer x:Name="ChatMessagesScroll" Grid.Row="1" Background="{DynamicResource SurfaceBrush}" Padding="32,18"
                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                            HorizontalContentAlignment="Stretch" CanContentScroll="False" Focusable="False">
+                            HorizontalContentAlignment="Stretch" CanContentScroll="False" Focusable="False"
+                            ScrollChanged="ChatMessagesScroll_OnScrollChanged">
                 <ItemsControl x:Name="ChatMessagesItems" MaxWidth="1080" HorizontalAlignment="Stretch">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
@@ -376,6 +379,10 @@
                           <Setter TargetName="AssistantActions" Property="Visibility" Value="Collapsed"/>
                         </DataTrigger>
                         <DataTrigger Binding="{Binding HasSources}" Value="False"><Setter TargetName="SourcesActionButton" Property="Visibility" Value="Collapsed"/></DataTrigger>
+                        <DataTrigger Binding="{Binding IsNavigationHighlighted}" Value="True">
+                          <Setter TargetName="MessageBubble" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                          <Setter TargetName="MessageBubble" Property="BorderThickness" Value="2"/>
+                        </DataTrigger>
                         <Trigger SourceName="MessageGroup" Property="IsMouseOver" Value="True">
                           <Setter TargetName="AssistantActions" Property="Opacity" Value="1"/>
                           <Setter TargetName="AssistantActions" Property="IsHitTestVisible" Value="True"/>
@@ -388,9 +395,50 @@
                 </ItemsControl>
               </ScrollViewer>
 
+              <Border x:Name="QuestionNavigator" Grid.Row="1" Panel.ZIndex="8" Visibility="Collapsed"
+                      Width="44" MaxHeight="520" HorizontalAlignment="Left" VerticalAlignment="Center"
+                      Margin="8,18,0,18" Background="Transparent" IsHitTestVisible="True">
+                <ScrollViewer VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled">
+                  <ItemsControl x:Name="QuestionNavigatorItems">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Button Tag="{Binding}" Width="36" Height="{Binding HitHeight}" MinHeight="0" Padding="0"
+                                Background="Transparent" BorderThickness="0" ToolTip="{Binding ToolTipText}"
+                                ToolTipService.ShowDuration="12000" AutomationProperties.Name="{Binding AutomationName}"
+                                Click="QuestionAnchorButton_OnClick">
+                          <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                              <Grid Background="Transparent">
+                                <Border x:Name="AnchorLine" Width="12" Height="3" CornerRadius="2"
+                                        Background="{DynamicResource BorderBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                              </Grid>
+                              <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                  <Setter TargetName="AnchorLine" Property="Width" Value="20"/>
+                                  <Setter TargetName="AnchorLine" Property="Height" Value="4"/>
+                                  <Setter TargetName="AnchorLine" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                                </Trigger>
+                                <Trigger Property="IsKeyboardFocused" Value="True">
+                                  <Setter TargetName="AnchorLine" Property="Width" Value="20"/>
+                                  <Setter TargetName="AnchorLine" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                                </Trigger>
+                                <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                  <Setter TargetName="AnchorLine" Property="Width" Value="24"/>
+                                  <Setter TargetName="AnchorLine" Property="Height" Value="4"/>
+                                  <Setter TargetName="AnchorLine" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                                </DataTrigger>
+                              </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                          </Button.Template>
+                        </Button>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
+              </Border>
+
               <TextBlock x:Name="ChatNotice" Grid.Row="2" MaxWidth="1040" HorizontalAlignment="Stretch" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" Margin="32,3,32,0"/>
-              <Border x:Name="ChatComposer" Grid.Row="3" MaxWidth="1040" HorizontalAlignment="Stretch" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="22" Margin="32,10,32,20" Padding="12,10"
-                      AllowDrop="True" DragEnter="ChatComposer_OnDragEnter" DragOver="ChatComposer_OnDragOver" DragLeave="ChatComposer_OnDragLeave" Drop="ChatComposer_OnDrop">
+              <Border x:Name="ChatComposer" Grid.Row="3" MaxWidth="1040" HorizontalAlignment="Stretch" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="22" Margin="32,10,32,20" Padding="12,10">
                 <Grid>
                   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                   <ScrollViewer x:Name="AttachmentPreviewScroll" Visibility="Collapsed" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Margin="2,0,2,8" MaxHeight="106">
@@ -459,13 +507,16 @@
                       </Button>
                     </StackPanel>
                   </Grid>
-                  <Border x:Name="AttachmentDropOverlay" Grid.RowSpan="3" Visibility="Collapsed" Panel.ZIndex="30" CornerRadius="17" Background="#EAF7F5" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="2" Opacity="0.97" IsHitTestVisible="False">
-                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                      <Viewbox Width="30" Height="30" HorizontalAlignment="Center"><Path Data="M12,3 V17 M6,9 L12,3 L18,9 M4,19 V21 H20 V19" Stroke="{DynamicResource LinkBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Fill="Transparent"/></Viewbox>
-                      <TextBlock Text="松开以上传文件" Margin="0,8,0,0" FontWeight="SemiBold" Foreground="{DynamicResource LinkBrush}"/>
-                    </StackPanel>
-                  </Border>
                 </Grid>
+              </Border>
+              <Border x:Name="AttachmentDropOverlay" Grid.RowSpan="4" Visibility="Collapsed" Panel.ZIndex="30"
+                      Margin="12" CornerRadius="20" Background="{DynamicResource SecondarySurfaceBrush}" BorderBrush="{DynamicResource AccentBrush}"
+                      BorderThickness="2" Opacity="0.97" IsHitTestVisible="False">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                  <Viewbox Width="42" Height="42" HorizontalAlignment="Center"><Path Data="M12,3 V17 M6,9 L12,3 L18,9 M4,19 V21 H20 V19" Stroke="{DynamicResource LinkBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Fill="Transparent"/></Viewbox>
+                  <TextBlock Text="松开以上传文件" Margin="0,12,0,0" FontSize="17" FontWeight="SemiBold" Foreground="{DynamicResource LinkBrush}"/>
+                  <TextBlock Text="支持一次拖入多个图片或文档" Margin="0,6,0,0" FontSize="12" Foreground="{DynamicResource MutedBrush}"/>
+                </StackPanel>
               </Border>
               <Border x:Name="ChatToast" Grid.RowSpan="4" Panel.ZIndex="20" Visibility="Collapsed" IsHitTestVisible="False"
                       HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="24,0,24,142" Padding="14,9" CornerRadius="10" Background="#E6111827">

@@ -31,6 +31,7 @@ public partial class MainWindow : Window
     private readonly ProjectContextBuilder _projectContextBuilder = new();
     private readonly RecentProjectStore _recentProjectStore = RecentProjectStore.ForApplicationDirectory();
     private readonly ObservableCollection<ChatDisplayMessage> _chatMessages = [];
+    private readonly ObservableCollection<ChatQuestionAnchor> _questionAnchors = [];
     private readonly ObservableCollection<ConversationListItem> _conversations = [];
     private readonly ICollectionView _conversationView;
     private AccountSession? _session;
@@ -50,7 +51,7 @@ public partial class MainWindow : Window
     private string? _selectedProjectPath;
     private bool _webSearchEnabled = true;
     private readonly AttachmentComposerController _attachments;
-    private int _composerDragDepth;
+    private CancellationTokenSource? _questionHighlightCancellation;
     private string _savedNickname = "";
     private bool _profileSaveBusy;
 
@@ -91,6 +92,8 @@ public partial class MainWindow : Window
         _chatToastTimer.Tick += (_, _) => { _chatToastTimer.Stop(); ChatToast.Visibility = Visibility.Collapsed; };
         _profileToastTimer.Tick += (_, _) => { _profileToastTimer.Stop(); ProfileToast.Visibility = Visibility.Collapsed; };
         ChatMessagesItems.ItemsSource = _chatMessages;
+        QuestionNavigatorItems.ItemsSource = _questionAnchors;
+        _chatMessages.CollectionChanged += (_, _) => Dispatcher.BeginInvoke(RefreshQuestionNavigator, DispatcherPriority.Loaded);
         _conversationView = CollectionViewSource.GetDefaultView(_conversations);
         _conversationView.Filter = FilterConversation;
         _conversationView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(ConversationListItem.GroupName)));
@@ -98,7 +101,7 @@ public partial class MainWindow : Window
         FitToWorkingArea();
         InitializeTrayIcon();
         Closing += MainWindow_OnClosing;
-        Closed += (_, _) => _attachments.Dispose();
+        Closed += (_, _) => { _questionHighlightCancellation?.Cancel(); _questionHighlightCancellation?.Dispose(); _attachments.Dispose(); };
         Application.Current.SessionEnding += (_, _) => _allowExit = true;
         _sessionTimer.Tick += async (_, _) => await RunExclusiveAsync(ValidateSessionAsync);
         if (skipStartupChecks) return;
@@ -862,6 +865,21 @@ public partial class MainWindow : Window
 
     private async void ChatInput_OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
+        if (e.Key == System.Windows.Input.Key.V
+            && (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) != 0)
+        {
+            System.Windows.IDataObject? data;
+            try { data = Clipboard.GetDataObject(); }
+            catch (Exception error) { ShowChatToast($"无法读取剪贴板：{error.Message}", true); e.Handled = true; return; }
+            if (data is not null && ContainsClipboardAttachments(data))
+            {
+                // Mark the key gesture handled before awaiting file hashing/upload;
+                // otherwise the TextBox may perform its default paste as well.
+                e.Handled = true;
+                await PasteClipboardAttachmentsAsync(data);
+            }
+            return;
+        }
         if (e.Key != System.Windows.Input.Key.Enter
             || System.Windows.Input.Keyboard.Modifiers != System.Windows.Input.ModifierKeys.None) return;
         e.Handled = true;
@@ -890,25 +908,58 @@ public partial class MainWindow : Window
 
     private async void ChatInput_OnPaste(object sender, DataObjectPastingEventArgs e)
     {
-        var data = e.SourceDataObject;
-        var paths = data.GetDataPresent(DataFormats.FileDrop) ? data.GetData(DataFormats.FileDrop) as string[] : null;
-        var bitmap = data.GetDataPresent(DataFormats.Bitmap) ? data.GetData(DataFormats.Bitmap) as BitmapSource : null;
-        if (paths is null && bitmap is null) return;
-        var text = data.GetDataPresent(DataFormats.UnicodeText) ? data.GetData(DataFormats.UnicodeText) as string : null;
+        if (!ContainsClipboardAttachments(e.SourceDataObject)) return;
         e.CancelCommand();
-        if (!string.IsNullOrEmpty(text))
+        await PasteClipboardAttachmentsAsync(e.SourceDataObject);
+    }
+
+    private static bool ContainsClipboardAttachments(System.Windows.IDataObject data)
+    {
+        try
         {
-            ChatInput.SelectedText = text;
-            ChatInput.CaretIndex += text.Length;
+            return data.GetDataPresent(DataFormats.FileDrop, true)
+                || data.GetDataPresent(DataFormats.Bitmap, true)
+                || Clipboard.ContainsImage();
         }
-        if (paths is { Length: > 0 }) await _attachments.AddFilesAsync(paths);
-        if (bitmap is not null) await _attachments.AddClipboardImageAsync(bitmap);
+        catch { return false; }
+    }
+
+    private async Task<bool> PasteClipboardAttachmentsAsync(System.Windows.IDataObject? suppliedData = null)
+    {
+        try
+        {
+            var data = suppliedData ?? Clipboard.GetDataObject();
+            if (data is null) return false;
+            var paths = data.GetDataPresent(DataFormats.FileDrop, true)
+                ? data.GetData(DataFormats.FileDrop, true) as string[] : null;
+            var bitmap = data.GetDataPresent(DataFormats.Bitmap, true)
+                ? data.GetData(DataFormats.Bitmap, true) as BitmapSource : null;
+            if (bitmap is null && Clipboard.ContainsImage()) bitmap = Clipboard.GetImage();
+            if (paths is not { Length: > 0 } && bitmap is null) return false;
+
+            var text = data.GetDataPresent(DataFormats.UnicodeText, true)
+                ? data.GetData(DataFormats.UnicodeText, true) as string : null;
+            if (!string.IsNullOrEmpty(text))
+            {
+                var insertionStart = ChatInput.SelectionStart;
+                ChatInput.SelectedText = text;
+                ChatInput.CaretIndex = Math.Min(ChatInput.Text.Length, insertionStart + text.Length);
+            }
+            if (paths is { Length: > 0 }) await _attachments.AddFilesAsync(paths);
+            if (bitmap is not null) await _attachments.AddClipboardImageAsync(bitmap);
+            ChatInput.Focus();
+            return true;
+        }
+        catch (Exception error)
+        {
+            ShowChatToast($"无法读取剪贴板：{error.Message}", true);
+            return true;
+        }
     }
 
     private void ChatComposer_OnDragEnter(object sender, DragEventArgs e)
     {
         if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
-        _composerDragDepth++;
         AttachmentDropOverlay.Visibility = Visibility.Visible;
         e.Effects = DragDropEffects.Copy;
         e.Handled = true;
@@ -922,17 +973,18 @@ public partial class MainWindow : Window
 
     private void ChatComposer_OnDragLeave(object sender, DragEventArgs e)
     {
-        _composerDragDepth = Math.Max(0, _composerDragDepth - 1);
-        if (_composerDragDepth == 0) AttachmentDropOverlay.Visibility = Visibility.Collapsed;
+        var position = e.GetPosition(ChatDropSurface);
+        if (position.X < 0 || position.Y < 0
+            || position.X > ChatDropSurface.ActualWidth || position.Y > ChatDropSurface.ActualHeight)
+            AttachmentDropOverlay.Visibility = Visibility.Collapsed;
         e.Handled = true;
     }
 
     private async void ChatComposer_OnDrop(object sender, DragEventArgs e)
     {
-        _composerDragDepth = 0;
         AttachmentDropOverlay.Visibility = Visibility.Collapsed;
-        if (e.Data.GetData(DataFormats.FileDrop) is string[] paths) await _attachments.AddFilesAsync(paths);
         e.Handled = true;
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] paths) await _attachments.AddFilesAsync(paths);
     }
 
     private async void RemoveAttachmentButton_OnClick(object sender, RoutedEventArgs e)
@@ -1159,6 +1211,81 @@ public partial class MainWindow : Window
         }, DispatcherPriority.Background);
     }
 
+    private void RefreshQuestionNavigator()
+    {
+        var questions = _chatMessages.Where(message => message.IsUser).ToArray();
+        _questionAnchors.Clear();
+        if (questions.Length < 3)
+        {
+            QuestionNavigator.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var groupSize = questions.Length > 50 ? (int)Math.Ceiling(questions.Length / 36d) : 1;
+        var hitHeight = questions.Length <= 20 ? 18d : questions.Length <= 50 ? 11d : 14d;
+        for (var start = 0; start < questions.Length; start += groupSize)
+        {
+            var end = Math.Min(questions.Length - 1, start + groupSize - 1);
+            var question = questions[start];
+            var summary = string.Join(" ", question.Content.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)).Trim();
+            if (summary.Length == 0) summary = question.Attachments.FirstOrDefault()?.Name ?? "附件消息";
+            if (summary.Length > 28) summary = summary[..28] + "…";
+            var sequence = start == end ? $"第 {start + 1} 个问题" : $"第 {start + 1}–{end + 1} 个问题";
+            _questionAnchors.Add(new ChatQuestionAnchor(
+                question.Source.Id, start, end, hitHeight,
+                $"{summary}\n{question.TimeText} · {sequence}", $"定位到{sequence}：{summary}"));
+        }
+        QuestionNavigator.Visibility = Visibility.Visible;
+        Dispatcher.BeginInvoke(UpdateCurrentQuestionFromScroll, DispatcherPriority.Background);
+    }
+
+    private void ChatMessagesScroll_OnScrollChanged(object sender, System.Windows.Controls.ScrollChangedEventArgs e) =>
+        UpdateCurrentQuestionFromScroll();
+
+    private void UpdateCurrentQuestionFromScroll()
+    {
+        if (_questionAnchors.Count == 0) return;
+        var questions = _chatMessages.Where(message => message.IsUser).ToArray();
+        if (questions.Length == 0) return;
+        var marker = ChatMessagesScroll.VerticalOffset + 72;
+        var currentIndex = 0;
+        for (var index = 0; index < questions.Length; index++)
+        {
+            if (ChatMessagesItems.ItemContainerGenerator.ContainerFromItem(questions[index]) is not System.Windows.Controls.ContentPresenter container) continue;
+            var top = container.TranslatePoint(new Point(0, 0), ChatMessagesItems).Y;
+            if (top <= marker) currentIndex = index;
+            else break;
+        }
+        foreach (var anchor in _questionAnchors)
+            anchor.IsCurrent = currentIndex >= anchor.StartIndex && currentIndex <= anchor.EndIndex;
+    }
+
+    private async void QuestionAnchorButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button { Tag: ChatQuestionAnchor anchor }) return;
+        var message = _chatMessages.FirstOrDefault(item => item.Source.Id == anchor.MessageId);
+        if (message is null) return;
+        ChatMessagesItems.UpdateLayout();
+        if (ChatMessagesItems.ItemContainerGenerator.ContainerFromItem(message) is not System.Windows.Controls.ContentPresenter container) return;
+        var top = container.TranslatePoint(new Point(0, 0), ChatMessagesItems).Y;
+        ChatMessagesScroll.ScrollToVerticalOffset(Math.Max(0, top - 32));
+        foreach (var item in _questionAnchors) item.IsCurrent = ReferenceEquals(item, anchor);
+
+        _questionHighlightCancellation?.Cancel();
+        _questionHighlightCancellation?.Dispose();
+        var highlight = new CancellationTokenSource();
+        _questionHighlightCancellation = highlight;
+        var cancellationToken = highlight.Token;
+        message.IsNavigationHighlighted = true;
+        try { await Task.Delay(600, cancellationToken); }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            if (ReferenceEquals(_questionHighlightCancellation, highlight)) message.IsNavigationHighlighted = false;
+            highlight.Dispose();
+        }
+    }
+
     private async Task SaveCurrentConversationAsync(CancellationToken cancellationToken)
     {
         if (_session is null || _currentConversation is null) return;
@@ -1359,6 +1486,17 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
     public IReadOnlyList<ChatCitation> Sources => _source.Citations ?? [];
     public bool HasSources => Sources.Count > 0;
     public string TimeText => _source.ClientCreatedAt.ToLocalTime().ToString("HH:mm");
+    private bool _isNavigationHighlighted;
+    public bool IsNavigationHighlighted
+    {
+        get => _isNavigationHighlighted;
+        set
+        {
+            if (_isNavigationHighlighted == value) return;
+            _isNavigationHighlighted = value;
+            PropertyChanged?.Invoke(this, new(nameof(IsNavigationHighlighted)));
+        }
+    }
     public Thickness MessageMargin => IsUser ? new Thickness(0, 0, 0, 28) : new Thickness(0, 0, 0, 44);
     public double BubbleWidth
     {
@@ -1404,6 +1542,38 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
         var natural = longest + (isUser ? 38 : 42);
         if (content.Length > 160 && longest < 360) natural = Math.Max(natural, isUser ? 400 : 620);
         return Math.Min(isUser ? 560 : 820, Math.Max(isUser ? 80 : 58, natural));
+    }
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+}
+
+public sealed class ChatQuestionAnchor : System.ComponentModel.INotifyPropertyChanged
+{
+    public ChatQuestionAnchor(string messageId, int startIndex, int endIndex, double hitHeight, string toolTipText, string automationName)
+    {
+        MessageId = messageId;
+        StartIndex = startIndex;
+        EndIndex = endIndex;
+        HitHeight = hitHeight;
+        ToolTipText = toolTipText;
+        AutomationName = automationName;
+    }
+
+    public string MessageId { get; }
+    public int StartIndex { get; }
+    public int EndIndex { get; }
+    public double HitHeight { get; }
+    public string ToolTipText { get; }
+    public string AutomationName { get; }
+    private bool _isCurrent;
+    public bool IsCurrent
+    {
+        get => _isCurrent;
+        set
+        {
+            if (_isCurrent == value) return;
+            _isCurrent = value;
+            PropertyChanged?.Invoke(this, new(nameof(IsCurrent)));
+        }
     }
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
 }
