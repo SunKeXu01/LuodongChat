@@ -48,9 +48,15 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _chatToastTimer = new() { Interval = TimeSpan.FromSeconds(1.8) };
     private readonly DispatcherTimer _profileToastTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly DispatcherTimer _attachmentDropLeaveTimer = new() { Interval = TimeSpan.FromMilliseconds(280) };
+    private readonly DispatcherTimer _touchpadScrollTimer = new() { Interval = TimeSpan.FromMilliseconds(16) };
     private CancellationTokenSource? _chatCancellation;
     private readonly CancellationTokenSource _updateCancellation = new();
     private bool _chatScrollPending;
+    private bool _chatFollowOutput = true;
+    private bool _chatProgrammaticScroll;
+    private double _pendingTouchpadScroll;
+    private long _lastWheelTimestamp;
+    private int _wheelBurstCount;
     private bool _syncingPasswordVisibility;
     private ClientUpdate? _availableUpdate;
     private AppTheme _theme;
@@ -101,14 +107,22 @@ public partial class MainWindow : Window
             CurrentVersionText.Text = $"v{currentVersion}";
             CurrentVersionPill.ToolTip = $"当前版本 v{currentVersion}";
             CurrentVersionPill.Visibility = Visibility.Visible;
+            SidebarCurrentVersionText.Text = $"v{currentVersion}";
+            SidebarCurrentVersionPill.ToolTip = $"当前版本 v{currentVersion}";
+            SidebarCurrentVersionPill.Visibility = Visibility.Visible;
         }
         UpdateThemeButton();
         _chatToastTimer.Tick += (_, _) => { _chatToastTimer.Stop(); ChatToast.Visibility = Visibility.Collapsed; };
         _profileToastTimer.Tick += (_, _) => { _profileToastTimer.Stop(); ProfileToast.Visibility = Visibility.Collapsed; };
         _attachmentDropLeaveTimer.Tick += (_, _) => HideAttachmentDropOverlay();
+        _touchpadScrollTimer.Tick += (_, _) => ApplyPendingTouchpadScroll();
         ChatMessagesItems.ItemsSource = _chatMessages;
         QuestionNavigatorItems.ItemsSource = _questionAnchors;
-        _chatMessages.CollectionChanged += (_, _) => Dispatcher.BeginInvoke(RefreshQuestionNavigator, DispatcherPriority.Loaded);
+        _chatMessages.CollectionChanged += (_, _) => Dispatcher.BeginInvoke(() =>
+        {
+            RefreshQuestionNavigator();
+            UpdateEmptyConversationState();
+        }, DispatcherPriority.Loaded);
         _conversationView = CollectionViewSource.GetDefaultView(_conversations);
         _conversationView.Filter = FilterConversation;
         _conversationView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(ConversationListItem.GroupName)));
@@ -116,7 +130,7 @@ public partial class MainWindow : Window
         FitToWorkingArea();
         InitializeTrayIcon();
         Closing += MainWindow_OnClosing;
-        Closed += (_, _) => { _attachmentDropLeaveTimer.Stop(); CancelQuestionHighlight(); _attachments.Dispose(); };
+        Closed += (_, _) => { _attachmentDropLeaveTimer.Stop(); _touchpadScrollTimer.Stop(); CancelQuestionHighlight(); _attachments.Dispose(); };
         Application.Current.SessionEnding += (_, _) => _allowExit = true;
         _sessionTimer.Tick += async (_, _) => await RunExclusiveAsync(ValidateSessionAsync);
         if (skipStartupChecks) return;
@@ -597,8 +611,9 @@ public partial class MainWindow : Window
         ApplyProjectSelection(projectPath);
         if (_selectedProjectPath is not null) _recentProjectStore.Remember(_selectedProjectPath);
         ChatNotice.Text = _selectedProjectPath is null
-            ? "已新建普通对话。需要管理本机文件或运行程序时，请先选择项目空间。"
+            ? ""
             : $"已在项目“{Path.GetFileName(_selectedProjectPath)}”中新建对话";
+        ProjectRequirementNotice.Visibility = Visibility.Collapsed;
         ChatInput.Focus();
     }
 
@@ -662,6 +677,22 @@ public partial class MainWindow : Window
             foreach (var message in conversation.Messages.OrderBy(item => item.ClientCreatedAt))
                 _chatMessages.Add(CreateDisplayMessage(message));
         ScrollChatToEnd();
+        UpdateEmptyConversationState();
+    }
+
+    private void UpdateEmptyConversationState()
+    {
+        var isEmpty = _chatMessages.Count == 0;
+        EmptyConversationPanel.Visibility = isEmpty ? Visibility.Visible : Visibility.Collapsed;
+        ConversationActionsPanel.Visibility = isEmpty ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void ConversationSuggestionButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button { Tag: string suggestion }) return;
+        ChatInput.Text = suggestion;
+        ChatInput.CaretIndex = ChatInput.Text.Length;
+        ChatInput.Focus();
     }
 
     private void CopyCurrentChatButton_OnClick(object sender, RoutedEventArgs e)
@@ -894,7 +925,7 @@ public partial class MainWindow : Window
         _workspaceCustomPermissions = accessSettings.Custom;
         _alwaysAllowedWorkspaceCommands.Clear();
         _alwaysAllowedWorkspaceCommands.UnionWith(accessSettings.AlwaysAllowedCommandHashes ?? []);
-        ProjectPickerLabel.Text = _selectedProjectPath is null ? "选择项目" : Path.GetFileName(_selectedProjectPath);
+        ProjectPickerLabel.Text = _selectedProjectPath is null ? "项目空间" : Path.GetFileName(_selectedProjectPath);
         ProjectPickerButton.ToolTip = _selectedProjectPath ?? "选择项目目录";
         if (_selectedProjectPath is not null)
             ProjectPickerButton.ToolTip = $"项目空间：{_selectedProjectPath}\n{WorkspaceAccessPolicy.Description(_workspaceAccessMode)}\n点击查看详情或移除";
@@ -904,6 +935,7 @@ public partial class MainWindow : Window
     private void UpdateWorkspaceAccessUi()
     {
         ProjectSpaceHint.Visibility = _selectedProjectPath is null ? Visibility.Visible : Visibility.Collapsed;
+        if (_selectedProjectPath is not null) ProjectRequirementNotice.Visibility = Visibility.Collapsed;
         WorkspaceAccessButton.Visibility = _selectedProjectPath is null ? Visibility.Collapsed : Visibility.Visible;
         WorkspaceAccessLabel.Text = WorkspaceAccessPolicy.DisplayName(_workspaceAccessMode);
         WorkspaceAccessButton.ToolTip = $"当前权限：{WorkspaceAccessPolicy.DisplayName(_workspaceAccessMode)}\n{WorkspaceAccessPolicy.Description(_workspaceAccessMode)}\n始终允许的命令：{_alwaysAllowedWorkspaceCommands.Count} 条\n命令隔离：Windows Job Object（进程树与桌面交互限制）\n点击更改访问权限";
@@ -1110,7 +1142,12 @@ public partial class MainWindow : Window
         await SendChatAsync();
     }
 
-    private void ChatInput_OnTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) => UpdateComposerState();
+    private void ChatInput_OnTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+    {
+        UpdateComposerState();
+        if (_selectedProjectPath is null && !RequiresProjectSpace(ChatInput.Text))
+            ProjectRequirementNotice.Visibility = Visibility.Collapsed;
+    }
 
     private void UpdateComposerState()
     {
@@ -1273,6 +1310,14 @@ public partial class MainWindow : Window
         var text = ChatInput.Text.Trim();
         var attachmentSnapshot = _attachments.Snapshot();
         if (text.Length == 0 && attachmentSnapshot.Count == 0) return;
+        if (_selectedProjectPath is null && attachmentSnapshot.Count == 0 && RequiresProjectSpace(text))
+        {
+            ProjectRequirementNotice.Visibility = Visibility.Visible;
+            ChatNotice.Text = "";
+            ChatInput.Focus();
+            return;
+        }
+        ProjectRequirementNotice.Visibility = Visibility.Collapsed;
         if (attachmentSnapshot.Count > 0 && !_attachments.IsReady)
         {
             ShowChatToast(_attachments.BlockingReason ?? "附件尚未准备完成", true);
@@ -1296,6 +1341,7 @@ public partial class MainWindow : Window
             var user = new SyncedChatMessage(messageId, conversationId, "user", text, DateTimeOffset.UtcNow, Attachments: storedAttachments);
             ChatInput.Clear();
             _chatMessages.Add(CreateDisplayMessage(user));
+            ScrollChatToEnd();
             var titleSource = text.Length > 0 ? text : attachmentSnapshot[0].Name;
             _currentConversation = _currentConversation is null
                 ? new LocalConversation(conversationId, titleSource[..Math.Min(titleSource.Length, 40)], now, now, [user], _selectedProjectPath)
@@ -1342,7 +1388,7 @@ public partial class MainWindow : Window
             {
                 var progress = new Progress<string>(delta => {
                     display.Content += delta;
-                    ScrollChatToEnd();
+                    ScrollChatToEnd(force: false);
                 });
                 var wantsImage = ImageGenerationIntent.IsExplicit(text);
                 var hasReferenceImages = attachmentSnapshot.Any(item => item.IsImage);
@@ -1376,7 +1422,7 @@ public partial class MainWindow : Window
                 NetworkStatusText.Text = !_webSearchEnabled ? "联网搜索已关闭" : result.WebSearchUnavailable
                     ? "联网不可用 · 可重试"
                     : result.WebSearchPerformed ? "已联网并检索来源" : "联网搜索已开启 · 本次未调用";
-                ScrollChatToEnd();
+                ScrollChatToEnd(force: false);
             }
             catch (OperationCanceledException)
             {
@@ -1596,15 +1642,34 @@ public partial class MainWindow : Window
         catch (Exception error) { ShowChatToast($"无法打开附件：{error.Message}", true); }
     }
 
-    private void ScrollChatToEnd()
+    private void ScrollChatToEnd(bool force = true)
     {
+        if (force) _chatFollowOutput = true;
+        if (!_chatFollowOutput) return;
         if (_chatScrollPending) return;
         _chatScrollPending = true;
         Dispatcher.BeginInvoke(() =>
         {
             _chatScrollPending = false;
-            ChatMessagesScroll.ScrollToEnd();
+            if (!_chatFollowOutput) return;
+            _chatProgrammaticScroll = true;
+            try { ChatMessagesScroll.ScrollToEnd(); }
+            finally { _chatProgrammaticScroll = false; }
+            UpdateReturnToBottomButton();
         }, DispatcherPriority.Background);
+    }
+
+    private static bool RequiresProjectSpace(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        string[] phrases =
+        [
+            "本机文件", "本地文件", "电脑文件", "项目目录", "这个目录", "当前目录",
+            "运行命令", "执行命令", "启动程序", "打开程序", "停止程序",
+            "创建文件", "修改文件", "删除文件", "移动文件", "写入文件", "读取文件",
+            "帮我安装", "帮我下载到", "管理电脑",
+        ];
+        return phrases.Any(phrase => text.Contains(phrase, StringComparison.OrdinalIgnoreCase));
     }
 
     private void RefreshQuestionNavigator()
@@ -1635,8 +1700,70 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(UpdateCurrentQuestionFromScroll, DispatcherPriority.Background);
     }
 
-    private void ChatMessagesScroll_OnScrollChanged(object sender, System.Windows.Controls.ScrollChangedEventArgs e) =>
+    private void ChatMessagesScroll_OnScrollChanged(object sender, System.Windows.Controls.ScrollChangedEventArgs e)
+    {
+        if (!_chatProgrammaticScroll && Math.Abs(e.VerticalChange) > 0.1 && Math.Abs(e.ExtentHeightChange) < 0.1)
+            _chatFollowOutput = IsChatNearBottom();
+        UpdateReturnToBottomButton();
         UpdateCurrentQuestionFromScroll();
+    }
+
+    private void ChatMessagesScroll_OnPreviewMouseWheel(object sender, System.Windows.Input.MouseWheelEventArgs e)
+    {
+        if ((System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Shift) != 0) return;
+
+        var now = Stopwatch.GetTimestamp();
+        var elapsed = _lastWheelTimestamp == 0
+            ? double.MaxValue
+            : Stopwatch.GetElapsedTime(_lastWheelTimestamp, now).TotalMilliseconds;
+        _lastWheelTimestamp = now;
+        _wheelBurstCount = elapsed < 55 ? Math.Min(8, _wheelBurstCount + 1) : 0;
+
+        // WPF already handles normal mouse-wheel notches well. Precision touchpads
+        // emit smaller deltas or dense bursts; consume those once and apply a light
+        // 0.6 damping factor so the same gesture is never counted twice.
+        var isPrecisionGesture = Math.Abs(e.Delta) < 120 || (_wheelBurstCount >= 3 && Math.Abs(e.Delta) <= 120);
+        if (isPrecisionGesture)
+        {
+            e.Handled = true;
+            _pendingTouchpadScroll += -e.Delta * 0.6;
+            if (!_touchpadScrollTimer.IsEnabled) _touchpadScrollTimer.Start();
+            return;
+        }
+
+        // At either edge, consume the wheel event so it cannot bubble into a
+        // parent surface and create the impression of a second scroll container.
+        var atTop = ChatMessagesScroll.VerticalOffset <= 0.5 && e.Delta > 0;
+        var atBottom = ChatMessagesScroll.VerticalOffset >= ChatMessagesScroll.ScrollableHeight - 0.5 && e.Delta < 0;
+        if (atTop || atBottom) e.Handled = true;
+    }
+
+    private void ApplyPendingTouchpadScroll()
+    {
+        _touchpadScrollTimer.Stop();
+        if (Math.Abs(_pendingTouchpadScroll) < 0.01) return;
+        var target = Math.Clamp(
+            ChatMessagesScroll.VerticalOffset + _pendingTouchpadScroll,
+            0,
+            ChatMessagesScroll.ScrollableHeight);
+        _pendingTouchpadScroll = 0;
+        _chatProgrammaticScroll = true;
+        try { ChatMessagesScroll.ScrollToVerticalOffset(target); }
+        finally { _chatProgrammaticScroll = false; }
+        _chatFollowOutput = IsChatNearBottom();
+        UpdateReturnToBottomButton();
+        UpdateCurrentQuestionFromScroll();
+    }
+
+    private bool IsChatNearBottom() =>
+        ChatMessagesScroll.ScrollableHeight - ChatMessagesScroll.VerticalOffset < 100;
+
+    private void UpdateReturnToBottomButton() =>
+        ReturnToBottomButton.Visibility = _chatMessages.Count > 0 && !IsChatNearBottom()
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+    private void ReturnToBottomButton_OnClick(object sender, RoutedEventArgs e) => ScrollChatToEnd();
 
     private void UpdateCurrentQuestionFromScroll()
     {
@@ -1708,10 +1835,20 @@ public partial class MainWindow : Window
     private void ProfileSidebarButton_OnClick(object sender, RoutedEventArgs e) => AccountPanel.SelectedIndex = 1;
     private void BackToChatButton_OnClick(object sender, RoutedEventArgs e) => AccountPanel.SelectedIndex = 0;
 
+    private void SidebarMoreButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (SidebarMoreButton.ContextMenu is null) return;
+        SidebarMoreButton.ContextMenu.PlacementTarget = SidebarMoreButton;
+        SidebarMoreButton.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Top;
+        SidebarMoreButton.ContextMenu.IsOpen = true;
+    }
+
     private void StopGenerationButton_OnClick(object sender, RoutedEventArgs e) => _chatCancellation?.Cancel();
 
     private void ShowLogin()
     {
+        GlobalTopBar.Visibility = Visibility.Visible;
+        GlobalTopBarRow.Height = new GridLength(64);
         AccountPanel.Visibility = Visibility.Collapsed;
         LoginPanel.Visibility = Visibility.Visible;
         WindowState = WindowState.Normal;
@@ -1723,6 +1860,8 @@ public partial class MainWindow : Window
     }
     private void ShowAccount(AccountProfile profile)
     {
+        GlobalTopBar.Visibility = Visibility.Collapsed;
+        GlobalTopBarRow.Height = new GridLength(0);
         LoginPanel.Visibility = Visibility.Collapsed;
         AccountPanel.Visibility = Visibility.Visible;
         AccountPanel.SelectedIndex = 0;
@@ -1739,7 +1878,6 @@ public partial class MainWindow : Window
         NicknameInput.Text = profile.Nickname;
         UpdateProfileFormState();
         SidebarProfileName.Text = string.IsNullOrWhiteSpace(profile.Nickname) ? profile.Email : profile.Nickname;
-        SidebarProfileEmail.Text = profile.Email;
         var avatar = DecodeAvatar(profile.AvatarBase64);
         AvatarImage.Source = avatar;
         ProfileAvatarFallbackText.Text = ProfileInitial(profile);
@@ -1775,10 +1913,19 @@ public partial class MainWindow : Window
         {
             if (CurrentVersion is not { } currentVersion) return;
             var update = await _updates.CheckAsync(currentVersion, cancellationToken);
-            if (update is null) { UpdateBanner.Visibility = Visibility.Collapsed; VersionUpdateButton.Visibility = Visibility.Collapsed; return; }
+            if (update is null)
+            {
+                UpdateBanner.Visibility = Visibility.Collapsed;
+                VersionUpdateButton.Visibility = Visibility.Collapsed;
+                SidebarVersionUpdateButton.Visibility = Visibility.Collapsed;
+                return;
+            }
             _availableUpdate = update;
             VersionUpdateButton.Content = $"新版本 v{update.Version.TrimStart('v')}";
             VersionUpdateButton.Visibility = Visibility.Visible;
+            SidebarVersionUpdateButton.Content = "新";
+            SidebarVersionUpdateButton.ToolTip = $"发现新版本 v{update.Version.TrimStart('v')}";
+            SidebarVersionUpdateButton.Visibility = Visibility.Visible;
             UpdateBanner.Visibility = Visibility.Visible;
             GlobalUpdateText.Text = $"正在低速下载版本 {update.Version}，不会阻塞登录和对话。";
             var prepared = await _updates.PrepareAsync(update, cancellationToken: cancellationToken);
@@ -1803,6 +1950,14 @@ public partial class MainWindow : Window
         VersionUpdateButton.ContextMenu.PlacementTarget = VersionUpdateButton;
         VersionUpdateButton.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
         VersionUpdateButton.ContextMenu.IsOpen = true;
+    }
+
+    private void SidebarVersionUpdateButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (SidebarVersionUpdateButton.ContextMenu is null) return;
+        SidebarVersionUpdateButton.ContextMenu.PlacementTarget = SidebarVersionUpdateButton;
+        SidebarVersionUpdateButton.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        SidebarVersionUpdateButton.ContextMenu.IsOpen = true;
     }
 
     private void DownloadUpdateFromOss_OnClick(object sender, RoutedEventArgs e)
