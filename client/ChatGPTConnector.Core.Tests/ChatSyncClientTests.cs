@@ -110,6 +110,28 @@ public sealed class ChatSyncClientTests
         Assert.Equal("att_reference", body.RootElement.GetProperty("attachment_ids")[0].GetString());
     }
 
+    [Fact]
+    public async Task ExecutesLocalFunctionCallAndReturnsOutputToModel()
+    {
+        var handler = new ToolLoopHandler();
+        LocalToolCall? received = null;
+        var result = await new ChatSyncClient(new HttpClient(handler)).StreamResponseAsync(
+            new Uri("https://gateway.example"), "usr_test",
+            [new SyncedChatMessage("m1", "c1", "user", "读取说明", DateTimeOffset.UtcNow)],
+            localTools: WorkspaceFileTools.ToolDefinitions,
+            executeLocalTool: (call, _) => { received = call; return Task.FromResult("{\"ok\":true,\"result\":\"README\"}"); });
+
+        Assert.NotNull(received);
+        Assert.Equal("read_text_file", received!.Name);
+        Assert.Equal("读取完成", result.Text);
+        Assert.Equal(2, handler.Bodies.Count);
+        using var second = JsonDocument.Parse(handler.Bodies[1]);
+        var input = second.RootElement.GetProperty("input");
+        Assert.Contains(input.EnumerateArray(), item => item.TryGetProperty("type", out var type) && type.GetString() == "function_call");
+        Assert.Contains(input.EnumerateArray(), item => item.TryGetProperty("type", out var type) && type.GetString() == "function_call_output"
+            && item.GetProperty("call_id").GetString() == "call_read");
+    }
+
     private sealed class InlineProgress(Action<string> report) : IProgress<string> { public void Report(string value) => report(value); }
     private sealed class StubHandler(string responseBody, string mediaType) : HttpMessageHandler
     {
@@ -144,6 +166,19 @@ public sealed class ChatSyncClientTests
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Body = await request.Content!.ReadAsStringAsync(cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(events, Encoding.UTF8, "text/event-stream") };
+        }
+    }
+
+    private sealed class ToolLoopHandler : HttpMessageHandler
+    {
+        public List<string> Bodies { get; } = [];
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Bodies.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
+            var events = Bodies.Count == 1
+                ? "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"function_call\",\"id\":\"fc_read\",\"call_id\":\"call_read\",\"name\":\"read_text_file\",\"arguments\":\"{\\\"path\\\":\\\"README.md\\\",\\\"start_line\\\":1,\\\"line_count\\\":20}\"}]}}\n\ndata: [DONE]\n\n"
+                : "data: {\"type\":\"response.output_text.delta\",\"delta\":\"读取完成\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\ndata: [DONE]\n\n";
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(events, Encoding.UTF8, "text/event-stream") };
         }
     }

@@ -316,13 +316,15 @@ test("serves a safe public landing page", async (t) => {
   assert.equal(response.headers.get("vary"), "User-Agent");
   const page = await response.text();
   const packageMetadata = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8")) as { version: string };
-  const releaseVersion = packageMetadata.version.replace(/\.0$/, "");
+  const releaseVersion = packageMetadata.version;
   assert.match(page, /泺栋 Chat/);
   assert.ok(page.includes(`oss.520skx.com/latest/LuodongChat-${releaseVersion}-win-x64-setup.exe`));
   assert.ok(page.includes(`oss.520skx.com/latest/LuodongChat-${releaseVersion}-win-x64-portable.zip`));
   assert.ok(page.includes(`oss.520skx.com/latest/LuodongChat-${releaseVersion}-win-arm64-setup.exe`));
   assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat\.apk/);
   assert.match(page, /github\.com\/SunKeXu01\/LuodongChat\/releases\/latest/);
+  assert.match(page, /class="github-link"/);
+  assert.match(page, /访问泺栋 Chat GitHub 项目/);
   assert.match(page, /viewport-fit=cover/);
   assert.match(page, /选择适合你的版本/);
   assert.match(page, /历史对话不会在泺栋 Chat 服务器持久化/);
@@ -338,7 +340,9 @@ test("serves a safe public landing page", async (t) => {
   const landingStyles = await fetch(`http://127.0.0.1:${gatewayPort}/assets/landing.css`);
   assert.equal(landingStyles.status, 200);
   assert.match(landingStyles.headers.get("content-type") ?? "", /^text\/css/);
-  assert.match(await landingStyles.text(), /\.product-window/);
+  const landingCss = await landingStyles.text();
+  assert.match(landingCss, /\.product-window/);
+  assert.match(landingCss, /\.topnav \.github-link/);
 
   const landingScript = await fetch(`http://127.0.0.1:${gatewayPort}/assets/landing.js`);
   assert.equal(landingScript.status, 200);

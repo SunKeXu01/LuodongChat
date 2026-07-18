@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Net.Http;
+using System.Security.Principal;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -779,7 +780,7 @@ public partial class MainWindow : Window
         }
         ChatNotice.Text = fullPath is null
             ? "当前对话已移出项目空间"
-            : "当前对话已进入项目空间。相关文本会发送给 GPT；目录保持只读，不会修改文件。";
+            : "当前对话已进入项目空间。GPT 可以读取文件；写入、移动、删除或运行命令都会先询问你。";
         ChatInput.Focus();
     }
 
@@ -789,7 +790,7 @@ public partial class MainWindow : Window
         ProjectPickerLabel.Text = _selectedProjectPath is null ? "选择项目" : Path.GetFileName(_selectedProjectPath);
         ProjectPickerButton.ToolTip = _selectedProjectPath ?? "选择项目目录";
         if (_selectedProjectPath is not null)
-            ProjectPickerButton.ToolTip = $"项目上下文：{_selectedProjectPath}\n只读访问；点击查看文件或移除上下文";
+            ProjectPickerButton.ToolTip = $"项目空间：{_selectedProjectPath}\n读取自动允许；修改和命令执行前询问；点击查看详情或移除";
     }
 
     private async Task ShowProjectContextDetailsAsync()
@@ -811,7 +812,7 @@ public partial class MainWindow : Window
         root.Children.Add(new System.Windows.Controls.TextBlock { Text = inspected.ProjectName, FontSize = 22, FontWeight = FontWeights.SemiBold });
         var summary = new System.Windows.Controls.TextBlock
         {
-            Text = $"访问模式：只读  ·  扫描 {inspected.ScannedFileCount} 个文件  ·  可读取 {inspected.ReadableFiles.Count} 个  ·  忽略 {inspected.IgnoredFileCount} 个",
+            Text = $"访问模式：读取自动允许，修改和命令执行前询问  ·  扫描 {inspected.ScannedFileCount} 个文件  ·  可读取 {inspected.ReadableFiles.Count} 个  ·  忽略 {inspected.IgnoredFileCount} 个",
             Foreground = (Brush)FindResource("MutedBrush"), Margin = new Thickness(0, 8, 0, 14), TextWrapping = TextWrapping.Wrap,
         };
         System.Windows.Controls.Grid.SetRow(summary, 1); root.Children.Add(summary);
@@ -1109,7 +1110,9 @@ public partial class MainWindow : Window
                     GatewayUri, _session.AccessToken, context, progress, cancellationToken,
                     enableWebSearch: _webSearchEnabled, enableImageGeneration: wantsImage,
                     attachmentIds: attachmentSnapshot.Select(item => item.ServerFileId!).ToArray(),
-                    hasReferenceImages: hasReferenceImages);
+                    hasReferenceImages: hasReferenceImages,
+                    localTools: _selectedProjectPath is null ? null : WorkspaceFileTools.ToolDefinitions,
+                    executeLocalTool: _selectedProjectPath is null ? null : CreateWorkspaceToolExecutor(_selectedProjectPath));
                 var storedImages = new List<GeneratedChatImage>();
                 foreach (var image in result.Images)
                     storedImages.Add(await _conversationStore.SaveGeneratedImageAsync(
@@ -1162,6 +1165,53 @@ public partial class MainWindow : Window
             StopGenerationButton.Visibility = Visibility.Collapsed;
             ChatInput.Focus();
         }
+    }
+
+    private Func<LocalToolCall, CancellationToken, Task<string>> CreateWorkspaceToolExecutor(string projectPath)
+    {
+        var tools = new WorkspaceFileTools(projectPath);
+        return async (call, cancellationToken) =>
+        {
+            WorkspaceToolPlan plan;
+            try { plan = tools.Describe(call); }
+            catch (Exception error)
+            {
+                return System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = error.Message });
+            }
+            if (plan.RequiresApproval)
+            {
+                var paths = string.Join("\n", plan.AffectedPaths.Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => "• " + path));
+                if (plan.Name == "run_command" && IsRunningElevated())
+                    return System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = "泺栋 Chat 当前以管理员身份运行。为避免 AI 命令获得管理员权限，请退出后以普通方式重新启动软件。" });
+                var commandWarning = plan.Name == "run_command"
+                    ? "\n\n安全提示：命令由本机 Shell 执行，可能产生项目目录之外的副作用。请确认完整命令可信；泺栋 Chat 不会自动授予管理员权限。"
+                    : "";
+                var answer = MessageBox.Show(
+                    $"GPT 请求执行以下本地操作：\n\n{plan.Summary}\n\n工作位置：\n{paths}{commandWarning}\n\n仅允许本次操作吗？",
+                    "确认项目文件操作", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+                if (answer != MessageBoxResult.Yes)
+                    return System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = "用户拒绝了本次文件操作。" });
+            }
+            ChatNotice.Text = plan.Summary + "…";
+            var result = await tools.ExecuteAsync(call, cancellationToken);
+            var succeeded = false;
+            try { succeeded = System.Text.Json.JsonDocument.Parse(result).RootElement.GetProperty("ok").GetBoolean(); }
+            catch (System.Text.Json.JsonException) { }
+            ChatNotice.Text = succeeded
+                ? plan.RequiresApproval ? plan.Summary + "已完成" : "已读取项目文件，正在继续回答…"
+                : plan.Summary + "未执行，正在让 GPT 调整方案…";
+            return result;
+        };
+    }
+
+    private static bool IsRunningElevated()
+    {
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+        }
+        catch { return false; }
     }
 
     private void CitationButton_OnClick(object sender, RoutedEventArgs e)

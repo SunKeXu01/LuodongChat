@@ -18,31 +18,71 @@ public sealed record ChatStreamResult(
     string Text, IReadOnlyList<ChatCitation> Citations, IReadOnlyList<GeneratedImageData> Images,
     bool WebSearchUnavailable = false, bool WebSearchPerformed = false);
 
+internal sealed record ChatStreamPassResult(
+    string Text, IReadOnlyList<ChatCitation> Citations, IReadOnlyList<GeneratedImageData> Images,
+    bool WebSearchPerformed, IReadOnlyList<LocalToolCall> ToolCalls, IReadOnlyList<JsonElement> OutputItems);
+
 public sealed class ChatSyncClient(HttpClient http)
 {
     public async Task<ChatStreamResult> StreamResponseAsync(
         Uri gateway, string token, IReadOnlyList<SyncedChatMessage> messages,
         IProgress<string>? progress = null, CancellationToken cancellationToken = default,
         bool enableWebSearch = false, bool enableImageGeneration = false, IReadOnlyList<string>? attachmentIds = null,
-        bool hasReferenceImages = false)
+        bool hasReferenceImages = false, IReadOnlyList<object>? localTools = null,
+        Func<LocalToolCall, CancellationToken, Task<string>>? executeLocalTool = null)
     {
         try
         {
-            return await StreamOnceAsync(gateway, token, messages, progress, cancellationToken, enableWebSearch, enableImageGeneration, attachmentIds, hasReferenceImages);
+            return await StreamWithToolsAsync(gateway, token, messages, progress, cancellationToken, enableWebSearch,
+                enableImageGeneration, attachmentIds, hasReferenceImages, localTools, executeLocalTool);
         }
         catch (ResponseRequestException error) when (enableWebSearch && error.StatusCode is
             HttpStatusCode.BadRequest or HttpStatusCode.NotFound or HttpStatusCode.UnprocessableEntity or
             HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout)
         {
-            var fallback = await StreamOnceAsync(gateway, token, messages, progress, cancellationToken, false, enableImageGeneration, attachmentIds, hasReferenceImages);
+            var fallback = await StreamWithToolsAsync(gateway, token, messages, progress, cancellationToken, false,
+                enableImageGeneration, attachmentIds, hasReferenceImages, localTools, executeLocalTool);
             return fallback with { WebSearchUnavailable = true };
         }
     }
 
-    private async Task<ChatStreamResult> StreamOnceAsync(
+    private async Task<ChatStreamResult> StreamWithToolsAsync(
         Uri gateway, string token, IReadOnlyList<SyncedChatMessage> messages,
         IProgress<string>? progress, CancellationToken cancellationToken, bool enableWebSearch, bool enableImageGeneration,
-        IReadOnlyList<string>? attachmentIds, bool hasReferenceImages)
+        IReadOnlyList<string>? attachmentIds, bool hasReferenceImages, IReadOnlyList<object>? localTools,
+        Func<LocalToolCall, CancellationToken, Task<string>>? executeLocalTool)
+    {
+        var input = new List<object>(messages.Select(message => (object)new { role = message.Role, content = message.Content }));
+        var text = new StringBuilder();
+        var citations = new Dictionary<string, ChatCitation>(StringComparer.OrdinalIgnoreCase);
+        var images = new List<GeneratedImageData>();
+        var webSearchPerformed = false;
+        for (var round = 0; round < 8; round++)
+        {
+            var pass = await StreamOnceAsync(gateway, token, input, progress, cancellationToken, enableWebSearch,
+                enableImageGeneration, round == 0 ? attachmentIds : null, hasReferenceImages, localTools);
+            text.Append(pass.Text);
+            foreach (var citation in pass.Citations) citations[citation.Url] = citation;
+            images.AddRange(pass.Images);
+            webSearchPerformed |= pass.WebSearchPerformed;
+            if (pass.ToolCalls.Count == 0)
+                return new ChatStreamResult(text.ToString(), citations.Values.ToArray(), images, WebSearchPerformed: webSearchPerformed);
+            if (executeLocalTool is null) throw new InvalidOperationException("模型请求了本地工具，但客户端没有配置工具执行器。");
+            foreach (var outputItem in pass.OutputItems) input.Add(outputItem);
+            foreach (var call in pass.ToolCalls)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var output = await executeLocalTool(call, cancellationToken);
+                input.Add(new { type = "function_call_output", call_id = call.CallId, output });
+            }
+        }
+        throw new InvalidOperationException("本次文件操作步骤过多，已为安全起见停止。请缩小任务范围后重试。");
+    }
+
+    private async Task<ChatStreamPassResult> StreamOnceAsync(
+        Uri gateway, string token, IReadOnlyList<object> input,
+        IProgress<string>? progress, CancellationToken cancellationToken, bool enableWebSearch, bool enableImageGeneration,
+        IReadOnlyList<string>? attachmentIds, bool hasReferenceImages, IReadOnlyList<object>? localTools)
     {
         using var request = Authorized(HttpMethod.Post, new Uri(gateway, "/v1/responses"), token);
         request.Headers.Accept.ParseAdd("text/event-stream");
@@ -50,7 +90,7 @@ public sealed class ChatSyncClient(HttpClient http)
         {
             ["model"] = enableWebSearch ? "gpt-5.6" : "gpt-5.6-sol",
             ["stream"] = true,
-            ["input"] = messages.Select(message => new { role = message.Role, content = message.Content }),
+            ["input"] = input,
         };
         if (attachmentIds is { Count: > 0 }) payload["attachment_ids"] = attachmentIds;
         var tools = new List<object>();
@@ -58,6 +98,7 @@ public sealed class ChatSyncClient(HttpClient http)
             tools.Add(new { type = "web_search", search_context_size = "medium" });
         if (enableImageGeneration)
             tools.Add(new { type = "image_generation", action = hasReferenceImages ? "edit" : "generate", size = "auto", quality = "auto" });
+        if (localTools is { Count: > 0 }) tools.AddRange(localTools);
         if (tools.Count > 0)
         {
             payload["tools"] = tools;
@@ -71,6 +112,8 @@ public sealed class ChatSyncClient(HttpClient http)
         var result = new StringBuilder();
         var citations = new Dictionary<string, ChatCitation>(StringComparer.OrdinalIgnoreCase);
         var images = new List<GeneratedImageData>();
+        var toolCalls = new List<LocalToolCall>();
+        var outputItems = new List<JsonElement>();
         var webSearchPerformed = false;
         while (await reader.ReadLineAsync(cancellationToken) is { } line)
         {
@@ -94,21 +137,31 @@ public sealed class ChatSyncClient(HttpClient http)
                     && item.TryGetProperty("type", out var itemType) && itemType.GetString() == "web_search_call")
                     webSearchPerformed = true;
                 if (eventType == "response.completed")
-                    webSearchPerformed |= ExtractCompletedOutput(root, citations, images);
+                    webSearchPerformed |= ExtractCompletedOutput(root, citations, images, toolCalls, outputItems);
             }
             catch (JsonException) { }
         }
-        return new ChatStreamResult(result.ToString(), citations.Values.ToArray(), images, WebSearchPerformed: webSearchPerformed);
+        return new ChatStreamPassResult(result.ToString(), citations.Values.ToArray(), images, webSearchPerformed, toolCalls, outputItems);
     }
 
     private static bool ExtractCompletedOutput(
-        JsonElement root, IDictionary<string, ChatCitation> citations, ICollection<GeneratedImageData> images)
+        JsonElement root, IDictionary<string, ChatCitation> citations, ICollection<GeneratedImageData> images,
+        ICollection<LocalToolCall> toolCalls, ICollection<JsonElement> outputItems)
     {
         if (!root.TryGetProperty("response", out var response)
             || !response.TryGetProperty("output", out var output) || output.ValueKind != JsonValueKind.Array) return false;
         var webSearchPerformed = false;
         foreach (var item in output.EnumerateArray())
         {
+            outputItems.Add(item.Clone());
+            if (item.TryGetProperty("type", out var functionType) && functionType.GetString() == "function_call"
+                && item.TryGetProperty("call_id", out var callIdElement) && callIdElement.GetString() is { Length: > 0 } callId
+                && item.TryGetProperty("name", out var nameElement) && nameElement.GetString() is { Length: > 0 } name)
+            {
+                var arguments = item.TryGetProperty("arguments", out var argumentsElement) ? argumentsElement.GetString() ?? "{}" : "{}";
+                toolCalls.Add(new LocalToolCall(callId, name, arguments));
+                continue;
+            }
             if (item.TryGetProperty("type", out var itemType) && itemType.GetString() == "web_search_call")
             {
                 webSearchPerformed = true;
