@@ -1103,11 +1103,13 @@ public partial class MainWindow : Window
                     ScrollChatToEnd();
                 });
                 var wantsImage = ImageGenerationIntent.IsExplicit(text);
-                if (wantsImage) ChatNotice.Text = "正在生成图片，请稍候…";
+                var hasReferenceImages = attachmentSnapshot.Any(item => item.IsImage);
+                if (wantsImage) ChatNotice.Text = hasReferenceImages ? "正在参考上传图片生成，请稍候…" : "正在生成图片，请稍候…";
                 var result = await _chat.StreamResponseAsync(
                     GatewayUri, _session.AccessToken, context, progress, cancellationToken,
                     enableWebSearch: _webSearchEnabled, enableImageGeneration: wantsImage,
-                    attachmentIds: attachmentSnapshot.Select(item => item.ServerFileId!).ToArray());
+                    attachmentIds: attachmentSnapshot.Select(item => item.ServerFileId!).ToArray(),
+                    hasReferenceImages: hasReferenceImages);
                 var storedImages = new List<GeneratedChatImage>();
                 foreach (var image in result.Images)
                     storedImages.Add(await _conversationStore.SaveGeneratedImageAsync(
@@ -1256,7 +1258,7 @@ public partial class MainWindow : Window
     {
         var questions = _chatMessages.Where(message => message.IsUser).ToArray();
         _questionAnchors.Clear();
-        if (questions.Length < 3)
+        if (questions.Length < 2)
         {
             QuestionNavigator.Visibility = Visibility.Collapsed;
             return;

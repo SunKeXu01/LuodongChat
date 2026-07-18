@@ -282,7 +282,7 @@
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
                       <Grid Margin="{Binding MessageMargin}">
-                        <StackPanel x:Name="MessageGroup" MaxWidth="820" HorizontalAlignment="Left">
+                        <StackPanel x:Name="MessageGroup" MaxWidth="820" HorizontalAlignment="Left" Background="Transparent">
                           <StackPanel x:Name="MessageHeader" Orientation="Horizontal" Margin="2,0,2,6">
                             <Border x:Name="MessageAvatar" Width="28" Height="28" CornerRadius="14" Background="{DynamicResource BrandBrush}"><TextBlock x:Name="MessageAvatarText" Text="AI" Foreground="White" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                             <TextBlock x:Name="MessageSender" Text="{Binding Sender}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
@@ -336,15 +336,15 @@
                             </ItemsControl>
                             </StackPanel>
                           </Border>
-                          <Grid x:Name="MessageActions" Margin="4,6,4,0">
+                          <Grid x:Name="MessageActions" Margin="4,6,4,0" Background="Transparent">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <TextBlock x:Name="MessageTime" Text="{Binding TimeText}" Foreground="{DynamicResource WeakTextBrush}" FontSize="12" VerticalAlignment="Center"/>
-                            <StackPanel Grid.Column="0" x:Name="UserActions" Orientation="Horizontal" Margin="0,0,8,0" Visibility="Collapsed" Opacity="0" IsHitTestVisible="False">
+                            <StackPanel Grid.Column="0" x:Name="UserActions" Orientation="Horizontal" Margin="0,0,8,0" Visibility="Collapsed" Opacity="0.42" IsHitTestVisible="True">
                               <Button Tag="{Binding}" Style="{StaticResource IconActionButton}" ToolTip="复制消息" Click="CopyMessageButton_OnClick">
                                 <Viewbox Width="15" Height="15"><Path Data="M8,8 H19 V19 H8 Z M5,16 H4 A2,2 0 0 1 2,14 V4 A2,2 0 0 1 4,2 H14 A2,2 0 0 1 16,4 V5" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" StrokeLineJoin="Round" Fill="Transparent"/></Viewbox>
                               </Button>
                             </StackPanel>
-                            <StackPanel Grid.Column="1" x:Name="AssistantActions" Orientation="Horizontal" Margin="8,0,0,0" Opacity="0" IsHitTestVisible="False">
+                            <StackPanel Grid.Column="1" x:Name="AssistantActions" Orientation="Horizontal" Margin="8,0,0,0" Opacity="0.42" IsHitTestVisible="True">
                               <Button Tag="{Binding}" Style="{StaticResource IconActionButton}" ToolTip="复制回答" Click="CopyMessageButton_OnClick">
                                 <Viewbox Width="15" Height="15"><Path Data="M8,8 H19 V19 H8 Z M5,16 H4 A2,2 0 0 1 2,14 V4 A2,2 0 0 1 4,2 H14 A2,2 0 0 1 16,4 V5" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" StrokeLineJoin="Round" Fill="Transparent"/></Viewbox>
                               </Button>
@@ -385,9 +385,7 @@
                         </DataTrigger>
                         <Trigger SourceName="MessageGroup" Property="IsMouseOver" Value="True">
                           <Setter TargetName="AssistantActions" Property="Opacity" Value="1"/>
-                          <Setter TargetName="AssistantActions" Property="IsHitTestVisible" Value="True"/>
                           <Setter TargetName="UserActions" Property="Opacity" Value="1"/>
-                          <Setter TargetName="UserActions" Property="IsHitTestVisible" Value="True"/>
                         </Trigger>
                       </DataTemplate.Triggers>
                     </DataTemplate>

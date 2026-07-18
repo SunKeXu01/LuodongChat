@@ -23,17 +23,18 @@ public sealed class ChatSyncClient(HttpClient http)
     public async Task<ChatStreamResult> StreamResponseAsync(
         Uri gateway, string token, IReadOnlyList<SyncedChatMessage> messages,
         IProgress<string>? progress = null, CancellationToken cancellationToken = default,
-        bool enableWebSearch = false, bool enableImageGeneration = false, IReadOnlyList<string>? attachmentIds = null)
+        bool enableWebSearch = false, bool enableImageGeneration = false, IReadOnlyList<string>? attachmentIds = null,
+        bool hasReferenceImages = false)
     {
         try
         {
-            return await StreamOnceAsync(gateway, token, messages, progress, cancellationToken, enableWebSearch, enableImageGeneration, attachmentIds);
+            return await StreamOnceAsync(gateway, token, messages, progress, cancellationToken, enableWebSearch, enableImageGeneration, attachmentIds, hasReferenceImages);
         }
         catch (ResponseRequestException error) when (enableWebSearch && error.StatusCode is
             HttpStatusCode.BadRequest or HttpStatusCode.NotFound or HttpStatusCode.UnprocessableEntity or
             HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout)
         {
-            var fallback = await StreamOnceAsync(gateway, token, messages, progress, cancellationToken, false, enableImageGeneration, attachmentIds);
+            var fallback = await StreamOnceAsync(gateway, token, messages, progress, cancellationToken, false, enableImageGeneration, attachmentIds, hasReferenceImages);
             return fallback with { WebSearchUnavailable = true };
         }
     }
@@ -41,7 +42,7 @@ public sealed class ChatSyncClient(HttpClient http)
     private async Task<ChatStreamResult> StreamOnceAsync(
         Uri gateway, string token, IReadOnlyList<SyncedChatMessage> messages,
         IProgress<string>? progress, CancellationToken cancellationToken, bool enableWebSearch, bool enableImageGeneration,
-        IReadOnlyList<string>? attachmentIds)
+        IReadOnlyList<string>? attachmentIds, bool hasReferenceImages)
     {
         using var request = Authorized(HttpMethod.Post, new Uri(gateway, "/v1/responses"), token);
         request.Headers.Accept.ParseAdd("text/event-stream");
@@ -56,7 +57,7 @@ public sealed class ChatSyncClient(HttpClient http)
         if (enableWebSearch)
             tools.Add(new { type = "web_search", search_context_size = "medium" });
         if (enableImageGeneration)
-            tools.Add(new { type = "image_generation", action = "generate", size = "auto", quality = "auto" });
+            tools.Add(new { type = "image_generation", action = hasReferenceImages ? "edit" : "generate", size = "auto", quality = "auto" });
         if (tools.Count > 0)
         {
             payload["tools"] = tools;

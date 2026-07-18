@@ -148,12 +148,25 @@ function latestUserPrompt(body: Buffer): string {
 
 async function generateImage(
   config: NonNullable<GatewayConfig["imageGeneration"]>, prompt: string, timeoutMs: number,
+  referenceImages: ResolvedAttachment[] = [],
 ): Promise<string> {
-  const response = await fetch(`${config.baseUrl}/images/generations`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${config.apiKey}`, "content-type": "application/json" },
-    body: JSON.stringify({ model: config.model, prompt, size: "1024x1024" }),
-    signal: AbortSignal.timeout(timeoutMs),
+  const hasReferences = referenceImages.length > 0;
+  const headers: Record<string, string> = { authorization: `Bearer ${config.apiKey}` };
+  let body: BodyInit;
+  if (hasReferences) {
+    const form = new FormData();
+    form.set("model", config.model);
+    form.set("prompt", prompt);
+    form.set("size", "1024x1024");
+    for (const image of referenceImages)
+      form.append("image[]", new Blob([new Uint8Array(image.data)], { type: image.mimeType }), image.name);
+    body = form;
+  } else {
+    headers["content-type"] = "application/json";
+    body = JSON.stringify({ model: config.model, prompt, size: "1024x1024" });
+  }
+  const response = await fetch(`${config.baseUrl}/images/${hasReferences ? "edits" : "generations"}`, {
+    method: "POST", headers, body, signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) { await response.body?.cancel(); throw new Error(`image_api_http_${response.status}`); }
   const payload = await response.json() as { data?: { b64_json?: string }[] };
@@ -658,7 +671,9 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
       const requiresImageGeneration = requestsImageGeneration(body);
       if (requiresImageGeneration && config.imageGeneration) {
         attempts = 1;
-        const image = await generateImage(config.imageGeneration, latestUserPrompt(body), config.upstreamTimeoutMs);
+        const referenceImages = resolvedAttachments.filter((item) => item.mimeType.startsWith("image/"));
+        const image = await generateImage(
+          config.imageGeneration, latestUserPrompt(body), config.upstreamTimeoutMs, referenceImages);
         const event = JSON.stringify({
           type: "response.completed",
           response: { output: [{ type: "image_generation_call", result: image }] },

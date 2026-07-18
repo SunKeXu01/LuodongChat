@@ -88,6 +88,26 @@ public sealed class ChatSyncClientTests
         Assert.Equal("aGVsbG8=", Assert.Single(result.Images).Base64);
         using var body = JsonDocument.Parse(handler.Body!);
         Assert.Equal("image_generation", body.RootElement.GetProperty("tools")[0].GetProperty("type").GetString());
+        Assert.Equal("generate", body.RootElement.GetProperty("tools")[0].GetProperty("action").GetString());
+    }
+
+    [Fact]
+    public async Task RequestsImageEditingWhenReferenceImagesAreAttached()
+    {
+        var events = """
+            data: {"type":"response.completed","response":{"output":[{"type":"image_generation_call","result":"aGVsbG8="}]}}
+
+            data: [DONE]
+
+            """;
+        var handler = new CapturingHandler(events);
+        await new ChatSyncClient(new HttpClient(handler)).StreamResponseAsync(
+            new Uri("https://gateway.example"), "usr_test", [], enableImageGeneration: true,
+            attachmentIds: ["att_reference"], hasReferenceImages: true);
+
+        using var body = JsonDocument.Parse(handler.Body!);
+        Assert.Equal("edit", body.RootElement.GetProperty("tools")[0].GetProperty("action").GetString());
+        Assert.Equal("att_reference", body.RootElement.GetProperty("attachment_ids")[0].GetString());
     }
 
     private sealed class InlineProgress(Action<string> report) : IProgress<string> { public void Report(string value) => report(value); }

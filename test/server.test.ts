@@ -662,3 +662,63 @@ test("routes image generation requests to the verified capable upstream", async 
   assert.equal(ordinaryCalls, 0);
   assert.match(await response.text(), /image_generation_call.*aGVsbG8=/);
 });
+
+test("sends uploaded images to the edit endpoint as generation references", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "connector-image-reference-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const images = createServer(async (req, res) => {
+    assert.equal(req.url, "/v1/images/edits");
+    assert.match(req.headers["content-type"] ?? "", /^multipart\/form-data;/);
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(Buffer.from(chunk));
+    const form = await new Response(new Uint8Array(Buffer.concat(chunks)), {
+      headers: { "content-type": req.headers["content-type"]! },
+    }).formData();
+    assert.equal(form.get("model"), "gpt-image-2");
+    assert.equal(form.get("prompt"), "基于参考图生成新图");
+    assert.equal(form.get("size"), "1024x1024");
+    const references = form.getAll("image[]");
+    assert.equal(references.length, 1);
+    const reference = references[0];
+    assert.ok(reference && typeof reference !== "string");
+    assert.equal(reference.name, "reference.png");
+    assert.equal(reference.type, "image/png");
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ data: [{ b64_json: "aGVsbG8=" }] }));
+  });
+  const imagePort = await listen(images);
+  t.after(() => images.close());
+
+  const config: GatewayConfig = {
+    port: 0, upstreamBaseUrl: "https://upstream.invalid", upstreamApiKey: "unused", upstreamApiKeys: ["unused"],
+    upstreamResponsesPath: "/responses", gatewayKeyHashes: new Set(), requestsPerMinute: 10,
+    maxConcurrentRequests: 2, upstreamTimeoutMs: 5_000,
+    imageGeneration: { baseUrl: `http://127.0.0.1:${imagePort}/v1`, apiKey: "image-key", model: "gpt-image-2" },
+  };
+  const enrollmentService = {
+    authenticate: async (token: string) => token === "usr_test" ? { id: "account-1" } : null,
+    getRequestLimits: () => ({ requestsPerMinute: 10, maxConcurrentRequests: 2, dailyLimit: null }),
+  } as unknown as EnrollmentService;
+  const gateway = createGatewayServer(config, { enrollmentService, attachmentStore: new AttachmentStore(directory) });
+  const gatewayPort = await listen(gateway);
+  t.after(() => gateway.close());
+
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+  const uploadForm = new FormData();
+  uploadForm.append("file", new Blob([png], { type: "image/png" }), "reference.png");
+  const upload = await fetch(`http://127.0.0.1:${gatewayPort}/v1/attachments`, {
+    method: "POST", headers: { authorization: "Bearer usr_test" }, body: uploadForm,
+  });
+  assert.equal(upload.status, 201);
+  const uploaded = await upload.json() as { id: string };
+
+  const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/responses`, {
+    method: "POST", headers: { authorization: "Bearer usr_test", "content-type": "application/json" },
+    body: JSON.stringify({
+      model: "gpt-5.6-sol", tools: [{ type: "image_generation", action: "edit" }],
+      input: [{ role: "user", content: "基于参考图生成新图" }], attachment_ids: [uploaded.id],
+    }),
+  });
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /image_generation_call.*aGVsbG8=/);
+});
