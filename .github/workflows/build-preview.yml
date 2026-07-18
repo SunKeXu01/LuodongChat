@@ -85,7 +85,34 @@ jobs:
           global-json-file: global.json
       - name: Install NSIS 3.12
         shell: pwsh
-        run: choco install nsis --version=3.12 --yes --no-progress
+        run: |
+          $chocoSucceeded = $false
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            choco install nsis --version=3.12 --yes --no-progress
+            if ($LASTEXITCODE -eq 0) {
+              $chocoSucceeded = $true
+              break
+            }
+            Write-Warning "Chocolatey NSIS install attempt $attempt failed."
+            if ($attempt -lt 3) { Start-Sleep -Seconds (10 * $attempt) }
+          }
+          if ($chocoSucceeded) {
+            $home = Join-Path ${env:ProgramFiles(x86)} 'NSIS'
+            if (!(Test-Path "$home/makensis.exe")) { $home = Join-Path $env:ProgramFiles 'NSIS' }
+          } else {
+            # Chocolatey's public feed occasionally returns 503/504. Fall back to
+            # the official, version-pinned NSIS archive and verify it before use.
+            $archive = Join-Path $env:RUNNER_TEMP 'nsis-3.12.zip'
+            $destination = Join-Path $env:RUNNER_TEMP 'nsis-portable'
+            Invoke-WebRequest -UseBasicParsing -Uri 'https://downloads.sourceforge.net/project/nsis/NSIS%203/3.12/nsis-3.12.zip' -OutFile $archive
+            $expected = '56581f90db321581c5381193d796fffcf2d24b2f8fed2160a6c6a3baa67f2c4f'
+            $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) { throw "Official NSIS archive checksum mismatch: $actual" }
+            Expand-Archive -Path $archive -DestinationPath $destination -Force
+            $home = Join-Path $destination 'nsis-3.12'
+          }
+          if (!(Test-Path "$home/makensis.exe")) { throw 'NSIS compiler was not installed or extracted correctly.' }
+          "NSIS_HOME=$home" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Verify NSIS script uses UTF-8 BOM
         shell: pwsh
         run: |
@@ -116,8 +143,7 @@ jobs:
           (Get-FileHash "$asset-portable.zip" -Algorithm SHA256).Hash.ToLowerInvariant() |
             Set-Content "$asset-portable.zip.sha256"
           $setup = "$asset-setup.exe"
-          $makensis = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
-          if (!(Test-Path $makensis)) { $makensis = Join-Path $env:ProgramFiles 'NSIS\makensis.exe' }
+          $makensis = Join-Path $env:NSIS_HOME 'makensis.exe'
           if (!(Test-Path $makensis)) { throw 'NSIS compiler was installed but makensis.exe was not found.' }
           & $makensis "/DVERSION=$version" "/DFILE_VERSION=$fileVersion" "/DSOURCE_EXE=$((Resolve-Path 'artifacts/publish/LuodongChat.exe').Path)" "/DOUTPUT_FILE=$((Resolve-Path 'artifacts').Path)\LuodongChat-$version-win-x64-setup.exe" "/DAPP_ICON=$((Resolve-Path 'client/ChatGPTConnector.App/Assets/AppIcon.ico').Path)" installer/LuodongChat.nsi
           if ($LASTEXITCODE -ne 0 -or !(Test-Path $setup)) { throw "NSIS installer build failed." }
