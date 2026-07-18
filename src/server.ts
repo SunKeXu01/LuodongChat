@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { AttachmentStore, MAX_ATTACHMENT_BYTES, attachmentCategory, type ResolvedAttachment } from "./attachments.js";
+import { AttachmentStore, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_TOTAL_BYTES, attachmentCategory, type ResolvedAttachment } from "./attachments.js";
 import {
   extractBearerKey,
   hashGatewayKey,
@@ -238,7 +238,8 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
         const status = code === "request_too_large" || code === "attachment_too_large" ? 413
           : code === "attachment_count_exceeded" ? 409 : 400;
         const messages: Record<string, string> = {
-          request_too_large: "附件不能超过 20 MB", attachment_too_large: "附件不能超过 20 MB",
+          request_too_large: "文档不能超过 40 MB，其他附件不能超过 20 MB",
+          attachment_too_large: "文档不能超过 40 MB，其他附件不能超过 20 MB",
           attachment_count_exceeded: "最多只能保留 10 个待发送附件", attachment_type_not_allowed: "不支持该文件扩展名",
           attachment_duplicate: "该附件已经添加，请勿重复上传",
           attachment_mime_not_allowed: "不支持该文件类型", attachment_signature_mismatch: "文件内容与扩展名或类型不一致",
@@ -640,7 +641,7 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
           if (!ids.every((id) => typeof id === "string" && /^att_[a-f\d]{32}$/.test(id))) throw new Error("attachment_id_invalid");
           resolvedAttachments = await attachmentStore.resolveMany(requestUserId, ids as string[]);
           const total = resolvedAttachments.reduce((sum, item) => sum + item.size, 0);
-          if (total > 50 * 1024 * 1024) throw new Error("attachment_total_too_large");
+          if (total > MAX_ATTACHMENTS_TOTAL_BYTES) throw new Error("attachment_total_too_large");
           body = withResolvedAttachments(body, resolvedAttachments);
         }
       } catch (error) {
@@ -648,7 +649,7 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
         if (code.startsWith("attachment_")) {
           await ledger.finishRequest({ requestId, status: "failed", endedAt: new Date(), attempts: 0, errorClass: code });
           return json(res, code === "attachment_not_found" ? 410 : 400, {
-            error: { code, message: code === "attachment_not_found" ? "附件已过期，请重新添加" : code === "attachment_total_too_large" ? "单次发送的附件总大小不能超过 50 MB" : "附件数据无效" },
+            error: { code, message: code === "attachment_not_found" ? "附件已过期，请重新添加" : code === "attachment_total_too_large" ? "单次发送的附件总大小不能超过 48 MB" : "附件数据无效" },
           });
         }
         throw error;

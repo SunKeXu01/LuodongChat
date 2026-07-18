@@ -70,7 +70,8 @@ public sealed class ComposerAttachment : INotifyPropertyChanged
 public sealed class AttachmentComposerController : IDisposable
 {
     public const int MaximumCount = 10;
-    public const long MaximumFileBytes = 20 * 1024 * 1024;
+    public const long MaximumDefaultFileBytes = 20 * 1024 * 1024;
+    public const long MaximumDocumentFileBytes = 40 * 1024 * 1024;
     private readonly AttachmentUploadClient _client;
     private readonly Uri _gateway;
     private readonly Func<string?> _token;
@@ -185,10 +186,12 @@ public sealed class AttachmentComposerController : IDisposable
         if (!File.Exists(path)) throw new FileNotFoundException("文件不存在或已被移动。", path);
         var info = new FileInfo(path);
         if (info.Length == 0) throw new InvalidDataException($"“{info.Name}”是空文件，无法上传。");
-        if (info.Length > MaximumFileBytes) throw new InvalidDataException($"“{info.Name}”超过 20 MB 限制。");
         var extension = info.Extension.ToLowerInvariant();
         var (mime, category) = FileKind(extension);
         if (mime is null) throw new InvalidDataException($"暂不支持 {extension.ToUpperInvariant()} 文件。");
+        var maximumBytes = category == "document" ? MaximumDocumentFileBytes : MaximumDefaultFileBytes;
+        if (info.Length > maximumBytes)
+            throw new InvalidDataException($"“{info.Name}”超过 {(maximumBytes / 1024 / 1024)} MB 限制。");
         string fingerprint;
         await using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, true))
             fingerprint = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));

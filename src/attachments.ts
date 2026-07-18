@@ -3,7 +3,12 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, extname, join } from "node:path";
 
-export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+export const MAX_DEFAULT_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+export const MAX_DOCUMENT_ATTACHMENT_BYTES = 40 * 1024 * 1024;
+// This is also used as the HTTP request-body ceiling. Per-category validation
+// below keeps images and other binary attachments at the smaller limit.
+export const MAX_ATTACHMENT_BYTES = MAX_DOCUMENT_ATTACHMENT_BYTES;
+export const MAX_ATTACHMENTS_TOTAL_BYTES = 48 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_OWNER = 10;
 const ATTACHMENT_TTL_MS = 30 * 60 * 1000;
 
@@ -77,7 +82,10 @@ export function validateAttachment(nameValue: string, mimeValue: string, data: B
   if (!MIME_PREFIXES.some((prefix) => mimeType.startsWith(prefix)) && !MIME_TYPES.has(mimeType))
     throw new Error("attachment_mime_not_allowed");
   if (data.length === 0) throw new Error("attachment_empty");
-  if (data.length > MAX_ATTACHMENT_BYTES) throw new Error("attachment_too_large");
+  const maximumBytes = attachmentCategory(mimeType, extension) === "document"
+    ? MAX_DOCUMENT_ATTACHMENT_BYTES
+    : MAX_DEFAULT_ATTACHMENT_BYTES;
+  if (data.length > maximumBytes) throw new Error("attachment_too_large");
   if (!matchesSignature(extension, mimeType, data)) throw new Error("attachment_signature_mismatch");
   return { name, extension, mimeType };
 }
