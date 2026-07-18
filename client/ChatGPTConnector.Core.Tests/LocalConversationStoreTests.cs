@@ -68,12 +68,21 @@ public sealed class LocalConversationStoreTests : IDisposable
 
     [Theory]
     [InlineData("请生成一张夜空图片")]
+    [InlineData("你能生成一张日落雪山图片吗？")]
+    [InlineData("帮我生成一张猫的图片")]
     [InlineData("Draw an image of a mountain")]
+    [InlineData("Can you generate an image of a mountain at sunset?")]
     public void DetectsExplicitImageRequests(string text) => Assert.True(ImageGenerationIntent.IsExplicit(text));
 
-    [Fact]
-    public void DoesNotTreatOrdinaryConversationAsImageGeneration() =>
-        Assert.False(ImageGenerationIntent.IsExplicit("解释一下图片压缩算法"));
+    [Theory]
+    [InlineData("解释一下图片压缩算法")]
+    [InlineData("你好，能生成图片吗？")]
+    [InlineData("你好，能更生成图片吗？")]
+    [InlineData("你支持生图吗？")]
+    [InlineData("Can you generate images?")]
+    [InlineData("Do you support image generation?")]
+    public void DoesNotTreatConversationOrCapabilityQuestionsAsImageGeneration(string text) =>
+        Assert.False(ImageGenerationIntent.IsExplicit(text));
 
     [Fact]
     public async Task BuildsBoundedReadOnlyProjectContextAndExcludesSecretsAndDependencies()
