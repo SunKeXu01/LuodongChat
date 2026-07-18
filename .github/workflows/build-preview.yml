@@ -97,8 +97,8 @@ jobs:
             if ($attempt -lt 3) { Start-Sleep -Seconds (10 * $attempt) }
           }
           if ($chocoSucceeded) {
-            $home = Join-Path ${env:ProgramFiles(x86)} 'NSIS'
-            if (!(Test-Path "$home/makensis.exe")) { $home = Join-Path $env:ProgramFiles 'NSIS' }
+            $nsisRoot = Join-Path ${env:ProgramFiles(x86)} 'NSIS'
+            if (!(Test-Path "$nsisRoot/makensis.exe")) { $nsisRoot = Join-Path $env:ProgramFiles 'NSIS' }
           } else {
             # Chocolatey's public feed occasionally returns 503/504. Fall back to
             # the official, version-pinned NSIS archive and verify it before use.
@@ -109,10 +109,10 @@ jobs:
             $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($actual -ne $expected) { throw "Official NSIS archive checksum mismatch: $actual" }
             Expand-Archive -Path $archive -DestinationPath $destination -Force
-            $home = Join-Path $destination 'nsis-3.12'
+            $nsisRoot = Join-Path $destination 'nsis-3.12'
           }
-          if (!(Test-Path "$home/makensis.exe")) { throw 'NSIS compiler was not installed or extracted correctly.' }
-          "NSIS_HOME=$home" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          if (!(Test-Path "$nsisRoot/makensis.exe")) { throw 'NSIS compiler was not installed or extracted correctly.' }
+          "NSIS_HOME=$nsisRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Verify NSIS script uses UTF-8 BOM
         shell: pwsh
         run: |
