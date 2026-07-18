@@ -1,6 +1,6 @@
 # 泺栋chat 发布构建
 
-当前 Windows 版本为 `1.26`，目标平台为 Windows 10/11 x64，采用 .NET 10 自包含单文件发布；Android 暂停维护，仅在手动触发流水线时构建。
+当前 Windows 版本为 `1.27`，目标平台为 Windows 10/11 x64 与 ARM64，采用 .NET 10 自包含单文件发布；Android 暂停维护，仅在手动触发流水线时构建。
 
 ## 限制
 
@@ -23,11 +23,11 @@
 
 推送版本标签后，`Build and test` 工作流会自动运行网关测试、核心库测试、Windows 发布构建及可执行文件启动冒烟测试、Android 单元测试和签名校验。全部成功后，Windows EXE、ZIP 与 Android APK 会同步上传至对应 GitHub Release。
 
-Release 内同时包含带版本号的安装 EXE、便携 ZIP、APK 及各自的 `.sha256` 文件。安装程序允许选择目录，并在该目录中创建 `Uninstall.exe`；便携版的所有运行数据保存在解压目录内。可在 PowerShell 中验证 Windows ZIP：
+Release 内同时包含 x64、ARM64 两种架构带版本号的安装 EXE、便携 ZIP、APK 及各自的 `.sha256` 文件。安装程序允许选择目录，并在该目录中创建 `Uninstall.exe`；便携版的所有运行数据保存在解压目录内。可在 PowerShell 中验证 Windows x64 ZIP：
 
 ```powershell
-$expected = (Get-Content .\LuodongChat-1.26-win-x64-portable.zip.sha256).Trim()
+$expected = (Get-Content .\LuodongChat-1.27-win-x64-portable.zip.sha256).Trim()
 .\deploy\Test-PreviewBuild.ps1 `
-  -ZipPath .\LuodongChat-1.26-win-x64-portable.zip `
+  -ZipPath .\LuodongChat-1.27-win-x64-portable.zip `
   -ExpectedSha256 $expected
 ```

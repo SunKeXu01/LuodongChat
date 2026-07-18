@@ -1,4 +1,5 @@
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Text;
 using ChatGPTConnector.Core;
 using Xunit;
@@ -31,6 +32,28 @@ public sealed class ClientUpdateServiceTests
         Assert.NotNull(update);
         Assert.Equal("1.0", update.Version);
         Assert.Equal("LuodongChat-Setup.exe", update.InstallerUri!.Segments[^1]);
+    }
+
+    [Fact]
+    public async Task SelectsNativeArm64UpdateAssetsWhenRunningOnArm64()
+    {
+        const string json = """{"version":"2.0","executableUrl":"https://oss.520skx.com/latest/x64.exe","checksumUrl":"https://oss.520skx.com/latest/x64.sha256","installerUrl":"https://oss.520skx.com/latest/x64-setup.exe","installerChecksumUrl":"https://oss.520skx.com/latest/x64-setup.sha256","arm64ExecutableUrl":"https://oss.520skx.com/latest/arm64.exe","arm64ChecksumUrl":"https://oss.520skx.com/latest/arm64.sha256","arm64InstallerUrl":"https://oss.520skx.com/latest/arm64-setup.exe","arm64InstallerChecksumUrl":"https://oss.520skx.com/latest/arm64-setup.sha256"}""";
+        var update = await new ClientUpdateService(new HttpClient(new StubHandler(json)), Architecture.Arm64).CheckAsync("1.0");
+
+        Assert.NotNull(update);
+        Assert.Equal("arm64.exe", update.PortableExecutableUri.Segments[^1]);
+        Assert.Equal("arm64-setup.exe", update.InstallerUri!.Segments[^1]);
+    }
+
+    [Fact]
+    public async Task KeepsX64AssetsForX64ClientsWhenManifestAlsoContainsArm64Assets()
+    {
+        const string json = """{"version":"2.0","executableUrl":"https://oss.520skx.com/latest/x64.exe","checksumUrl":"https://oss.520skx.com/latest/x64.sha256","installerUrl":"https://oss.520skx.com/latest/x64-setup.exe","installerChecksumUrl":"https://oss.520skx.com/latest/x64-setup.sha256","arm64ExecutableUrl":"https://oss.520skx.com/latest/arm64.exe","arm64ChecksumUrl":"https://oss.520skx.com/latest/arm64.sha256","arm64InstallerUrl":"https://oss.520skx.com/latest/arm64-setup.exe","arm64InstallerChecksumUrl":"https://oss.520skx.com/latest/arm64-setup.sha256"}""";
+        var update = await new ClientUpdateService(new HttpClient(new StubHandler(json)), Architecture.X64).CheckAsync("1.0");
+
+        Assert.NotNull(update);
+        Assert.Equal("x64.exe", update.PortableExecutableUri.Segments[^1]);
+        Assert.Equal("x64-setup.exe", update.InstallerUri!.Segments[^1]);
     }
 
     [Fact]

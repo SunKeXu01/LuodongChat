@@ -211,6 +211,30 @@ jobs:
           if (!$runningClient.HasExited) { throw "Uninstaller did not stop the running client." }
           if (Test-Path "$testRoot/LuodongChat.exe") { throw "Uninstaller left LuodongChat.exe behind." }
           if (Test-Path $desktopShortcut) { throw "Uninstaller did not remove the desktop shortcut." }
+
+          # Build a native ARM64 package for Windows 11 virtual machines and
+          # ARM-based PCs. It cannot be launched on this x64 runner, so verify
+          # the PE machine header before packaging it with the same installer.
+          $armAsset = "artifacts/LuodongChat-$version-win-arm64"
+          dotnet publish client/ChatGPTConnector.App/ChatGPTConnector.App.csproj --configuration Release --runtime win-arm64 --output artifacts/publish-arm64
+          $armExecutable = (Resolve-Path 'artifacts/publish-arm64/LuodongChat.exe').Path
+          $armBytes = [System.IO.File]::ReadAllBytes($armExecutable)
+          $peOffset = [BitConverter]::ToInt32($armBytes, 0x3c)
+          $machine = [BitConverter]::ToUInt16($armBytes, $peOffset + 4)
+          if ($machine -ne 0xAA64) { throw "ARM64 executable has unexpected PE machine value 0x$($machine.ToString('X4'))." }
+          Copy-Item $armExecutable "$armAsset.exe"
+          (Get-FileHash "$armAsset.exe" -Algorithm SHA256).Hash.ToLowerInvariant() |
+            Set-Content "$armAsset.exe.sha256"
+          New-Item -ItemType Directory -Force artifacts/portable-arm64/LuodongChat | Out-Null
+          Copy-Item $armExecutable artifacts/portable-arm64/LuodongChat/LuodongChat.exe
+          Compress-Archive -Path artifacts/portable-arm64/LuodongChat -DestinationPath "$armAsset-portable.zip"
+          (Get-FileHash "$armAsset-portable.zip" -Algorithm SHA256).Hash.ToLowerInvariant() |
+            Set-Content "$armAsset-portable.zip.sha256"
+          $armSetup = "$armAsset-setup.exe"
+          & $makensis "/DVERSION=$version" "/DFILE_VERSION=$fileVersion" "/DSOURCE_EXE=$armExecutable" "/DOUTPUT_FILE=$((Resolve-Path 'artifacts').Path)\LuodongChat-$version-win-arm64-setup.exe" "/DAPP_ICON=$((Resolve-Path 'client/ChatGPTConnector.App/Assets/AppIcon.ico').Path)" installer/LuodongChat.nsi
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path $armSetup)) { throw "ARM64 NSIS installer build failed." }
+          (Get-FileHash $armSetup -Algorithm SHA256).Hash.ToLowerInvariant() |
+            Set-Content "$armSetup.sha256"
       - uses: actions/upload-artifact@v6
         with:
           name: LuodongChat-win-x64
@@ -221,6 +245,12 @@ jobs:
             artifacts/LuodongChat-*-win-x64-setup.exe.sha256
             artifacts/LuodongChat-*-win-x64-portable.zip
             artifacts/LuodongChat-*-win-x64-portable.zip.sha256
+            artifacts/LuodongChat-*-win-arm64.exe
+            artifacts/LuodongChat-*-win-arm64.exe.sha256
+            artifacts/LuodongChat-*-win-arm64-setup.exe
+            artifacts/LuodongChat-*-win-arm64-setup.exe.sha256
+            artifacts/LuodongChat-*-win-arm64-portable.zip
+            artifacts/LuodongChat-*-win-arm64-portable.zip.sha256
           if-no-files-found: error
           retention-days: 14
   android-preview:
@@ -314,9 +344,13 @@ jobs:
             \( -name "LuodongChat-$version-win-x64-setup.exe" \
             -o -name "LuodongChat-$version-win-x64-setup.exe.sha256" \
             -o -name "LuodongChat-$version-win-x64-portable.zip" \
-            -o -name "LuodongChat-$version-win-x64-portable.zip.sha256" \) \
+            -o -name "LuodongChat-$version-win-x64-portable.zip.sha256" \
+            -o -name "LuodongChat-$version-win-arm64-setup.exe" \
+            -o -name "LuodongChat-$version-win-arm64-setup.exe.sha256" \
+            -o -name "LuodongChat-$version-win-arm64-portable.zip" \
+            -o -name "LuodongChat-$version-win-arm64-portable.zip.sha256" \) \
             -print)
-          test "${#files[@]}" -eq 4
+          test "${#files[@]}" -eq 8
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "${files[@]}" --clobber
           else
@@ -409,15 +443,37 @@ jobs:
           installer_checksum="$(find release -type f -name 'LuodongChat-*-win-x64-setup.exe.sha256' -print -quit)"
           portable="$(find release -type f -name 'LuodongChat-*-win-x64-portable.zip' -print -quit)"
           portable_checksum="$(find release -type f -name 'LuodongChat-*-win-x64-portable.zip.sha256' -print -quit)"
+          arm_executable="$(find release -type f -name 'LuodongChat-*-win-arm64.exe' -print -quit)"
+          arm_checksum="$(find release -type f -name 'LuodongChat-*-win-arm64.exe.sha256' -print -quit)"
+          arm_installer="$(find release -type f -name 'LuodongChat-*-win-arm64-setup.exe' -print -quit)"
+          arm_installer_checksum="$(find release -type f -name 'LuodongChat-*-win-arm64-setup.exe.sha256' -print -quit)"
+          arm_portable="$(find release -type f -name 'LuodongChat-*-win-arm64-portable.zip' -print -quit)"
+          arm_portable_checksum="$(find release -type f -name 'LuodongChat-*-win-arm64-portable.zip.sha256' -print -quit)"
           test -s "$executable"
           test -s "$checksum"
           test -s "$installer"
           test -s "$installer_checksum"
           test -s "$portable"
           test -s "$portable_checksum"
+          test -s "$arm_executable"
+          test -s "$arm_checksum"
+          test -s "$arm_installer"
+          test -s "$arm_installer_checksum"
+          test -s "$arm_portable"
+          test -s "$arm_portable_checksum"
           version="${VERSION#v}"
           base='https://oss.520skx.com/latest'
-          printf '{"version":"%s","executableUrl":"%s/LuodongChat-%s-win-x64.exe","checksumUrl":"%s/LuodongChat-%s-win-x64.exe.sha256","installerUrl":"%s/LuodongChat-%s-win-x64-setup.exe","installerChecksumUrl":"%s/LuodongChat-%s-win-x64-setup.exe.sha256","androidApkUrl":"%s/LuodongChat.apk","androidChecksumUrl":"%s/LuodongChat.apk.sha256"}\n' "$version" "$base" "$version" "$base" "$version" "$base" "$version" "$base" "$version" "$base" "$base" > update.json
+          x64_executable_url="$base/LuodongChat-$version-win-x64.exe"
+          x64_checksum_url="$base/LuodongChat-$version-win-x64.exe.sha256"
+          x64_installer_url="$base/LuodongChat-$version-win-x64-setup.exe"
+          x64_installer_checksum_url="$base/LuodongChat-$version-win-x64-setup.exe.sha256"
+          arm_executable_url="$base/LuodongChat-$version-win-arm64.exe"
+          arm_checksum_url="$base/LuodongChat-$version-win-arm64.exe.sha256"
+          arm_installer_url="$base/LuodongChat-$version-win-arm64-setup.exe"
+          arm_installer_checksum_url="$base/LuodongChat-$version-win-arm64-setup.exe.sha256"
+          printf '{"version":"%s","executableUrl":"%s","checksumUrl":"%s","installerUrl":"%s","installerChecksumUrl":"%s","arm64ExecutableUrl":"%s","arm64ChecksumUrl":"%s","arm64InstallerUrl":"%s","arm64InstallerChecksumUrl":"%s","androidApkUrl":"%s/LuodongChat.apk","androidChecksumUrl":"%s/LuodongChat.apk.sha256"}\n' \
+            "$version" "$x64_executable_url" "$x64_checksum_url" "$x64_installer_url" "$x64_installer_checksum_url" \
+            "$arm_executable_url" "$arm_checksum_url" "$arm_installer_url" "$arm_installer_checksum_url" "$base" "$base" > update.json
           install -d latest
           cp "$executable" latest/LuodongChat.exe
           cp "$checksum" latest/LuodongChat.exe.sha256
@@ -425,12 +481,24 @@ jobs:
           cp "$installer_checksum" latest/LuodongChat-Setup.exe.sha256
           cp "$portable" latest/LuodongChat-portable.zip
           cp "$portable_checksum" latest/LuodongChat-portable.zip.sha256
+          cp "$arm_executable" latest/LuodongChat-ARM64.exe
+          cp "$arm_checksum" latest/LuodongChat-ARM64.exe.sha256
+          cp "$arm_installer" latest/LuodongChat-ARM64-Setup.exe
+          cp "$arm_installer_checksum" latest/LuodongChat-ARM64-Setup.exe.sha256
+          cp "$arm_portable" latest/LuodongChat-ARM64-portable.zip
+          cp "$arm_portable_checksum" latest/LuodongChat-ARM64-portable.zip.sha256
           cp "$executable" "latest/LuodongChat-$version-win-x64.exe"
           cp "$checksum" "latest/LuodongChat-$version-win-x64.exe.sha256"
           cp "$installer" "latest/LuodongChat-$version-win-x64-setup.exe"
           cp "$installer_checksum" "latest/LuodongChat-$version-win-x64-setup.exe.sha256"
           cp "$portable" "latest/LuodongChat-$version-win-x64-portable.zip"
           cp "$portable_checksum" "latest/LuodongChat-$version-win-x64-portable.zip.sha256"
+          cp "$arm_executable" "latest/LuodongChat-$version-win-arm64.exe"
+          cp "$arm_checksum" "latest/LuodongChat-$version-win-arm64.exe.sha256"
+          cp "$arm_installer" "latest/LuodongChat-$version-win-arm64-setup.exe"
+          cp "$arm_installer_checksum" "latest/LuodongChat-$version-win-arm64-setup.exe.sha256"
+          cp "$arm_portable" "latest/LuodongChat-$version-win-arm64-portable.zip"
+          cp "$arm_portable_checksum" "latest/LuodongChat-$version-win-arm64-portable.zip.sha256"
           cp update.json latest/update.json
           OSSUTIL="$RUNNER_TEMP/ossutil-bin"
           CONFIG="$RUNNER_TEMP/ossutil.conf"
@@ -440,10 +508,13 @@ jobs:
           "$OSSUTIL" cp oss://luodongchat-app/latest/LuodongChat.apk.sha256 latest/LuodongChat.apk.sha256 --force --config-file "$CONFIG"
           "$OSSUTIL" rm oss://luodongchat-app/latest/ --recursive --force --config-file "$CONFIG"
           "$OSSUTIL" cp latest/ oss://luodongchat-app/latest/ --recursive --force --acl public-read --cache-control 'public, max-age=300' --config-file "$CONFIG"
-          for object in LuodongChat.exe LuodongChat.exe.sha256 LuodongChat-Setup.exe LuodongChat-Setup.exe.sha256 LuodongChat-portable.zip LuodongChat-portable.zip.sha256 LuodongChat.apk LuodongChat.apk.sha256 update.json; do
+          for object in LuodongChat.exe LuodongChat.exe.sha256 LuodongChat-Setup.exe LuodongChat-Setup.exe.sha256 LuodongChat-portable.zip LuodongChat-portable.zip.sha256 LuodongChat-ARM64.exe LuodongChat-ARM64.exe.sha256 LuodongChat-ARM64-Setup.exe LuodongChat-ARM64-Setup.exe.sha256 LuodongChat-ARM64-portable.zip LuodongChat-ARM64-portable.zip.sha256 LuodongChat.apk LuodongChat.apk.sha256 update.json; do
             "$OSSUTIL" stat "oss://luodongchat-app/latest/$object" --config-file "$CONFIG" >/dev/null
           done
           for object in "LuodongChat-$version-win-x64.exe" "LuodongChat-$version-win-x64.exe.sha256" "LuodongChat-$version-win-x64-setup.exe" "LuodongChat-$version-win-x64-setup.exe.sha256" "LuodongChat-$version-win-x64-portable.zip" "LuodongChat-$version-win-x64-portable.zip.sha256"; do
+            "$OSSUTIL" stat "oss://luodongchat-app/latest/$object" --config-file "$CONFIG" >/dev/null
+          done
+          for object in "LuodongChat-$version-win-arm64.exe" "LuodongChat-$version-win-arm64.exe.sha256" "LuodongChat-$version-win-arm64-setup.exe" "LuodongChat-$version-win-arm64-setup.exe.sha256" "LuodongChat-$version-win-arm64-portable.zip" "LuodongChat-$version-win-arm64-portable.zip.sha256"; do
             "$OSSUTIL" stat "oss://luodongchat-app/latest/$object" --config-file "$CONFIG" >/dev/null
           done
           rsync -rz update.json connector-deploy@8.140.211.162:/app/module/client-releases/update.json.next

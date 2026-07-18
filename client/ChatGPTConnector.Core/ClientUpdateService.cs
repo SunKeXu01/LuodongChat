@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -13,8 +14,9 @@ public sealed record ClientUpdate(
     Uri? InstallerChecksumUri);
 public sealed record PreparedClientUpdate(string Version, string FilePath, bool IsInstaller);
 
-public sealed class ClientUpdateService(HttpClient http)
+public sealed class ClientUpdateService(HttpClient http, Architecture? processArchitecture = null)
 {
+    private readonly Architecture architecture = processArchitecture ?? RuntimeInformation.ProcessArchitecture;
     private static readonly Uri[] UpdateManifests =
     [
         new("https://oss.520skx.com/latest/update.json"),
@@ -40,10 +42,15 @@ public sealed class ClientUpdateService(HttpClient http)
         var root = document.RootElement;
         var version = root.GetProperty("version").GetString() ?? string.Empty;
         if (!IsNewer(version, currentVersion)) return null;
-        var executable = TrustedUri(root, "executableUrl");
-        var checksum = TrustedUri(root, "checksumUrl");
-        var installer = OptionalTrustedUri(root, "installerUrl");
-        var installerChecksum = OptionalTrustedUri(root, "installerChecksumUrl");
+        var useArm64 = architecture == Architecture.Arm64
+            && root.TryGetProperty("arm64ExecutableUrl", out var armExecutable)
+            && armExecutable.ValueKind == JsonValueKind.String
+            && root.TryGetProperty("arm64ChecksumUrl", out var armChecksum)
+            && armChecksum.ValueKind == JsonValueKind.String;
+        var executable = TrustedUri(root, useArm64 ? "arm64ExecutableUrl" : "executableUrl");
+        var checksum = TrustedUri(root, useArm64 ? "arm64ChecksumUrl" : "checksumUrl");
+        var installer = OptionalTrustedUri(root, useArm64 ? "arm64InstallerUrl" : "installerUrl");
+        var installerChecksum = OptionalTrustedUri(root, useArm64 ? "arm64InstallerChecksumUrl" : "installerChecksumUrl");
         if ((installer is null) != (installerChecksum is null))
             throw new InvalidDataException("更新清单中的安装程序信息不完整。");
         return new(version.TrimStart('v'), executable, checksum, installer, installerChecksum);

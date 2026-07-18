@@ -316,8 +316,9 @@ test("serves a safe public landing page", async (t) => {
   assert.equal(response.headers.get("vary"), "User-Agent");
   const page = await response.text();
   assert.match(page, /泺栋 Chat/);
-  assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat-1\.21-win-x64-setup\.exe/);
-  assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat-1\.21-win-x64-portable\.zip/);
+  assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat-1\.27-win-x64-setup\.exe/);
+  assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat-1\.27-win-x64-portable\.zip/);
+  assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat-1\.27-win-arm64-setup\.exe/);
   assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat\.apk/);
   assert.match(page, /github\.com\/SunKeXu01\/LuodongChat\/releases\/latest/);
   assert.match(page, /viewport-fit=cover/);
@@ -327,7 +328,8 @@ test("serves a safe public landing page", async (t) => {
   assert.match(page, /支持图片生成/);
   assert.match(page, /办公、学习与创作的/);
   assert.match(page, /客户端界面预览/);
-  assert.match(page, /Windows 版本暂未代码签名/);
+  assert.match(page, /安装包暂未代码签名/);
+  assert.match(page, /Apple 芯片虚拟机及 Windows ARM 设备请选择 ARM64 版/);
   assert.match(page, /\/assets\/landing\.css/);
   assert.match(page, /\/assets\/landing\.js/);
 
@@ -344,7 +346,7 @@ test("serves a safe public landing page", async (t) => {
   const windowsResponse = await fetch(`http://127.0.0.1:${gatewayPort}/`, {
     headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
   });
-  assert.match(await windowsResponse.text(), /下载 Windows 版/);
+  assert.match(await windowsResponse.text(), /下载 Windows x64 版/);
 
   const androidResponse = await fetch(`http://127.0.0.1:${gatewayPort}/`, {
     headers: { "user-agent": "Mozilla/5.0 (Linux; Android 15; Mobile)" },

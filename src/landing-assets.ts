@@ -15,12 +15,18 @@ const icon = (name: "arrow" | "check" | "download" | "globe" | "history" | "imag
 };
 
 export function landingPage(userAgent = ""): string {
+  const version = "1.27";
+  const x64Setup = `LuodongChat-${version}-win-x64-setup.exe`;
+  const x64Portable = `LuodongChat-${version}-win-x64-portable.zip`;
+  const arm64Setup = `LuodongChat-${version}-win-arm64-setup.exe`;
+  const arm64Portable = `LuodongChat-${version}-win-arm64-portable.zip`;
+  const downloads = "https://oss.520skx.com/latest";
   const isAndroid = /android/i.test(userAgent);
   const primary = isAndroid
     ? { label: "下载 Android 稳定版", meta: "Android 10+ · 暂停维护", href: "https://oss.520skx.com/latest/LuodongChat.apk", file: "LuodongChat.apk", platform: "android" as const }
-    : { label: "下载 Windows 版", meta: "v1.21 · Windows 10/11 x64 · 约 62 MB", href: "https://oss.520skx.com/latest/LuodongChat-1.21-win-x64-setup.exe", file: "LuodongChat-1.21-win-x64-setup.exe", platform: "windows" as const };
+    : { label: "下载 Windows x64 版", meta: `v${version} · Windows 10/11 x64`, href: `${downloads}/${x64Setup}`, file: x64Setup, platform: "windows" as const };
   const secondary = isAndroid
-    ? { label: "Windows 版", href: "https://oss.520skx.com/latest/LuodongChat-1.21-win-x64-setup.exe", file: "LuodongChat-1.21-win-x64-setup.exe", platform: "windows" as const }
+    ? { label: "Windows x64 版", href: `${downloads}/${x64Setup}`, file: x64Setup, platform: "windows" as const }
     : { label: "Android 稳定版", href: "https://oss.520skx.com/latest/LuodongChat.apk", file: "LuodongChat.apk", platform: "android" as const };
 
   return `<!doctype html>
@@ -50,8 +56,8 @@ export function landingPage(userAgent = ""): string {
           </a>
           <a class="secondary-download" data-download data-file="${secondary.file}" href="${secondary.href}">${icon(secondary.platform)}<span>${secondary.label}</span></a>
         </div>
-        <div class="quick-links"><a href="https://oss.520skx.com/latest/LuodongChat-1.21-win-x64-portable.zip">便携版</a><span>·</span><a href="https://github.com/SunKeXu01/LuodongChat/releases/latest">历史版本</a><span class="download-feedback" aria-live="polite"></span></div>
-        <p class="install-note">Windows 版本暂未代码签名，首次安装可能出现系统保护提示。<a href="https://github.com/SunKeXu01/LuodongChat#Windows-使用方式">查看安装指引 →</a></p>
+        <div class="quick-links"><a href="${downloads}/${arm64Setup}" data-download data-file="${arm64Setup}">Windows ARM64</a><span>·</span><a href="${downloads}/${x64Portable}" data-download data-file="${x64Portable}">x64 便携版</a><span>·</span><a href="https://github.com/SunKeXu01/LuodongChat/releases/latest">历史版本</a><span class="download-feedback" aria-live="polite"></span></div>
+        <p class="install-note">Apple 芯片虚拟机及 Windows ARM 设备请选择 ARM64 版。安装包暂未代码签名，首次运行可能出现系统保护提示。<a href="https://github.com/SunKeXu01/LuodongChat#Windows-使用方式">查看安装指引 →</a></p>
       </div>
 
       <div class="product-stage" aria-label="泺栋 Chat 客户端界面预览">
@@ -84,12 +90,12 @@ export function landingPage(userAgent = ""): string {
 
     <section class="download-details" id="downloads">
       <div><span class="section-kicker">更多下载</span><strong>选择适合你的版本</strong></div>
-      <div class="download-links"><a href="https://oss.520skx.com/latest/LuodongChat-1.21-win-x64-setup.exe" data-download data-file="LuodongChat-1.21-win-x64-setup.exe">Windows 安装版</a><a href="https://oss.520skx.com/latest/LuodongChat-1.21-win-x64-portable.zip" data-download data-file="LuodongChat-1.21-win-x64-portable.zip">Windows 便携版</a><a href="https://oss.520skx.com/latest/LuodongChat.apk" data-download data-file="LuodongChat.apk">Android 稳定版</a><a href="https://oss.520skx.com/latest/LuodongChat-1.21-win-x64-setup.exe.sha256">SHA-256 校验</a></div>
+      <div class="download-links"><a href="${downloads}/${x64Setup}" data-download data-file="${x64Setup}">Windows x64 安装版</a><a href="${downloads}/${arm64Setup}" data-download data-file="${arm64Setup}">Windows ARM64 安装版</a><a href="${downloads}/${x64Portable}" data-download data-file="${x64Portable}">x64 便携版</a><a href="${downloads}/${arm64Portable}" data-download data-file="${arm64Portable}">ARM64 便携版</a><a href="https://oss.520skx.com/latest/LuodongChat.apk" data-download data-file="LuodongChat.apk">Android 稳定版</a><a href="${downloads}/${arm64Setup}.sha256">ARM64 SHA-256</a></div>
     </section>
 
     <aside class="privacy-note" id="privacy">${icon("shield")}<div><strong>隐私与账号安全</strong><p>历史对话不会在泺栋 Chat 服务器持久化；发送消息时，内容仍需传输至模型服务以生成回复。</p></div><a href="https://github.com/SunKeXu01/LuodongChat/blob/main/docs/DATA_MODEL.md">了解数据处理方式 →</a></aside>
 
-    <footer class="footer"><nav><a href="https://github.com/SunKeXu01/LuodongChat/blob/main/docs/DATA_MODEL.md">隐私说明</a><a href="https://github.com/SunKeXu01/LuodongChat#Windows-使用方式">安装帮助</a><a href="https://github.com/SunKeXu01/LuodongChat/releases/latest">更新记录</a><a href="https://github.com/SunKeXu01/LuodongChat/issues">联系我们</a></nav><span>v1.21 · 服务正常 <i class="status-dot"></i></span></footer>
+    <footer class="footer"><nav><a href="https://github.com/SunKeXu01/LuodongChat/blob/main/docs/DATA_MODEL.md">隐私说明</a><a href="https://github.com/SunKeXu01/LuodongChat#Windows-使用方式">安装帮助</a><a href="https://github.com/SunKeXu01/LuodongChat/releases/latest">更新记录</a><a href="https://github.com/SunKeXu01/LuodongChat/issues">联系我们</a></nav><span>v${version} · 服务正常 <i class="status-dot"></i></span></footer>
   </main>
   <script src="/assets/landing.js" defer></script>
 </body>

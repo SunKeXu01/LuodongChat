@@ -9,10 +9,10 @@
     <Title>泺栋 Chat</Title>
     <Product>泺栋 Chat</Product>
     <Description>独立的 GPT-5.6 对话客户端</Description>
-    <Version>1.26</Version>
-    <AssemblyVersion>1.26.0.0</AssemblyVersion>
-    <FileVersion>1.26.0.0</FileVersion>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Version>1.27</Version>
+    <AssemblyVersion>1.27.0.0</AssemblyVersion>
+    <FileVersion>1.27.0.0</FileVersion>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
