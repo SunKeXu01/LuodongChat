@@ -103,7 +103,7 @@ public partial class MainWindow : Window
         FitToWorkingArea();
         InitializeTrayIcon();
         Closing += MainWindow_OnClosing;
-        Closed += (_, _) => { _attachmentDropLeaveTimer.Stop(); _questionHighlightCancellation?.Cancel(); _questionHighlightCancellation?.Dispose(); _attachments.Dispose(); };
+        Closed += (_, _) => { _attachmentDropLeaveTimer.Stop(); CancelQuestionHighlight(); _attachments.Dispose(); };
         Application.Current.SessionEnding += (_, _) => _allowExit = true;
         _sessionTimer.Tick += async (_, _) => await RunExclusiveAsync(ValidateSessionAsync);
         if (skipStartupChecks) return;
@@ -1314,8 +1314,7 @@ public partial class MainWindow : Window
         ChatMessagesScroll.ScrollToVerticalOffset(Math.Max(0, top - 32));
         foreach (var item in _questionAnchors) item.IsCurrent = ReferenceEquals(item, anchor);
 
-        _questionHighlightCancellation?.Cancel();
-        _questionHighlightCancellation?.Dispose();
+        CancelQuestionHighlight();
         var highlight = new CancellationTokenSource();
         _questionHighlightCancellation = highlight;
         var cancellationToken = highlight.Token;
@@ -1324,9 +1323,22 @@ public partial class MainWindow : Window
         catch (OperationCanceledException) { }
         finally
         {
-            if (ReferenceEquals(_questionHighlightCancellation, highlight)) message.IsNavigationHighlighted = false;
-            highlight.Dispose();
+            if (ReferenceEquals(_questionHighlightCancellation, highlight))
+            {
+                _questionHighlightCancellation = null;
+                message.IsNavigationHighlighted = false;
+                highlight.Dispose();
+            }
         }
+    }
+
+    private void CancelQuestionHighlight()
+    {
+        var highlight = _questionHighlightCancellation;
+        _questionHighlightCancellation = null;
+        if (highlight is null) return;
+        highlight.Cancel();
+        highlight.Dispose();
     }
 
     private async Task SaveCurrentConversationAsync(CancellationToken cancellationToken)
