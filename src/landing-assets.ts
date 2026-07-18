@@ -1,3 +1,20 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+function readClientVersion(): string {
+  const override = process.env.CLIENT_RELEASE_VERSION?.trim();
+  if (override) return override.replace(/^v/, "").replace(/\.0$/, "");
+
+  try {
+    const metadata = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8")) as { version?: unknown };
+    const version = typeof metadata.version === "string" ? metadata.version.trim() : "";
+    if (version) return version.replace(/^v/, "").replace(/\.0$/, "");
+  } catch {
+    // The production package includes package.json; keep the page available if a custom host omits it.
+  }
+  return "1";
+}
+
 const icon = (name: "arrow" | "check" | "download" | "globe" | "history" | "image" | "refresh" | "shield" | "windows" | "android") => {
   const paths = {
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
@@ -15,7 +32,7 @@ const icon = (name: "arrow" | "check" | "download" | "globe" | "history" | "imag
 };
 
 export function landingPage(userAgent = ""): string {
-  const version = "1.28";
+  const version = readClientVersion();
   const x64Setup = `LuodongChat-${version}-win-x64-setup.exe`;
   const x64Portable = `LuodongChat-${version}-win-x64-portable.zip`;
   const arm64Setup = `LuodongChat-${version}-win-arm64-setup.exe`;

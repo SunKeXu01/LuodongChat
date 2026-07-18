@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hashGatewayKey } from "../src/auth.js";
@@ -315,10 +315,12 @@ test("serves a safe public landing page", async (t) => {
   assert.equal(response.headers.get("x-frame-options"), "DENY");
   assert.equal(response.headers.get("vary"), "User-Agent");
   const page = await response.text();
+  const packageMetadata = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8")) as { version: string };
+  const releaseVersion = packageMetadata.version.replace(/\.0$/, "");
   assert.match(page, /泺栋 Chat/);
-  assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat-1\.28-win-x64-setup\.exe/);
-  assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat-1\.28-win-x64-portable\.zip/);
-  assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat-1\.28-win-arm64-setup\.exe/);
+  assert.ok(page.includes(`oss.520skx.com/latest/LuodongChat-${releaseVersion}-win-x64-setup.exe`));
+  assert.ok(page.includes(`oss.520skx.com/latest/LuodongChat-${releaseVersion}-win-x64-portable.zip`));
+  assert.ok(page.includes(`oss.520skx.com/latest/LuodongChat-${releaseVersion}-win-arm64-setup.exe`));
   assert.match(page, /oss\.520skx\.com\/latest\/LuodongChat\.apk/);
   assert.match(page, /github\.com\/SunKeXu01\/LuodongChat\/releases\/latest/);
   assert.match(page, /viewport-fit=cover/);
