@@ -27,7 +27,7 @@
 - [GitHub Releases（含历史版本）](https://github.com/SunKeXu01/LuodongChat/releases)
 - [Android 最后一个稳定版](https://oss.520skx.com/latest/LuodongChat.apk)（暂停维护）
 
-GitHub Release 和 OSS 文件均包含版本号，例如 `LuodongChat-1.22-win-x64-setup.exe` 与 `LuodongChat-1.22-win-x64-portable.zip`，并同时提供 SHA-256 校验文件。OSS 还保留不带版本号的固定地址用于自动更新，并且只存储最新版，不积累历史安装包。Android 当前暂停维护，保留最后一个稳定版的固定下载地址。
+GitHub Release 和 OSS 文件均包含版本号，例如 `LuodongChat-1.23-win-x64-setup.exe` 与 `LuodongChat-1.23-win-x64-portable.zip`，并同时提供 SHA-256 校验文件。OSS 还保留不带版本号的固定地址用于自动更新，并且只存储最新版，不积累历史安装包。Android 当前暂停维护，保留最后一个稳定版的固定下载地址。
 
 当前 Windows 版尚未进行代码签名。如果系统显示“Windows 已保护你的电脑”，请确认安装包来自本仓库或上述下载地址，然后点击“更多信息”→“仍要运行”。Android 版使用固定发布证书签名，更新时会覆盖旧版本并保留账号数据。
 

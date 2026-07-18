@@ -91,9 +91,15 @@ public sealed class LocalConversationStore(string root)
         var temporary = target + $".{Guid.NewGuid():N}.tmp";
         try
         {
-            await using var input = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, true);
-            await using var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024, true);
-            await input.CopyToAsync(output, cancellationToken);
+            // Windows does not allow the temporary file to be moved while our own
+            // output stream still has it open. Keep both streams in an explicit
+            // scope so they are disposed before the atomic move.
+            await using (var input = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, true))
+            await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024, true))
+            {
+                await input.CopyToAsync(output, cancellationToken);
+                await output.FlushAsync(cancellationToken);
+            }
             File.Move(temporary, target, true);
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
