@@ -15,7 +15,7 @@ const icon = (name: "arrow" | "check" | "download" | "globe" | "history" | "imag
 };
 
 export function landingPage(userAgent = ""): string {
-  const version = "1.27";
+  const version = "1.28";
   const x64Setup = `LuodongChat-${version}-win-x64-setup.exe`;
   const x64Portable = `LuodongChat-${version}-win-x64-portable.zip`;
   const arm64Setup = `LuodongChat-${version}-win-arm64-setup.exe`;

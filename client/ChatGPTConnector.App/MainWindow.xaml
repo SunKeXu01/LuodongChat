@@ -246,8 +246,8 @@
             </Border>
 
             <Grid x:Name="ChatDropSurface" Grid.Column="1" AllowDrop="True"
-                  DragEnter="ChatComposer_OnDragEnter" DragOver="ChatComposer_OnDragOver"
-                  DragLeave="ChatComposer_OnDragLeave" Drop="ChatComposer_OnDrop">
+                  PreviewDragEnter="ChatComposer_OnDragEnter" PreviewDragOver="ChatComposer_OnDragOver"
+                  PreviewDragLeave="ChatComposer_OnDragLeave" PreviewDrop="ChatComposer_OnDrop">
               <Grid.RowDefinitions><RowDefinition Height="60"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
               <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="24,0">
                 <Grid>

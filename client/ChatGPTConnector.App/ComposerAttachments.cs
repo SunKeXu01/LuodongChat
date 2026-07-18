@@ -192,11 +192,14 @@ public sealed class AttachmentComposerController : IDisposable
         string fingerprint;
         await using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, true))
             fingerprint = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
+        var preview = category == "image"
+            ? await Task.Run(() => LoadPreview(path), cancellationToken)
+            : null;
         return new ComposerAttachment
         {
             Id = Guid.NewGuid().ToString("N"), FilePath = path, Name = info.Name, Extension = extension,
             Size = info.Length, MimeType = mime, Category = category, Fingerprint = fingerprint, IsTemporary = temporary,
-            Preview = category == "image" ? LoadPreview(path) : null, Status = ComposerAttachmentStatus.Pending,
+            Preview = preview, Status = ComposerAttachmentStatus.Pending,
         };
     }
 

@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -58,15 +59,23 @@ public sealed class AttachmentUploadClient(HttpClient http)
             try
             {
                 long sent = 0;
+                var lastReported = 0d;
+                var lastReportAt = Stopwatch.StartNew();
                 while (true)
                 {
                     var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
                     if (read == 0) break;
                     await target.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
                     sent += read;
-                    progress?.Report(source.Length == 0 ? 1 : Math.Clamp((double)sent / source.Length, 0, 1));
+                    var current = source.Length == 0 ? 1 : Math.Clamp((double)sent / source.Length, 0, 1);
+                    if (current >= 1 || (current - lastReported >= 0.02 && lastReportAt.ElapsedMilliseconds >= 75))
+                    {
+                        progress?.Report(current);
+                        lastReported = current;
+                        lastReportAt.Restart();
+                    }
                 }
-                progress?.Report(1);
+                if (lastReported < 1) progress?.Report(1);
             }
             finally { ArrayPool<byte>.Shared.Return(buffer); }
         }

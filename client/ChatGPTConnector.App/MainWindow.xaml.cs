@@ -42,6 +42,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _sessionTimer = new() { Interval = TimeSpan.FromMinutes(5) };
     private readonly DispatcherTimer _chatToastTimer = new() { Interval = TimeSpan.FromSeconds(1.8) };
     private readonly DispatcherTimer _profileToastTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+    private readonly DispatcherTimer _attachmentDropLeaveTimer = new() { Interval = TimeSpan.FromMilliseconds(280) };
     private CancellationTokenSource? _chatCancellation;
     private readonly CancellationTokenSource _updateCancellation = new();
     private bool _chatScrollPending;
@@ -91,6 +92,7 @@ public partial class MainWindow : Window
         UpdateThemeButton();
         _chatToastTimer.Tick += (_, _) => { _chatToastTimer.Stop(); ChatToast.Visibility = Visibility.Collapsed; };
         _profileToastTimer.Tick += (_, _) => { _profileToastTimer.Stop(); ProfileToast.Visibility = Visibility.Collapsed; };
+        _attachmentDropLeaveTimer.Tick += (_, _) => HideAttachmentDropOverlay();
         ChatMessagesItems.ItemsSource = _chatMessages;
         QuestionNavigatorItems.ItemsSource = _questionAnchors;
         _chatMessages.CollectionChanged += (_, _) => Dispatcher.BeginInvoke(RefreshQuestionNavigator, DispatcherPriority.Loaded);
@@ -101,7 +103,7 @@ public partial class MainWindow : Window
         FitToWorkingArea();
         InitializeTrayIcon();
         Closing += MainWindow_OnClosing;
-        Closed += (_, _) => { _questionHighlightCancellation?.Cancel(); _questionHighlightCancellation?.Dispose(); _attachments.Dispose(); };
+        Closed += (_, _) => { _attachmentDropLeaveTimer.Stop(); _questionHighlightCancellation?.Cancel(); _questionHighlightCancellation?.Dispose(); _attachments.Dispose(); };
         Application.Current.SessionEnding += (_, _) => _allowExit = true;
         _sessionTimer.Tick += async (_, _) => await RunExclusiveAsync(ValidateSessionAsync);
         if (skipStartupChecks) return;
@@ -959,32 +961,71 @@ public partial class MainWindow : Window
 
     private void ChatComposer_OnDragEnter(object sender, DragEventArgs e)
     {
-        if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop, true))
+        {
+            HideAttachmentDropOverlay();
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
         AttachmentDropOverlay.Visibility = Visibility.Visible;
+        _attachmentDropLeaveTimer.Stop();
         e.Effects = DragDropEffects.Copy;
         e.Handled = true;
     }
 
     private void ChatComposer_OnDragOver(object sender, DragEventArgs e)
     {
-        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        var hasFiles = e.Data.GetDataPresent(DataFormats.FileDrop, true);
+        if (hasFiles)
+        {
+            AttachmentDropOverlay.Visibility = Visibility.Visible;
+            _attachmentDropLeaveTimer.Stop();
+        }
+        else HideAttachmentDropOverlay();
+        e.Effects = hasFiles ? DragDropEffects.Copy : DragDropEffects.None;
         e.Handled = true;
     }
 
     private void ChatComposer_OnDragLeave(object sender, DragEventArgs e)
     {
-        var position = e.GetPosition(ChatDropSurface);
-        if (position.X < 0 || position.Y < 0
-            || position.X > ChatDropSurface.ActualWidth || position.Y > ChatDropSurface.ActualHeight)
-            AttachmentDropOverlay.Visibility = Visibility.Collapsed;
+        // PreviewDragLeave also fires while the pointer crosses child controls.
+        // Delay hiding briefly; continuous DragOver events keep the overlay alive,
+        // while leaving/cancelling the OLE drag reliably clears it.
+        ArmAttachmentDropLeaveTimer();
         e.Handled = true;
     }
 
     private async void ChatComposer_OnDrop(object sender, DragEventArgs e)
     {
-        AttachmentDropOverlay.Visibility = Visibility.Collapsed;
+        HideAttachmentDropOverlay();
         e.Handled = true;
-        if (e.Data.GetData(DataFormats.FileDrop) is string[] paths) await _attachments.AddFilesAsync(paths);
+        try
+        {
+            if (!e.Data.GetDataPresent(DataFormats.FileDrop, true)
+                || e.Data.GetData(DataFormats.FileDrop, true) is not string[] { Length: > 0 } paths) return;
+            e.Effects = DragDropEffects.Copy;
+            // Let WPF repaint the cleared overlay before hashing or decoding files.
+            await Dispatcher.Yield(DispatcherPriority.Background);
+            await _attachments.AddFilesAsync(paths);
+        }
+        catch (Exception error)
+        {
+            HideAttachmentDropOverlay();
+            ShowChatToast($"无法添加附件：{error.Message}", true);
+        }
+    }
+
+    private void ArmAttachmentDropLeaveTimer()
+    {
+        _attachmentDropLeaveTimer.Stop();
+        _attachmentDropLeaveTimer.Start();
+    }
+
+    private void HideAttachmentDropOverlay()
+    {
+        _attachmentDropLeaveTimer.Stop();
+        AttachmentDropOverlay.Visibility = Visibility.Collapsed;
     }
 
     private async void RemoveAttachmentButton_OnClick(object sender, RoutedEventArgs e)
