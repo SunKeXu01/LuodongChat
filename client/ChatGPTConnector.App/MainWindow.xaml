@@ -212,7 +212,9 @@
                   </Viewbox>
                 </Grid>
                 <ListBox x:Name="ConversationsList" Grid.Row="2" BorderThickness="0" Background="Transparent"
-                         SelectionChanged="ConversationsList_OnSelectionChanged" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                         SelectionChanged="ConversationsList_OnSelectionChanged"
+                         PreviewKeyDown="ConversationsList_OnPreviewKeyDown"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                   <ListBox.GroupStyle>
                     <GroupStyle>
                       <GroupStyle.HeaderTemplate>
@@ -232,7 +234,8 @@
                   </ListBox.ItemContainerStyle>
                   <ListBox.ItemTemplate>
                     <DataTemplate>
-                      <Border x:Name="ConversationCard" Height="40" Padding="10,0" CornerRadius="8" Background="Transparent" BorderThickness="0">
+                      <Border x:Name="ConversationCard" Height="40" Padding="10,0" CornerRadius="8" Background="Transparent" BorderThickness="0"
+                              ToolTip="{Binding Title}" MouseLeftButtonDown="ConversationCard_OnMouseLeftButtonDown">
                         <Border.ContextMenu>
                           <ContextMenu>
                             <MenuItem Header="重命名" CommandParameter="{Binding}" Click="RenameConversationMenuItem_OnClick"/>
@@ -241,8 +244,12 @@
                           </ContextMenu>
                         </Border.ContextMenu>
                         <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                          <TextBlock Text="{Binding Title}" FontWeight="Normal" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+                          <TextBlock Text="{Binding Title}" FontWeight="Normal" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                     AutomationProperties.Name="{Binding Title}"/>
                           <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock x:Name="ConversationActivityText" Text="{Binding ActivityText}"
+                                       Visibility="{Binding ActivityVisibility}" Foreground="{DynamicResource LinkBrush}"
+                                       FontSize="11" Margin="7,1,3,0" ToolTip="{Binding ActivityToolTip}"/>
                             <TextBlock x:Name="ConversationUpdatedText" Text="{Binding UpdatedText}" Visibility="Collapsed" Foreground="{DynamicResource WeakTextBrush}" FontSize="11" Margin="8,1,3,0"/>
                             <Button x:Name="ConversationMoreButton" Tag="{Binding}" Visibility="Collapsed" Width="28" Height="28" MinHeight="28" Padding="6"
                                     Style="{StaticResource IconToolbarButton}" ToolTip="更多操作" AutomationProperties.Name="会话更多操作"
@@ -260,6 +267,12 @@
                       <DataTemplate.Triggers>
                         <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
                           <Setter TargetName="ConversationCard" Property="Background" Value="{DynamicResource SecondarySurfaceBrush}"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding ActivityStatus}" Value="Failed">
+                          <Setter TargetName="ConversationActivityText" Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding ActivityStatus}" Value="Stopped">
+                          <Setter TargetName="ConversationActivityText" Property="Foreground" Value="{DynamicResource WeakTextBrush}"/>
                         </DataTrigger>
                         <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
                           <Setter TargetName="ConversationCard" Property="Background" Value="{DynamicResource SecondarySurfaceBrush}"/>
@@ -368,6 +381,10 @@
                             <local:MarkdownViewer MarkdownText="{Binding Content}" FontSize="15.5" FontWeight="Normal"
                                                   Foreground="{DynamicResource TextBrush}" Background="Transparent"
                                                   HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"/>
+                            <StackPanel Orientation="Horizontal" Visibility="{Binding ThinkingVisibility}" Margin="1,1,0,2">
+                              <TextBlock Text="◌" Foreground="{DynamicResource LinkBrush}" FontSize="18" Margin="0,-2,7,0"/>
+                              <TextBlock Text="正在思考，切换到其他对话不会中断" Foreground="{DynamicResource MutedBrush}" FontSize="13"/>
+                            </StackPanel>
                             <ItemsControl ItemsSource="{Binding Images}" Margin="0,10,0,0">
                               <ItemsControl.ItemTemplate>
                                 <DataTemplate>

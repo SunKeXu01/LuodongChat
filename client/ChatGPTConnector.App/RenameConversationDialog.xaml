@@ -67,9 +67,13 @@
 
       <Grid Grid.Row="1" Margin="32,8,32,22">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-        <TextBlock Text="会话名称" FontSize="14" FontWeight="Medium"/>
+        <Grid>
+          <TextBlock Text="会话名称" FontSize="14" FontWeight="Medium"/>
+          <TextBlock x:Name="CharacterCountText" HorizontalAlignment="Right" Foreground="{DynamicResource WeakTextBrush}"
+                     FontSize="12" VerticalAlignment="Center"/>
+        </Grid>
         <TextBox x:Name="NameInput" Grid.Row="1" Height="42" MinHeight="42" MaxLength="50" Margin="0,8,0,0"
-                 Padding="12,7" TextChanged="NameInput_OnTextChanged"/>
+                 Padding="12,7" TextChanged="NameInput_OnTextChanged" AutomationProperties.Name="会话名称"/>
         <TextBlock x:Name="ValidationError" Grid.Row="2" Foreground="{DynamicResource ErrorBrush}" FontSize="12"
                    MinHeight="17" Margin="2,4,0,0" TextWrapping="Wrap"/>
         <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,7,0,0">

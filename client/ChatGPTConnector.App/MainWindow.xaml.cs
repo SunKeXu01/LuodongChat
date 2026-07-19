@@ -53,7 +53,10 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _profileToastTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly DispatcherTimer _attachmentDropLeaveTimer = new() { Interval = TimeSpan.FromMilliseconds(280) };
     private readonly DispatcherTimer _touchpadScrollTimer = new() { Interval = TimeSpan.FromMilliseconds(16) };
-    private CancellationTokenSource? _chatCancellation;
+    private readonly Dictionary<string, ConversationRun> _conversationRuns = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ConversationActivityStatus> _conversationActivities = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _conversationRunErrors = new(StringComparer.Ordinal);
+    private bool _sendStartInProgress;
     private readonly CancellationTokenSource _updateCancellation = new();
     private bool _chatScrollPending;
     private bool _chatFollowOutput = true;
@@ -542,6 +545,7 @@ public partial class MainWindow : Window
     {
         await RunExclusiveAsync(async () => {
             if (MessageBox.Show("确定要退出登录吗？\n\n退出后需要重新登录才能继续使用。", "退出当前账号", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+            await CancelConversationRunsAsync();
             await _attachments.CompleteSendAsync();
             if (_session is not null) await _accounts.LogoutAsync(GatewayUri, _session.AccessToken).ContinueWith(_ => { });
             _sessionStore.Clear();
@@ -561,6 +565,7 @@ public partial class MainWindow : Window
         }
         catch { return; }
         _sessionStore.Clear();
+        await CancelConversationRunsAsync();
         await _attachments.CompleteSendAsync();
         _session = null;
         _sessionTimer.Stop();
@@ -589,7 +594,6 @@ public partial class MainWindow : Window
 
     private void NewChatButton_OnClick(object sender, RoutedEventArgs e)
     {
-        if (_chatCancellation is not null) return;
         var menu = new System.Windows.Controls.ContextMenu();
         var plain = new System.Windows.Controls.MenuItem { Header = "＋  新建普通对话" };
         plain.Click += (_, _) => StartNewConversation(null);
@@ -639,7 +643,12 @@ public partial class MainWindow : Window
 
     private async Task DeleteConversationAsync(ConversationListItem item)
     {
-        if (_session is null || _chatCancellation is not null) return;
+        if (_session is null) return;
+        if (IsConversationRunning(item.Conversation.Id))
+        {
+            ShowChatToast("请先停止该对话正在进行的回答", true);
+            return;
+        }
         if (MessageBox.Show($"确定删除本机对话“{item.Title}”吗？此操作不会影响服务器，因为聊天内容从未上传。", "删除本地对话", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         await _conversationStore.DeleteAsync(_session.Profile.Id, item.Conversation.Id);
         var index = _conversations.IndexOf(item);
@@ -654,16 +663,57 @@ public partial class MainWindow : Window
 
     private void RenameConversationMenuItem_OnClick(object sender, RoutedEventArgs e)
     {
-        if (_session is null || _chatCancellation is not null
+        if (_session is null
             || sender is not System.Windows.Controls.MenuItem { CommandParameter: ConversationListItem item }) return;
+        OpenRenameConversationDialog(item);
+    }
+
+    private void ConversationsList_OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.F2 || ConversationsList.SelectedItem is not ConversationListItem item) return;
+        e.Handled = true;
+        OpenRenameConversationDialog(item);
+    }
+
+    private void ConversationCard_OnMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (e.ClickCount != 2 || sender is not FrameworkElement { DataContext: ConversationListItem item }) return;
+        if (FindAncestor<System.Windows.Controls.Button>(e.OriginalSource as DependencyObject) is not null) return;
+        e.Handled = true;
+        OpenRenameConversationDialog(item);
+    }
+
+    private static T? FindAncestor<T>(DependencyObject? source) where T : DependencyObject
+    {
+        while (source is not null)
+        {
+            if (source is T match) return match;
+            source = VisualTreeHelper.GetParent(source);
+        }
+        return null;
+    }
+
+    private void OpenRenameConversationDialog(ConversationListItem item)
+    {
+        if (_session is null) return;
+        if (IsConversationRunning(item.Conversation.Id))
+        {
+            ShowChatToast("回答生成期间暂不能重命名该对话", true);
+            return;
+        }
         var dialog = new RenameConversationDialog(item.Title, async title =>
         {
             try
             {
-                var renamed = item.Conversation with { Title = title, UpdatedAt = DateTimeOffset.UtcNow };
+                // Renaming is metadata-only. Preserve UpdatedAt so the conversation does
+                // not unexpectedly jump to another date group or the top of the sidebar.
+                var renamed = item.Conversation with { Title = title };
                 await _conversationStore.SaveAsync(_session.Profile.Id, renamed);
                 var index = _conversations.IndexOf(item);
-                var replacement = ConversationListItem.From(renamed);
+                if (index < 0) return "该会话已不存在，请刷新后重试。";
+                var replacement = ConversationListItem.From(
+                    renamed,
+                    _conversationActivities.GetValueOrDefault(renamed.Id));
                 _conversations[index] = replacement;
                 if (_currentConversation?.Id == renamed.Id) _currentConversation = renamed;
                 ConversationsList.SelectedItem = replacement;
@@ -679,12 +729,29 @@ public partial class MainWindow : Window
 
     private void ShowConversation(LocalConversation? conversation)
     {
-        _currentConversation = conversation;
-        ApplyProjectSelection(conversation?.ProjectPath);
+        var run = conversation is null ? null : GetConversationRun(conversation.Id);
+        _currentConversation = run?.Conversation ?? conversation;
+        ApplyProjectSelection(_currentConversation?.ProjectPath);
         _chatMessages.Clear();
-        if (conversation is not null)
-            foreach (var message in conversation.Messages.OrderBy(item => item.ClientCreatedAt))
-                _chatMessages.Add(CreateDisplayMessage(message));
+        if (_currentConversation is not null)
+        {
+            foreach (var message in _currentConversation.Messages.OrderBy(item => item.ClientCreatedAt))
+            {
+                if (run is not null && message.Id == run.AssistantDisplay.Source.Id)
+                    _chatMessages.Add(run.AssistantDisplay);
+                else
+                    _chatMessages.Add(CreateDisplayMessage(message));
+            }
+            if (run is { AssistantRemoved: false }
+                && _chatMessages.All(item => item.Source.Id != run.AssistantDisplay.Source.Id))
+                _chatMessages.Add(run.AssistantDisplay);
+
+            if (_conversationActivities.GetValueOrDefault(_currentConversation.Id) == ConversationActivityStatus.NewReply)
+                SetConversationActivity(_currentConversation.Id, ConversationActivityStatus.None);
+            ChatNotice.Text = _conversationRunErrors.GetValueOrDefault(_currentConversation.Id) ?? "";
+        }
+        else ChatNotice.Text = "";
+        UpdateComposerState();
         ScrollChatToEnd();
         UpdateEmptyConversationState();
     }
@@ -730,7 +797,7 @@ public partial class MainWindow : Window
 
     private async void RegenerateMessageButton_OnClick(object sender, RoutedEventArgs e)
     {
-        if (_chatCancellation is not null || _currentConversation is null
+        if (_currentConversation is null || IsConversationRunning(_currentConversation.Id)
             || sender is not System.Windows.Controls.Button { Tag: ChatDisplayMessage message }) return;
         var index = _chatMessages.IndexOf(message);
         if (index != _chatMessages.Count - 1)
@@ -908,6 +975,11 @@ public partial class MainWindow : Window
 
     private async Task SelectProjectAsync(string? path)
     {
+        if (_currentConversation is not null && IsConversationRunning(_currentConversation.Id))
+        {
+            ShowChatToast("回答生成期间不能更改当前项目空间", true);
+            return;
+        }
         var fullPath = Directory.Exists(path) ? Path.GetFullPath(path) : null;
         if (path is not null && fullPath is null) { ChatNotice.Text = "项目目录不存在，请重新选择。"; return; }
         ApplyProjectSelection(fullPath);
@@ -1110,7 +1182,7 @@ public partial class MainWindow : Window
 
     private async void ClearConversationMenuItem_OnClick(object sender, RoutedEventArgs e)
     {
-        if (_session is null || _currentConversation is null || _chatCancellation is not null) return;
+        if (_session is null || _currentConversation is null || IsConversationRunning(_currentConversation.Id)) return;
         if (MessageBox.Show("确定清空当前对话内容吗？", "清空对话", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         _currentConversation = _currentConversation with { Messages = [], UpdatedAt = DateTimeOffset.UtcNow };
         _chatMessages.Clear();
@@ -1162,8 +1234,10 @@ public partial class MainWindow : Window
     {
         AttachmentPreviewScroll.Visibility = _attachments.HasItems ? Visibility.Visible : Visibility.Collapsed;
         var hasContent = !string.IsNullOrWhiteSpace(ChatInput.Text) || _attachments.HasItems;
-        ChatSendButton.IsEnabled = _chatCancellation is null && hasContent && (!_attachments.HasItems || _attachments.IsReady);
-        ChatSendButton.ToolTip = _attachments.BlockingReason ?? "发送消息";
+        var currentRun = GetCurrentConversationRun();
+        ChatSendButton.IsEnabled = currentRun is null && hasContent && (!_attachments.HasItems || _attachments.IsReady);
+        ChatSendButton.ToolTip = currentRun is not null ? "当前对话正在生成回答" : _attachments.BlockingReason ?? "发送消息";
+        StopGenerationButton.Visibility = currentRun is null ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private async void AttachmentUploadButton_OnClick(object sender, RoutedEventArgs e)
@@ -1315,7 +1389,9 @@ public partial class MainWindow : Window
 
     private async Task SendChatAsync()
     {
-        if (_session is null || _chatCancellation is not null) return;
+        if (_session is null || _sendStartInProgress) return;
+        var baseConversation = _currentConversation;
+        if (baseConversation is not null && IsConversationRunning(baseConversation.Id)) return;
         var text = ChatInput.Text.Trim();
         var attachmentSnapshot = _attachments.Snapshot();
         if (text.Length == 0 && attachmentSnapshot.Count == 0) return;
@@ -1332,32 +1408,53 @@ public partial class MainWindow : Window
             ShowChatToast(_attachments.BlockingReason ?? "附件尚未准备完成", true);
             return;
         }
-        _chatCancellation = new CancellationTokenSource();
-        var cancellationToken = _chatCancellation.Token;
+        _sendStartInProgress = true;
+        var cancellation = new CancellationTokenSource();
+        var cancellationToken = cancellation.Token;
+        var session = _session;
+        var projectPath = _selectedProjectPath;
+        var webSearchEnabled = _webSearchEnabled;
+        ConversationRun? run = null;
+        var attachmentsDetached = false;
+        ChatInput.Clear();
         ChatSendButton.IsEnabled = false;
-        StopGenerationButton.Visibility = Visibility.Visible;
-        NetworkStatusText.Text = _webSearchEnabled ? "正在判断是否需要搜索…" : "联网搜索已关闭";
+        NetworkStatusText.Text = webSearchEnabled ? "正在判断是否需要搜索…" : "联网搜索已关闭";
         try
         {
             var now = DateTimeOffset.UtcNow;
-            var conversationId = _currentConversation?.Id ?? Guid.NewGuid().ToString();
+            var conversationId = baseConversation?.Id ?? Guid.NewGuid().ToString();
             var messageId = Guid.NewGuid().ToString();
             var storedAttachments = new List<LocalChatAttachment>();
             foreach (var attachment in attachmentSnapshot)
                 storedAttachments.Add(await _conversationStore.SaveAttachmentAsync(
-                    _session.Profile.Id, conversationId, messageId, attachment.FilePath, attachment.Name,
+                    session.Profile.Id, conversationId, messageId, attachment.FilePath, attachment.Name,
                     attachment.MimeType, attachment.Size, attachment.Category, cancellationToken));
             var user = new SyncedChatMessage(messageId, conversationId, "user", text, DateTimeOffset.UtcNow, Attachments: storedAttachments);
-            ChatInput.Clear();
-            _chatMessages.Add(CreateDisplayMessage(user));
-            ScrollChatToEnd();
+            var assistant = new SyncedChatMessage(Guid.NewGuid().ToString(), conversationId, "assistant", "", DateTimeOffset.UtcNow);
             var titleSource = text.Length > 0 ? text : attachmentSnapshot[0].Name;
-            _currentConversation = _currentConversation is null
-                ? new LocalConversation(conversationId, titleSource[..Math.Min(titleSource.Length, 40)], now, now, [user], _selectedProjectPath)
-                : _currentConversation with { UpdatedAt = now, Messages = _currentConversation.Messages.Append(user).ToArray() };
-            await SaveCurrentConversationAsync(cancellationToken);
-            IReadOnlyList<SyncedChatMessage> context = _chatMessages.Select(item => item.Source).ToArray();
-            if (_selectedProjectPath is not null)
+            var conversationWithUser = baseConversation is null
+                ? new LocalConversation(conversationId, titleSource[..Math.Min(titleSource.Length, 40)], now, now, [user], projectPath)
+                : baseConversation with { UpdatedAt = now, Messages = baseConversation.Messages.Append(user).ToArray() };
+            var workingConversation = conversationWithUser with { Messages = conversationWithUser.Messages.Append(assistant).ToArray() };
+            var display = CreateDisplayMessage(assistant);
+            display.IsThinking = true;
+            run = new ConversationRun(session.Profile.Id, workingConversation, display, cancellation);
+            _conversationRuns[conversationId] = run;
+            _attachments.DetachForSend(attachmentSnapshot);
+            attachmentsDetached = true;
+            _conversationRunErrors.Remove(conversationId);
+            if (ReferenceEquals(_currentConversation, baseConversation)) _currentConversation = workingConversation;
+            SetConversationActivity(conversationId, ConversationActivityStatus.Thinking, workingConversation);
+            _sendStartInProgress = false;
+
+            // Persist the user message immediately. Keep the empty assistant placeholder
+            // in memory only, so an unexpected app exit never leaves a blank message.
+            await PersistRunConversationAsync(run, cancellationToken, conversationWithUser);
+            UpsertConversationListItem(workingConversation, moveToTop: true, select: IsConversationVisible(conversationId));
+            if (IsConversationVisible(conversationId)) ShowConversation(workingConversation);
+
+            IReadOnlyList<SyncedChatMessage> context = conversationWithUser.Messages.ToArray();
+            if (projectPath is not null)
             {
                 var automaticRead = WorkspaceAccessPolicy.Decide(
                     _workspaceAccessMode,
@@ -1365,19 +1462,19 @@ public partial class MainWindow : Window
                     _workspaceCustomPermissions);
                 if (automaticRead == WorkspacePermissionDecision.Allow)
                 {
-                    NetworkStatusText.Text = "正在读取项目…";
-                    var projectContext = await _projectContextBuilder.BuildAsync(_selectedProjectPath, text, cancellationToken);
+                    SetRunUiText(conversationId, networkText: "正在读取项目…");
+                    var projectContext = await _projectContextBuilder.BuildAsync(projectPath, text, cancellationToken);
                     if (projectContext is not null)
                     {
                         var projectMessage = new SyncedChatMessage(
                             Guid.NewGuid().ToString(), conversationId, "developer", projectContext.Content, DateTimeOffset.UtcNow);
                         context = [projectMessage, .. context];
-                        ChatNotice.Text = $"项目上下文：索引 {projectContext.IndexedFileCount} 个文件，本次读取 {projectContext.IncludedFileCount} 个相关文本文件。";
+                        SetRunUiText(conversationId, notice: $"项目上下文：索引 {projectContext.IndexedFileCount} 个文件，本次读取 {projectContext.IncludedFileCount} 个相关文本文件。");
                     }
                 }
-                else ChatNotice.Text = automaticRead == WorkspacePermissionDecision.Deny
+                else SetRunUiText(conversationId, notice: automaticRead == WorkspacePermissionDecision.Deny
                     ? "当前权限禁止自动读取项目文件；GPT 仍可回答普通问题。"
-                    : "项目读取需要批准；GPT 请求具体文件时会询问你。";
+                    : "项目读取需要批准；GPT 请求具体文件时会询问你。");
             }
             else
             {
@@ -1389,32 +1486,36 @@ public partial class MainWindow : Window
                     DateTimeOffset.UtcNow);
                 context = [workspaceNotice, .. context];
             }
-            var assistant = new SyncedChatMessage(Guid.NewGuid().ToString(), conversationId, "assistant", "", DateTimeOffset.UtcNow);
-            var display = CreateDisplayMessage(assistant);
-            _chatMessages.Add(display);
-            ChatNotice.Text = "";
+            SetRunUiText(conversationId, notice: "");
             try
             {
                 var progress = new Progress<string>(delta => {
-                    display.Content += delta;
-                    ScrollChatToEnd(force: false);
+                    if (string.IsNullOrEmpty(delta) || run.IsSettled) return;
+                    run.SetAssistant(run.Assistant with { Content = run.Assistant.Content + delta });
+                    run.AssistantDisplay.IsThinking = false;
+                    SetConversationActivity(conversationId, ConversationActivityStatus.Streaming, run.Conversation);
+                    if (IsConversationVisible(conversationId))
+                    {
+                        _currentConversation = run.Conversation;
+                        ScrollChatToEnd(force: false);
+                    }
+                    _ = PersistRunConversationThrottledAsync(run);
                 });
                 var wantsImage = ImageGenerationIntent.IsExplicit(text);
                 var hasReferenceImages = attachmentSnapshot.Any(item => item.IsImage);
-                if (wantsImage) ChatNotice.Text = hasReferenceImages ? "正在参考上传图片生成，请稍候…" : "正在生成图片，请稍候…";
-                await using var workspaceTools = _selectedProjectPath is null
-                    ? null : new WorkspaceFileTools(_selectedProjectPath);
+                if (wantsImage) SetRunUiText(conversationId, notice: hasReferenceImages ? "正在参考上传图片生成，请稍候…" : "正在生成图片，请稍候…");
+                await using var workspaceTools = projectPath is null ? null : new WorkspaceFileTools(projectPath);
                 var result = await _chat.StreamResponseAsync(
-                    GatewayUri, _session.AccessToken, context, progress, cancellationToken,
-                    enableWebSearch: _webSearchEnabled, enableImageGeneration: wantsImage,
+                    GatewayUri, session.AccessToken, context, progress, cancellationToken,
+                    enableWebSearch: webSearchEnabled, enableImageGeneration: wantsImage,
                     attachmentIds: attachmentSnapshot.Select(item => item.ServerFileId!).ToArray(),
                     hasReferenceImages: hasReferenceImages,
                     localTools: workspaceTools is null ? null : WorkspaceFileTools.ToolDefinitions,
-                    executeLocalTool: workspaceTools is null ? null : CreateWorkspaceToolExecutor(_selectedProjectPath!, workspaceTools));
+                    executeLocalTool: workspaceTools is null ? null : CreateWorkspaceToolExecutor(projectPath!, workspaceTools));
                 var storedImages = new List<GeneratedChatImage>();
                 foreach (var image in result.Images)
                     storedImages.Add(await _conversationStore.SaveGeneratedImageAsync(
-                        _session.Profile.Id, conversationId, Guid.NewGuid().ToString(), image, cancellationToken));
+                        session.Profile.Id, conversationId, Guid.NewGuid().ToString(), image, cancellationToken));
                 assistant = assistant with {
                     Content = string.IsNullOrWhiteSpace(result.Text)
                         ? storedImages.Count > 0 ? "图片已生成" : "暂时没有收到模型输出。"
@@ -1422,45 +1523,79 @@ public partial class MainWindow : Window
                     Citations = result.Citations,
                     Images = storedImages,
                 };
-                display.Content = assistant.Content;
-                display.Source = assistant;
-                display.Images = ResolveImages(assistant);
-                _currentConversation = _currentConversation with { UpdatedAt = DateTimeOffset.UtcNow, Messages = _currentConversation.Messages.Append(assistant).ToArray() };
-                await SaveCurrentConversationAsync(cancellationToken);
-                await _attachments.CompleteSendAsync();
-                ChatNotice.Text = result.WebSearchUnavailable
-                    ? "当前上游暂不支持联网搜索，本次已自动使用普通对话。" : "";
-                NetworkStatusText.Text = !_webSearchEnabled ? "联网搜索已关闭" : result.WebSearchUnavailable
+                run.SetAssistant(assistant);
+                run.AssistantDisplay.Images = ResolveImages(assistant);
+                run.AssistantDisplay.IsThinking = false;
+                run.IsSettled = true;
+                await PersistRunConversationAsync(run, cancellationToken);
+                var completedWhileHidden = !IsConversationVisible(conversationId);
+                SetConversationActivity(conversationId, completedWhileHidden ? ConversationActivityStatus.NewReply : ConversationActivityStatus.None, run.Conversation);
+                UpsertConversationListItem(run.Conversation, moveToTop: false, select: !completedWhileHidden);
+                SetRunUiText(conversationId,
+                    notice: result.WebSearchUnavailable ? "当前上游暂不支持联网搜索，本次已自动使用普通对话。" : "",
+                    networkText: !webSearchEnabled ? "联网搜索已关闭" : result.WebSearchUnavailable
                     ? "联网不可用 · 可重试"
-                    : result.WebSearchPerformed ? "已联网并检索来源" : "联网搜索已开启 · 本次未调用";
-                ScrollChatToEnd(force: false);
+                    : result.WebSearchPerformed ? "已联网并检索来源" : "联网搜索已开启 · 本次未调用");
+                if (completedWhileHidden) ShowChatToast($"“{run.Conversation.Title}”的回答已完成");
+                else
+                {
+                    _currentConversation = run.Conversation;
+                    ScrollChatToEnd(force: false);
+                }
             }
             catch (OperationCanceledException)
             {
-                if (display.Content.Length == 0) _chatMessages.Remove(display);
-                else
-                {
-                    assistant = assistant with { Content = display.Content };
-                    display.Source = assistant;
-                    _currentConversation = _currentConversation! with { UpdatedAt = DateTimeOffset.UtcNow, Messages = _currentConversation!.Messages.Append(assistant).ToArray() };
-                    await SaveCurrentConversationAsync(CancellationToken.None);
-                }
-                ChatNotice.Text = "已停止生成";
-                NetworkStatusText.Text = _webSearchEnabled ? "联网搜索已开启" : "联网搜索已关闭";
+                run.AssistantDisplay.IsThinking = false;
+                if (string.IsNullOrWhiteSpace(run.Assistant.Content)) run.RemoveAssistant();
+                else run.IsSettled = true;
+                await PersistRunConversationAsync(run, CancellationToken.None);
+                SetConversationActivity(conversationId, ConversationActivityStatus.Stopped, run.Conversation);
+                UpsertConversationListItem(run.Conversation, moveToTop: false, select: IsConversationVisible(conversationId));
+                SetRunUiText(conversationId, notice: "已停止生成", networkText: webSearchEnabled ? "联网搜索已开启" : "联网搜索已关闭");
             }
             catch (Exception error)
             {
-                _chatMessages.Remove(display);
-                ChatNotice.Text = $"发送失败：{error.Message}";
-                NetworkStatusText.Text = "连接失败 · 请重试";
+                run.AssistantDisplay.IsThinking = false;
+                run.RemoveAssistant();
+                await PersistRunConversationAsync(run, CancellationToken.None);
+                _conversationRunErrors[conversationId] = $"发送失败：{error.Message}";
+                SetConversationActivity(conversationId, ConversationActivityStatus.Failed, run.Conversation);
+                UpsertConversationListItem(run.Conversation, moveToTop: false, select: IsConversationVisible(conversationId));
+                SetRunUiText(conversationId, notice: _conversationRunErrors[conversationId], networkText: "连接失败 · 请重试");
+            }
+        }
+        catch (Exception error)
+        {
+            if (run is null)
+            {
+                if (ReferenceEquals(_currentConversation, baseConversation) && string.IsNullOrWhiteSpace(ChatInput.Text))
+                    ChatInput.Text = text;
+                ShowChatToast($"发送失败：{error.Message}", true);
+            }
+            else
+            {
+                run.AssistantDisplay.IsThinking = false;
+                run.RemoveAssistant();
+                try { await PersistRunConversationAsync(run, CancellationToken.None); }
+                catch { }
+                _conversationRunErrors[run.Conversation.Id] = $"发送失败：{error.Message}";
+                SetConversationActivity(run.Conversation.Id, ConversationActivityStatus.Failed, run.Conversation);
+                UpsertConversationListItem(run.Conversation, moveToTop: false, select: IsConversationVisible(run.Conversation.Id));
+                SetRunUiText(run.Conversation.Id, notice: _conversationRunErrors[run.Conversation.Id], networkText: "连接失败 · 请重试");
             }
         }
         finally
         {
-            _chatCancellation.Dispose();
-            _chatCancellation = null;
+            _sendStartInProgress = false;
+            if (attachmentsDetached) await _attachments.ReleaseSentAsync(attachmentSnapshot);
+            if (run is not null)
+            {
+                _conversationRuns.Remove(run.Conversation.Id);
+                run.Completion.TrySetResult();
+                run.Dispose();
+            }
+            else cancellation.Dispose();
             UpdateComposerState();
-            StopGenerationButton.Visibility = Visibility.Collapsed;
             ChatInput.Focus();
         }
     }
@@ -1850,11 +1985,89 @@ public partial class MainWindow : Window
     {
         if (_session is null || _currentConversation is null) return;
         await _conversationStore.SaveAsync(_session.Profile.Id, _currentConversation, cancellationToken);
-        var existing = _conversations.FirstOrDefault(item => item.Conversation.Id == _currentConversation.Id);
+        UpsertConversationListItem(_currentConversation, moveToTop: true, select: true);
+    }
+
+    private ConversationRun? GetConversationRun(string conversationId) =>
+        _conversationRuns.GetValueOrDefault(conversationId);
+
+    private async Task CancelConversationRunsAsync()
+    {
+        var runs = _conversationRuns.Values.ToArray();
+        foreach (var run in runs) run.Cancellation.Cancel();
+        if (runs.Length == 0) return;
+        try { await Task.WhenAll(runs.Select(run => run.Completion.Task)).WaitAsync(TimeSpan.FromSeconds(5)); }
+        catch (TimeoutException) { }
+    }
+
+    private ConversationRun? GetCurrentConversationRun() =>
+        _currentConversation is null ? null : GetConversationRun(_currentConversation.Id);
+
+    private bool IsConversationRunning(string conversationId) =>
+        GetConversationRun(conversationId) is { IsSettled: false };
+
+    private bool IsConversationVisible(string conversationId) =>
+        _currentConversation?.Id == conversationId;
+
+    private void SetRunUiText(string conversationId, string? notice = null, string? networkText = null)
+    {
+        if (!IsConversationVisible(conversationId)) return;
+        if (notice is not null) ChatNotice.Text = notice;
+        if (networkText is not null) NetworkStatusText.Text = networkText;
+    }
+
+    private void SetConversationActivity(
+        string conversationId,
+        ConversationActivityStatus status,
+        LocalConversation? conversation = null)
+    {
+        var previousStatus = _conversationActivities.GetValueOrDefault(conversationId);
+        if (previousStatus == status) return;
+        if (status == ConversationActivityStatus.None) _conversationActivities.Remove(conversationId);
+        else _conversationActivities[conversationId] = status;
+
+        var existing = _conversations.FirstOrDefault(item => item.Conversation.Id == conversationId);
+        if (existing is null && conversation is null) return;
+        var index = existing is null ? 0 : _conversations.IndexOf(existing);
+        var selected = existing is not null && ReferenceEquals(ConversationsList.SelectedItem, existing);
+        var replacement = ConversationListItem.From(conversation ?? existing!.Conversation, status);
+        if (existing is null) _conversations.Insert(0, replacement);
+        else _conversations[index] = replacement;
+        if (selected) ConversationsList.SelectedItem = replacement;
+    }
+
+    private void UpsertConversationListItem(LocalConversation conversation, bool moveToTop, bool select)
+    {
+        var existing = _conversations.FirstOrDefault(item => item.Conversation.Id == conversation.Id);
+        var wasSelected = existing is not null && ReferenceEquals(ConversationsList.SelectedItem, existing);
+        var index = existing is null ? 0 : _conversations.IndexOf(existing);
         if (existing is not null) _conversations.Remove(existing);
-        var replacement = ConversationListItem.From(_currentConversation);
-        _conversations.Insert(0, replacement);
-        ConversationsList.SelectedItem = replacement;
+        var status = _conversationActivities.GetValueOrDefault(conversation.Id);
+        var replacement = ConversationListItem.From(conversation, status);
+        if (moveToTop || existing is null) _conversations.Insert(0, replacement);
+        else _conversations.Insert(Math.Min(index, _conversations.Count), replacement);
+        if (select || wasSelected) ConversationsList.SelectedItem = replacement;
+    }
+
+    private async Task PersistRunConversationAsync(
+        ConversationRun run,
+        CancellationToken cancellationToken,
+        LocalConversation? snapshot = null)
+    {
+        await run.PersistenceGate.WaitAsync(cancellationToken);
+        try
+        {
+            await _conversationStore.SaveAsync(run.AccountId, snapshot ?? run.Conversation, cancellationToken);
+            run.LastPersistedAt = DateTimeOffset.UtcNow;
+        }
+        finally { run.PersistenceGate.Release(); }
+    }
+
+    private async Task PersistRunConversationThrottledAsync(ConversationRun run)
+    {
+        if (run.IsSettled || DateTimeOffset.UtcNow - run.LastPersistedAt < TimeSpan.FromSeconds(1.5)) return;
+        try { await PersistRunConversationAsync(run, CancellationToken.None); }
+        catch { /* The final save reports any durable storage failure to the user. */ }
     }
 
     private void ProfileSidebarButton_OnClick(object sender, RoutedEventArgs e) => AccountPanel.SelectedIndex = 1;
@@ -1967,7 +2180,8 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void StopGenerationButton_OnClick(object sender, RoutedEventArgs e) => _chatCancellation?.Cancel();
+    private void StopGenerationButton_OnClick(object sender, RoutedEventArgs e) =>
+        GetCurrentConversationRun()?.Cancellation.Cancel();
 
     private void ShowLogin()
     {
@@ -2201,7 +2415,16 @@ public partial class MainWindow : Window
         }
     }
     private void ExitApplication() { PrepareForExit(); Application.Current.Shutdown(); }
-    internal void PrepareForExit() { _allowExit = true; _chatCancellation?.Cancel(); _updateCancellation.Cancel(); _sessionTimer.Stop(); WorkspaceApplicationRegistry.StopAll(); _trayIcon?.Dispose(); _trayIcon = null; }
+    internal void PrepareForExit()
+    {
+        _allowExit = true;
+        foreach (var run in _conversationRuns.Values.ToArray()) run.Cancellation.Cancel();
+        _updateCancellation.Cancel();
+        _sessionTimer.Stop();
+        WorkspaceApplicationRegistry.StopAll();
+        _trayIcon?.Dispose();
+        _trayIcon = null;
+    }
 }
 
 public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyChanged
@@ -2214,6 +2437,19 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
     public bool HasSources => Sources.Count > 0;
     public string TimeText => _source.ClientCreatedAt.ToLocalTime().ToString("HH:mm");
     private bool _isNavigationHighlighted;
+    private bool _isThinking;
+    public bool IsThinking
+    {
+        get => _isThinking;
+        set
+        {
+            if (_isThinking == value) return;
+            _isThinking = value;
+            PropertyChanged?.Invoke(this, new(nameof(IsThinking)));
+            PropertyChanged?.Invoke(this, new(nameof(ThinkingVisibility)));
+        }
+    }
+    public Visibility ThinkingVisibility => IsThinking ? Visibility.Visible : Visibility.Collapsed;
     public bool IsNavigationHighlighted
     {
         get => _isNavigationHighlighted;
@@ -2343,7 +2579,19 @@ public sealed record ChatDisplayImage(string FilePath, ImageSource Source)
     }
 }
 
-public sealed record ConversationListItem(LocalConversation Conversation)
+public enum ConversationActivityStatus
+{
+    None,
+    Thinking,
+    Streaming,
+    NewReply,
+    Failed,
+    Stopped,
+}
+
+public sealed record ConversationListItem(
+    LocalConversation Conversation,
+    ConversationActivityStatus ActivityStatus = ConversationActivityStatus.None)
 {
     public string Title => Conversation.Title;
     public string GroupName => !string.IsNullOrWhiteSpace(Conversation.ProjectPath)
@@ -2369,5 +2617,83 @@ public sealed record ConversationListItem(LocalConversation Conversation)
             return date == today ? "今天" : date == today.AddDays(-1) ? "昨天" : "更早";
         }
     }
-    public static ConversationListItem From(LocalConversation conversation) => new(conversation);
+    public string ActivityText => ActivityStatus switch
+    {
+        ConversationActivityStatus.Thinking => "◌ 思考中",
+        ConversationActivityStatus.Streaming => "••• 生成中",
+        ConversationActivityStatus.NewReply => "● 新回复",
+        ConversationActivityStatus.Failed => "! 失败",
+        ConversationActivityStatus.Stopped => "已停止",
+        _ => "",
+    };
+    public string ActivityToolTip => ActivityStatus switch
+    {
+        ConversationActivityStatus.Thinking => "AI 正在思考，切换对话不会中断",
+        ConversationActivityStatus.Streaming => "AI 正在生成回答",
+        ConversationActivityStatus.NewReply => "回答已完成，点击查看",
+        ConversationActivityStatus.Failed => "回答生成失败，点击查看错误",
+        ConversationActivityStatus.Stopped => "回答已停止",
+        _ => "",
+    };
+    public Visibility ActivityVisibility => ActivityStatus == ConversationActivityStatus.None
+        ? Visibility.Collapsed : Visibility.Visible;
+    public static ConversationListItem From(
+        LocalConversation conversation,
+        ConversationActivityStatus activityStatus = ConversationActivityStatus.None) => new(conversation, activityStatus);
+}
+
+internal sealed class ConversationRun : IDisposable
+{
+    public ConversationRun(
+        string accountId,
+        LocalConversation conversation,
+        ChatDisplayMessage assistantDisplay,
+        CancellationTokenSource cancellation)
+    {
+        AccountId = accountId;
+        Conversation = conversation;
+        AssistantDisplay = assistantDisplay;
+        Cancellation = cancellation;
+        Assistant = assistantDisplay.Source;
+    }
+
+    public string AccountId { get; }
+    public LocalConversation Conversation { get; private set; }
+    public SyncedChatMessage Assistant { get; private set; }
+    public ChatDisplayMessage AssistantDisplay { get; }
+    public CancellationTokenSource Cancellation { get; }
+    public SemaphoreSlim PersistenceGate { get; } = new(1, 1);
+    public TaskCompletionSource Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public DateTimeOffset LastPersistedAt { get; set; }
+    public bool IsSettled { get; set; }
+    public bool AssistantRemoved { get; private set; }
+
+    public void SetAssistant(SyncedChatMessage assistant)
+    {
+        AssistantRemoved = false;
+        Assistant = assistant;
+        AssistantDisplay.Content = assistant.Content;
+        AssistantDisplay.Source = assistant;
+        Conversation = Conversation with
+        {
+            UpdatedAt = DateTimeOffset.UtcNow,
+            Messages = Conversation.Messages.Select(message => message.Id == assistant.Id ? assistant : message).ToArray(),
+        };
+    }
+
+    public void RemoveAssistant()
+    {
+        AssistantRemoved = true;
+        Conversation = Conversation with
+        {
+            UpdatedAt = DateTimeOffset.UtcNow,
+            Messages = Conversation.Messages.Where(message => message.Id != Assistant.Id).ToArray(),
+        };
+    }
+
+    public void Dispose()
+    {
+        Cancellation.Dispose();
+        PersistenceGate.Dispose();
+    }
 }

@@ -149,6 +149,25 @@ public sealed class AttachmentComposerController : IDisposable
         foreach (var item in snapshot) await RemoveAsync(item);
     }
 
+    public void DetachForSend(IEnumerable<ComposerAttachment> attachments)
+    {
+        foreach (var item in attachments)
+            if (Items.Contains(item)) Items.Remove(item);
+    }
+
+    public async Task ReleaseSentAsync(IEnumerable<ComposerAttachment> attachments)
+    {
+        foreach (var item in attachments)
+        {
+            item.UploadCancellation?.Dispose();
+            item.UploadCancellation = null;
+            if (item.IsTemporary) TryDelete(item.FilePath);
+            var token = _token();
+            if (item.ServerFileId is not null && token is not null)
+                try { await _client.DeleteAsync(_gateway, token, item.ServerFileId); } catch { }
+        }
+    }
+
     public IReadOnlyList<ComposerAttachment> Snapshot() => Items.ToArray();
 
     private async Task UploadAsync(ComposerAttachment item)

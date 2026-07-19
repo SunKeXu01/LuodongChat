@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using System.Text.RegularExpressions;
 
 namespace ChatGPTConnector.App;
 
@@ -11,7 +12,7 @@ public partial class RenameConversationDialog : Window
 
     public RenameConversationDialog(string initialTitle, Func<string, Task<string?>> saveAsync)
     {
-        _initialTitle = initialTitle.Trim();
+        _initialTitle = NormalizeTitle(initialTitle);
         _saveAsync = saveAsync;
         InitializeComponent();
         NameInput.Text = _initialTitle;
@@ -22,12 +23,15 @@ public partial class RenameConversationDialog : Window
         };
     }
 
-    private string NormalizedTitle => NameInput.Text.Trim();
+    private string NormalizedTitle => NormalizeTitle(NameInput.Text);
+
+    private static string NormalizeTitle(string value) => Regex.Replace(value.Trim(), @"\s+", " ");
 
     private void NameInput_OnTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
     {
         if (!IsInitialized) return;
         var normalized = NormalizedTitle;
+        CharacterCountText.Text = $"{normalized.Length}/50";
         ValidationError.Text = NameInput.Text.Length > 0 && normalized.Length == 0 ? "会话名称不能为空。" : "";
         SaveButton.IsEnabled = !_saving && normalized.Length is >= 1 and <= 50
             && !string.Equals(normalized, _initialTitle, StringComparison.Ordinal);
