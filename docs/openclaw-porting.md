@@ -5,7 +5,9 @@
 ## 已完成
 
 - 项目目录内的文件列出、搜索、读取、写入、精确替换、移动和安全删除。
-- 前台命令执行、超时取消、输出截断、敏感环境变量清理。
+- Codex 风格多文件补丁，支持上下文校验、批准后哈希复核和失败回滚。
+- 命令执行、超时取消、输出截断、敏感环境变量清理。
+- Codex 风格的长命令会话：增量输出、标准输入、轮询和进程树终止。
 - 请求批准、替我审批、完全访问、自定义四种项目级权限。
 - 仅本次、当前会话和项目级永久批准；永久批准只保存精确操作指纹。
 - Windows Job Object 进程树约束，客户端退出时终止受管进程。
@@ -27,9 +29,11 @@
 ## 后续候选
 
 1. 使用 Windows AppContainer 或受支持的 Windows 沙箱 API，实现真正的文件和网络边界。
-2. 为长时间命令增加后台任务、增量输出、任务恢复和取消面板。
+2. 为长时间命令增加可视化任务面板；底层增量输出、输入、轮询和取消能力已完成。
 3. 增加可审阅的可执行文件签名、发布者和哈希信息。
 4. 为常见只读命令建立严格安全工具集，而不是扩大通用 Shell 白名单。
 5. 接入 MCP 时保持工具可见性、权限策略和进程隔离三层独立。
 
 参考：[OpenClaw Exec approvals](https://github.com/openclaw/openclaw/blob/main/docs/tools/exec-approvals.md)、[OpenClaw security model](https://github.com/openclaw/openclaw/blob/main/docs/gateway/security/index.md)。
+
+Codex 风格命令会话的设计和安全差异参见 [OpenAI Codex CLI 本地执行能力移植记录](codex-cli-porting.md)。

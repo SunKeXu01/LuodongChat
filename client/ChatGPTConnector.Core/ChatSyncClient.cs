@@ -57,7 +57,9 @@ public sealed class ChatSyncClient(HttpClient http)
         var citations = new Dictionary<string, ChatCitation>(StringComparer.OrdinalIgnoreCase);
         var images = new List<GeneratedImageData>();
         var webSearchPerformed = false;
-        for (var round = 0; round < 8; round++)
+        // Command sessions may need an initial exec plus several output polls. Keep the loop
+        // bounded, but allow enough turns for a normal build/test workflow to finish.
+        for (var round = 0; round < 12; round++)
         {
             var pass = await StreamOnceAsync(gateway, token, input, progress, cancellationToken, enableWebSearch,
                 enableImageGeneration, round == 0 ? attachmentIds : null, hasReferenceImages, localTools);

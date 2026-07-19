@@ -58,6 +58,130 @@ public sealed class WorkspaceFileToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task AppliesMultiFileCodexPatchInsideWorkspace()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "modify.txt"), "line1\nline2\nline3\n");
+        await File.WriteAllTextAsync(Path.Combine(_root, "delete.txt"), "obsolete\n");
+        await using var tools = new WorkspaceFileTools(_root);
+        var call = Call("apply_patch", new
+        {
+            patch = """
+                *** Begin Patch
+                *** Add File: nested/new.txt
+                +created
+                *** Update File: modify.txt
+                @@
+                 line1
+                -line2
+                +changed
+                 line3
+                *** Delete File: delete.txt
+                *** End Patch
+                """,
+        });
+        var plan = tools.Describe(call);
+
+        var result = await tools.ExecuteAsync(call, approvedPlan: plan);
+        using var document = JsonDocument.Parse(result);
+
+        Assert.True(plan.RequiresApproval);
+        Assert.Equal(WorkspaceOperationRisk.Destructive, plan.Risk);
+        Assert.Contains("nested/new.txt", plan.AffectedPaths);
+        Assert.True(document.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal("created\n", await File.ReadAllTextAsync(Path.Combine(_root, "nested", "new.txt")));
+        Assert.Equal("line1\nchanged\nline3\n", await File.ReadAllTextAsync(Path.Combine(_root, "modify.txt")));
+        Assert.False(File.Exists(Path.Combine(_root, "delete.txt")));
+    }
+
+    [Fact]
+    public async Task AppliesMoveAndPureAdditionPatch()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "old"));
+        await File.WriteAllTextAsync(Path.Combine(_root, "old", "name.txt"), "first\nsecond\n");
+        await using var tools = new WorkspaceFileTools(_root);
+        var result = await tools.ExecuteAsync(Call("apply_patch", new
+        {
+            patch = """
+                *** Begin Patch
+                *** Update File: old/name.txt
+                *** Move to: renamed/name.txt
+                @@
+                +third
+                *** End Patch
+                """,
+        }));
+
+        Assert.True(JsonDocument.Parse(result).RootElement.GetProperty("ok").GetBoolean());
+        Assert.False(File.Exists(Path.Combine(_root, "old", "name.txt")));
+        Assert.Equal("first\nsecond\nthird\n", await File.ReadAllTextAsync(Path.Combine(_root, "renamed", "name.txt")));
+    }
+
+    [Fact]
+    public async Task RejectsInvalidPatchWithoutPartialWrites()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "first.txt"), "original\n");
+        await File.WriteAllTextAsync(Path.Combine(_root, "second.txt"), "unchanged\n");
+        await using var tools = new WorkspaceFileTools(_root);
+        var result = await tools.ExecuteAsync(Call("apply_patch", new
+        {
+            patch = """
+                *** Begin Patch
+                *** Update File: first.txt
+                @@
+                -original
+                +modified
+                *** Update File: second.txt
+                @@
+                -missing context
+                +should fail
+                *** End Patch
+                """,
+        }));
+
+        Assert.False(JsonDocument.Parse(result).RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal("original\n", await File.ReadAllTextAsync(Path.Combine(_root, "first.txt")));
+        Assert.Equal("unchanged\n", await File.ReadAllTextAsync(Path.Combine(_root, "second.txt")));
+    }
+
+    [Fact]
+    public async Task PatchApprovalIsInvalidatedWhenSourceChanges()
+    {
+        var path = Path.Combine(_root, "source.txt");
+        await File.WriteAllTextAsync(path, "before\n");
+        await using var tools = new WorkspaceFileTools(_root);
+        var call = Call("apply_patch", new
+        {
+            patch = "*** Begin Patch\n*** Update File: source.txt\n@@\n-before\n+after\n*** End Patch",
+        });
+        var approved = tools.Describe(call);
+        await File.WriteAllTextAsync(path, "changed externally\n");
+
+        var result = await tools.ExecuteAsync(call, approvedPlan: approved);
+
+        Assert.Contains("批准后执行内容发生变化", JsonDocument.Parse(result).RootElement.GetProperty("error").GetString());
+        Assert.Equal("changed externally\n", await File.ReadAllTextAsync(path));
+    }
+
+    [Fact]
+    public async Task PatchRejectsTraversalAndSensitiveFiles()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, ".env"), "SECRET=keep\n");
+        await using var tools = new WorkspaceFileTools(_root);
+        var traversal = await tools.ExecuteAsync(Call("apply_patch", new
+        {
+            patch = "*** Begin Patch\n*** Add File: ../outside.txt\n+bad\n*** End Patch",
+        }));
+        var sensitive = await tools.ExecuteAsync(Call("apply_patch", new
+        {
+            patch = "*** Begin Patch\n*** Update File: .env\n@@\n-SECRET=keep\n+SECRET=leak\n*** End Patch",
+        }));
+
+        Assert.False(JsonDocument.Parse(traversal).RootElement.GetProperty("ok").GetBoolean());
+        Assert.False(JsonDocument.Parse(sensitive).RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal("SECRET=keep\n", await File.ReadAllTextAsync(Path.Combine(_root, ".env")));
+    }
+
+    [Fact]
     public async Task RefusesDeletingNonEmptyDirectory()
     {
         Directory.CreateDirectory(Path.Combine(_root, "data"));
@@ -102,6 +226,90 @@ public sealed class WorkspaceFileToolsTests : IDisposable
         var containment = document.RootElement.GetProperty("result").GetProperty("process_containment").GetString();
         if (OperatingSystem.IsWindows()) Assert.StartsWith("windows_job_", containment);
         else Assert.Equal("process_tree", containment);
+    }
+
+    [Fact]
+    public async Task LongCommandYieldsSessionAndCanBePolledToCompletion()
+    {
+        await using var tools = new WorkspaceFileTools(_root);
+        var command = OperatingSystem.IsWindows()
+            ? "echo first & ping 127.0.0.1 -n 2 >nul & echo second"
+            : "printf first; sleep 1; printf second";
+        var started = await tools.ExecuteAsync(Call("run_command", new
+        {
+            command, working_directory = "", shell = "cmd", timeout_seconds = 20, yield_time_ms = 250,
+        }));
+        using var startedDocument = JsonDocument.Parse(started);
+        var startedResult = startedDocument.RootElement.GetProperty("result");
+        Assert.Equal("running", startedResult.GetProperty("status").GetString());
+        var sessionId = startedResult.GetProperty("session_id").GetInt32();
+        Assert.True(sessionId > 0);
+
+        var polled = await tools.ExecuteAsync(Call("write_stdin", new
+        {
+            session_id = sessionId, chars = "", yield_time_ms = 3_000, terminate = false,
+        }));
+        using var polledDocument = JsonDocument.Parse(polled);
+        var polledResult = polledDocument.RootElement.GetProperty("result");
+        Assert.Equal("completed", polledResult.GetProperty("status").GetString());
+        Assert.Equal(0, polledResult.GetProperty("exit_code").GetInt32());
+        Assert.Contains("second", polledResult.GetProperty("stdout").GetString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CanWriteToAndTerminateOnlyManagedCommandSessions()
+    {
+        await using var tools = new WorkspaceFileTools(_root);
+        var command = OperatingSystem.IsWindows()
+            ? "set /p answer= & echo reply:%answer%"
+            : "read answer; printf reply:$answer";
+        var started = await tools.ExecuteAsync(Call("run_command", new
+        {
+            command, working_directory = "", shell = "cmd", timeout_seconds = 20, yield_time_ms = 250,
+        }));
+        var sessionId = JsonDocument.Parse(started).RootElement.GetProperty("result").GetProperty("session_id").GetInt32();
+
+        var replied = await tools.ExecuteAsync(Call("write_stdin", new
+        {
+            session_id = sessionId, chars = "luodong\n", yield_time_ms = 3_000, terminate = false,
+        }));
+        using var repliedDocument = JsonDocument.Parse(replied);
+        Assert.Equal("completed", repliedDocument.RootElement.GetProperty("result").GetProperty("status").GetString());
+        Assert.Contains("reply:luodong", repliedDocument.RootElement.GetProperty("result").GetProperty("stdout").GetString(), StringComparison.OrdinalIgnoreCase);
+
+        var longCommand = OperatingSystem.IsWindows() ? "ping 127.0.0.1 -n 20 >nul" : "sleep 20";
+        var longStarted = await tools.ExecuteAsync(Call("run_command", new
+        {
+            command = longCommand, working_directory = "", shell = "cmd", timeout_seconds = 30, yield_time_ms = 250,
+        }));
+        var longSessionId = JsonDocument.Parse(longStarted).RootElement.GetProperty("result").GetProperty("session_id").GetInt32();
+        var stopped = await tools.ExecuteAsync(Call("write_stdin", new
+        {
+            session_id = longSessionId, chars = "", yield_time_ms = 3_000, terminate = true,
+        }));
+        Assert.Equal("terminated", JsonDocument.Parse(stopped).RootElement.GetProperty("result").GetProperty("status").GetString());
+
+        var unknown = await tools.ExecuteAsync(Call("write_stdin", new
+        {
+            session_id = int.MaxValue, chars = "", yield_time_ms = 100, terminate = true,
+        }));
+        Assert.Contains("不属于本次对话", JsonDocument.Parse(unknown).RootElement.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public void ExposesCodexStyleCommandSessionToolsWithoutRepromptingForTransport()
+    {
+        var definitions = JsonSerializer.Serialize(WorkspaceFileTools.ToolDefinitions);
+        Assert.Contains("yield_time_ms", definitions);
+        Assert.Contains("write_stdin", definitions);
+
+        var plan = new WorkspaceFileTools(_root).Describe(Call("write_stdin", new
+        {
+            session_id = 1, chars = "", yield_time_ms = 500, terminate = false,
+        }));
+        Assert.False(plan.RequiresApproval);
+        Assert.Equal(WorkspacePermissionDecision.Allow,
+            WorkspaceAccessPolicy.Decide(WorkspaceAccessMode.RiskBased, plan));
     }
 
     [Theory]

@@ -1393,13 +1393,15 @@ public partial class MainWindow : Window
                 var wantsImage = ImageGenerationIntent.IsExplicit(text);
                 var hasReferenceImages = attachmentSnapshot.Any(item => item.IsImage);
                 if (wantsImage) ChatNotice.Text = hasReferenceImages ? "正在参考上传图片生成，请稍候…" : "正在生成图片，请稍候…";
+                await using var workspaceTools = _selectedProjectPath is null
+                    ? null : new WorkspaceFileTools(_selectedProjectPath);
                 var result = await _chat.StreamResponseAsync(
                     GatewayUri, _session.AccessToken, context, progress, cancellationToken,
                     enableWebSearch: _webSearchEnabled, enableImageGeneration: wantsImage,
                     attachmentIds: attachmentSnapshot.Select(item => item.ServerFileId!).ToArray(),
                     hasReferenceImages: hasReferenceImages,
-                    localTools: _selectedProjectPath is null ? null : WorkspaceFileTools.ToolDefinitions,
-                    executeLocalTool: _selectedProjectPath is null ? null : CreateWorkspaceToolExecutor(_selectedProjectPath));
+                    localTools: workspaceTools is null ? null : WorkspaceFileTools.ToolDefinitions,
+                    executeLocalTool: workspaceTools is null ? null : CreateWorkspaceToolExecutor(_selectedProjectPath!, workspaceTools));
                 var storedImages = new List<GeneratedChatImage>();
                 foreach (var image in result.Images)
                     storedImages.Add(await _conversationStore.SaveGeneratedImageAsync(
@@ -1454,9 +1456,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private Func<LocalToolCall, CancellationToken, Task<string>> CreateWorkspaceToolExecutor(string projectPath)
+    private Func<LocalToolCall, CancellationToken, Task<string>> CreateWorkspaceToolExecutor(
+        string projectPath, WorkspaceFileTools tools)
     {
-        var tools = new WorkspaceFileTools(projectPath);
         return async (call, cancellationToken) =>
         {
             WorkspaceToolPlan plan;
@@ -1523,12 +1525,26 @@ public partial class MainWindow : Window
                 throw;
             }
             var succeeded = false;
-            try { succeeded = System.Text.Json.JsonDocument.Parse(result).RootElement.GetProperty("ok").GetBoolean(); }
+            string? executionStatus = null;
+            try
+            {
+                using var resultDocument = System.Text.Json.JsonDocument.Parse(result);
+                var resultRoot = resultDocument.RootElement;
+                succeeded = resultRoot.GetProperty("ok").GetBoolean();
+                if (succeeded && resultRoot.TryGetProperty("result", out var resultValue)
+                    && resultValue.ValueKind == System.Text.Json.JsonValueKind.Object
+                    && resultValue.TryGetProperty("status", out var statusValue))
+                    executionStatus = statusValue.GetString();
+            }
             catch (System.Text.Json.JsonException) { }
-            AuditWorkspaceAction(projectPath, plan, auditDecision, succeeded ? "执行成功" : "执行失败");
-            ChatNotice.Text = succeeded
-                ? plan.RequiresApproval ? plan.Summary + "已完成" : "已读取项目文件，正在继续回答…"
-                : plan.Summary + "未执行，正在让 GPT 调整方案…";
+            AuditWorkspaceAction(projectPath, plan, auditDecision,
+                !succeeded ? "执行失败" : executionStatus == "running" ? "执行中" : executionStatus == "terminated" ? "已终止" : "执行成功");
+            ChatNotice.Text = !succeeded
+                ? plan.Summary + "未执行，正在让 GPT 调整方案…"
+                : executionStatus == "running" ? "命令仍在运行，GPT 正在读取后续输出…"
+                : executionStatus == "terminated" ? "命令及其子进程已停止，正在继续回答…"
+                : plan.Name == "write_stdin" ? "命令已完成，GPT 正在整理结果…"
+                : plan.RequiresApproval ? plan.Summary + "已完成" : "已读取项目文件，正在继续回答…";
             return result;
         };
     }

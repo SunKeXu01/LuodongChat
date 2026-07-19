@@ -95,12 +95,13 @@ public static class WorkspaceAccessPolicy
     };
 }
 
-public sealed class WorkspaceFileTools(string workspaceRoot)
+public sealed class WorkspaceFileTools(string workspaceRoot) : IAsyncDisposable
 {
     private const int MaxReadCharacters = 120_000;
     private const long MaxTextFileBytes = 4 * 1024 * 1024;
     private const int MaxListedEntries = 500;
     private readonly string _root = NormalizeRoot(workspaceRoot);
+    private readonly WorkspaceCommandSessionManager _commandSessions = new();
 
     private static readonly HashSet<string> IgnoredDirectories = new(StringComparer.OrdinalIgnoreCase)
     { ".git", ".svn", ".hg", ".idea", ".vs", "node_modules", "bin", "obj", "dist", "build", "out", "target", "vendor", "coverage" };
@@ -194,17 +195,39 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
             properties = new { path = new { type = "string", description = "相对于项目根目录的路径。" } },
             required = new[] { "path" }, additionalProperties = false,
         }),
-        Function("run_command", "在用户选择的项目目录中运行一条前台命令，可用于构建、测试、联网下载或其他项目任务。是否询问由用户选择的访问权限决定；禁止提权和修改关键系统设置。", new
+        Function("apply_patch", "使用 Codex 风格补丁精确修改项目内的一个或多个文本文件。支持 *** Add File、*** Update File、*** Move to 和 *** Delete File；执行前会校验上下文与源文件哈希。", new
         {
             type = "object",
             properties = new
             {
-                command = new { type = "string", description = "要执行的完整命令。保持单行，不要包含交互式提示或后台常驻进程。" },
+                patch = new { type = "string", description = "完整补丁文本，必须以 *** Begin Patch 开始并以 *** End Patch 结束。所有路径必须相对于项目根目录。" },
+            },
+            required = new[] { "patch" }, additionalProperties = false,
+        }),
+        Function("run_command", "在用户选择的项目目录中运行命令，可用于构建、测试、联网下载或开发服务。短命令直接返回；仍在运行的命令返回 session_id，随后使用 write_stdin 读取输出、发送输入或终止。是否询问由用户选择的访问权限决定；禁止提权和修改关键系统设置。", new
+        {
+            type = "object",
+            properties = new
+            {
+                command = new { type = "string", description = "要执行的完整单行命令。" },
                 working_directory = new { type = "string", description = "相对于项目根目录的工作目录；项目根目录使用空字符串。" },
                 shell = new { type = "string", @enum = new[] { "cmd", "powershell" }, description = "Windows 命令解释器。通常使用 cmd；仅在确实需要 PowerShell 语法时选择 powershell。" },
-                timeout_seconds = new { type = "integer", minimum = 5, maximum = 600, description = "超时时间，5 到 600 秒。" },
+                timeout_seconds = new { type = "integer", minimum = 5, maximum = 3600, description = "进程最长运行时间，5 到 3600 秒。" },
+                yield_time_ms = new { type = "integer", minimum = 250, maximum = 30000, description = "返回前等待时间，250 到 30000 毫秒。命令未结束时返回 session_id；普通命令建议 10000。" },
             },
-            required = new[] { "command", "working_directory", "shell", "timeout_seconds" }, additionalProperties = false,
+            required = new[] { "command", "working_directory", "shell", "timeout_seconds", "yield_time_ms" }, additionalProperties = false,
+        }),
+        Function("write_stdin", "继续操作 run_command 返回的命令会话。chars 为空时轮询新输出；可发送交互输入，或设置 terminate=true 停止进程。", new
+        {
+            type = "object",
+            properties = new
+            {
+                session_id = new { type = "integer", minimum = 1, description = "run_command 返回的命令会话 ID。" },
+                chars = new { type = "string", description = "写入进程标准输入的字符；仅轮询时使用空字符串。需要确认输入时包含换行符。" },
+                yield_time_ms = new { type = "integer", minimum = 100, maximum = 30000, description = "写入或轮询后等待新输出的时间。" },
+                terminate = new { type = "boolean", description = "是否终止该命令及其子进程。" },
+            },
+            required = new[] { "session_id", "chars", "yield_time_ms", "terminate" }, additionalProperties = false,
         }),
         Function("launch_application", "启动项目目录中的 Windows EXE 程序并保持运行。只能启动用户所选项目内的程序，启动前受项目权限和用户批准控制。", new
         {
@@ -244,7 +267,9 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
             "move_path" => new WorkspaceToolPlan(call.Name, $"移动或重命名 {Relative(args, "source")} → {Relative(args, "destination")}", true,
                 [Relative(args, "source"), Relative(args, "destination")], WorkspaceOperationRisk.Write),
             "delete_path" => WritePlan(call.Name, "删除文件或空目录", args, "path") with { Risk = WorkspaceOperationRisk.Destructive },
+            "apply_patch" => PatchPlan(args),
             "run_command" => CommandPlan(args),
+            "write_stdin" => CommandSessionPlan(args),
             "launch_application" => LaunchApplicationPlan(args),
             "list_launched_applications" => new WorkspaceToolPlan(call.Name, "查看由泺栋 Chat 启动的项目程序", false, [], WorkspaceOperationRisk.Read),
             "stop_launched_application" => new WorkspaceToolPlan(call.Name,
@@ -260,7 +285,7 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
     {
         try
         {
-            if (approvedPlan is not null && call.Name is "run_command" or "launch_application")
+            if (approvedPlan is not null && call.Name is "run_command" or "launch_application" or "apply_patch")
             {
                 var currentPlan = Describe(call);
                 if (!string.Equals(currentPlan.ApprovalBinding, approvedPlan.ApprovalBinding, StringComparison.Ordinal))
@@ -278,7 +303,9 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
                 "create_directory" => CreateDirectory(args),
                 "move_path" => MovePath(args),
                 "delete_path" => DeletePath(args),
+                "apply_patch" => await ApplyPatchAsync(args, cancellationToken),
                 "run_command" => await RunCommandAsync(args, cancellationToken),
+                "write_stdin" => await WriteStdinAsync(args, cancellationToken),
                 "launch_application" => LaunchApplication(args),
                 "list_launched_applications" => WorkspaceApplicationRegistry.List(_root),
                 "stop_launched_application" => StopLaunchedApplication(args),
@@ -436,6 +463,150 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
         return new { path = ToRelative(path) };
     }
 
+    private async Task<object> ApplyPatchAsync(JsonElement args, CancellationToken cancellationToken)
+    {
+        var document = WorkspacePatchDocument.Parse(PatchText(args));
+        var states = await PreparePatchStatesAsync(document, cancellationToken);
+        var transactionDirectory = Path.Combine(_root, ".luodongchat-patch-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(transactionDirectory);
+        var backups = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var temporaryFiles = new List<string>();
+        try
+        {
+            var backupIndex = 0;
+            foreach (var state in states.Values.Where(item => item.OriginalExists))
+            {
+                var backup = Path.Combine(transactionDirectory, (++backupIndex).ToString("D4"));
+                File.Copy(state.AbsolutePath, backup, overwrite: false);
+                backups[state.AbsolutePath] = backup;
+            }
+
+            foreach (var state in states.Values.Where(item => item.CurrentContent is not null))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                EnsureNoReparsePointEscape(state.AbsolutePath);
+                var parent = Path.GetDirectoryName(state.AbsolutePath)
+                    ?? throw new IOException("无法确定补丁文件的父目录。");
+                Directory.CreateDirectory(parent);
+                var temporary = Path.Combine(parent,
+                    "." + Path.GetFileName(state.AbsolutePath) + ".luodongchat-" + Guid.NewGuid().ToString("N") + ".tmp");
+                temporaryFiles.Add(temporary);
+                await File.WriteAllTextAsync(temporary, state.CurrentContent!, new UTF8Encoding(false), cancellationToken);
+                File.Move(temporary, state.AbsolutePath, overwrite: true);
+                temporaryFiles.Remove(temporary);
+            }
+            foreach (var state in states.Values.Where(item => item.CurrentContent is null && item.OriginalExists))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                EnsureNoReparsePointEscape(state.AbsolutePath);
+                File.Delete(state.AbsolutePath);
+            }
+
+            var added = states.Values.Count(item => !item.OriginalExists && item.CurrentContent is not null);
+            var deleted = states.Values.Count(item => item.OriginalExists && item.CurrentContent is null);
+            var modified = states.Values.Count(item => item.OriginalExists && item.CurrentContent is not null
+                && !string.Equals(item.OriginalContent, item.CurrentContent, StringComparison.Ordinal));
+            return new
+            {
+                added,
+                modified,
+                deleted,
+                files = states.Values.Select(item => ToRelative(item.AbsolutePath)).Order(StringComparer.OrdinalIgnoreCase).ToArray(),
+            };
+        }
+        catch
+        {
+            foreach (var state in states.Values)
+            {
+                try
+                {
+                    EnsureNoReparsePointEscape(state.AbsolutePath);
+                    if (state.OriginalExists && backups.TryGetValue(state.AbsolutePath, out var backup))
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(state.AbsolutePath)!);
+                        File.Copy(backup, state.AbsolutePath, overwrite: true);
+                    }
+                    else if (!state.OriginalExists && File.Exists(state.AbsolutePath)) File.Delete(state.AbsolutePath);
+                }
+                catch { }
+            }
+            throw;
+        }
+        finally
+        {
+            foreach (var temporary in temporaryFiles) try { File.Delete(temporary); } catch { }
+            try { Directory.Delete(transactionDirectory, recursive: true); } catch { }
+        }
+    }
+
+    private async Task<Dictionary<string, PatchFileState>> PreparePatchStatesAsync(
+        WorkspacePatchDocument document, CancellationToken cancellationToken)
+    {
+        var states = new Dictionary<string, PatchFileState>(StringComparer.OrdinalIgnoreCase);
+        foreach (var operation in document.Operations)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var source = ResolvePatchTextPath(operation.Path, operation is not WorkspacePatchAdd);
+            if (states.ContainsKey(source)) throw new InvalidOperationException($"同一补丁不能重复修改文件：{operation.Path}");
+            switch (operation)
+            {
+                case WorkspacePatchAdd add:
+                    if (File.Exists(source)) throw new IOException($"新增文件已经存在：{add.Path}");
+                    EnsurePatchContentSize(add.Content, add.Path);
+                    states[source] = new PatchFileState(source, false, null, add.Content);
+                    break;
+                case WorkspacePatchDelete delete:
+                {
+                    var original = await ReadPatchSourceAsync(source, cancellationToken);
+                    states[source] = new PatchFileState(source, true, original, null);
+                    break;
+                }
+                case WorkspacePatchUpdate update:
+                {
+                    var original = await ReadPatchSourceAsync(source, cancellationToken);
+                    var updated = WorkspacePatchEngine.ApplyUpdate(original, update);
+                    EnsurePatchContentSize(updated, update.Path);
+                    if (update.MovePath is null)
+                        states[source] = new PatchFileState(source, true, original, updated);
+                    else
+                    {
+                        var destination = ResolvePatchTextPath(update.MovePath, mustExist: false);
+                        if (states.ContainsKey(destination) || File.Exists(destination))
+                            throw new IOException($"移动目标已经存在或在补丁中重复：{update.MovePath}");
+                        states[source] = new PatchFileState(source, true, original, null);
+                        states[destination] = new PatchFileState(destination, false, null, updated);
+                    }
+                    break;
+                }
+            }
+        }
+        return states;
+    }
+
+    private string ResolvePatchTextPath(string relative, bool mustExist)
+    {
+        var path = ResolvePath(relative, mustExist, expectDirectory: false);
+        if (IsSensitiveFile(path)) throw new UnauthorizedAccessException("补丁不能修改密钥或凭据文件。");
+        EnsureTextPath(path);
+        return path;
+    }
+
+    private static void EnsurePatchContentSize(string content, string path)
+    {
+        if (Encoding.UTF8.GetByteCount(content) > MaxTextFileBytes)
+            throw new IOException($"补丁生成的文本文件过大：{path}");
+    }
+
+    private static async Task<string> ReadPatchSourceAsync(string path, CancellationToken cancellationToken)
+    {
+        if (new FileInfo(path).Length > MaxTextFileBytes) throw new IOException("补丁源文件过大。");
+        if (await LooksBinaryAsync(path, cancellationToken)) throw new InvalidOperationException("补丁不能修改二进制文件。");
+        return await File.ReadAllTextAsync(path, cancellationToken);
+    }
+
+    private sealed record PatchFileState(
+        string AbsolutePath, bool OriginalExists, string? OriginalContent, string? CurrentContent);
+
     private async Task<object> RunCommandAsync(JsonElement args, CancellationToken cancellationToken)
     {
         var command = Command(args);
@@ -444,43 +615,49 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
         var shell = args.GetProperty("shell").GetString() ?? "cmd";
         if (shell is not ("cmd" or "powershell")) throw new ArgumentException("不支持的命令解释器。");
         var timeoutSeconds = args.GetProperty("timeout_seconds").GetInt32();
-        if (timeoutSeconds is < 5 or > 600) throw new ArgumentException("命令超时时间必须在 5 到 600 秒之间。");
+        if (timeoutSeconds is < 5 or > 3600) throw new ArgumentException("命令超时时间必须在 5 到 3600 秒之间。");
+        var yieldTimeMs = OptionalInt32(args, "yield_time_ms", 10_000);
+        if (yieldTimeMs is < 250 or > 30_000) throw new ArgumentException("命令等待时间必须在 250 到 30000 毫秒之间。");
 
         var startInfo = CreateShellStartInfo(shell, command, workingDirectory);
         SanitizeEnvironment(startInfo.Environment);
-        using var process = new Process { StartInfo = startInfo };
-        if (!process.Start()) throw new InvalidOperationException("无法启动命令进程。");
-        using var containment = CommandProcessContainment.Attach(process);
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
-        var stdoutTask = ReadBoundedAsync(process.StandardOutput, timeout.Token);
-        var stderrTask = ReadBoundedAsync(process.StandardError, timeout.Token);
-        try
+        var result = await _commandSessions.StartAsync(startInfo, timeoutSeconds, yieldTimeMs, cancellationToken);
+        return new
         {
-            await process.WaitForExitAsync(timeout.Token);
-            var stdout = await stdoutTask;
-            var stderr = await stderrTask;
-            return new
-            {
-                command,
-                working_directory = ToRelative(workingDirectory),
-                exit_code = process.ExitCode,
-                stdout = stdout.Text,
-                stderr = stderr.Text,
-                output_truncated = stdout.Truncated || stderr.Truncated,
-                process_containment = containment.Level,
-            };
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            command,
+            working_directory = ToRelative(workingDirectory),
+            session_id = result.SessionId,
+            status = result.Status,
+            exit_code = result.ExitCode,
+            stdout = result.Stdout,
+            stderr = result.Stderr,
+            output_truncated = result.OutputTruncated,
+            process_containment = result.ProcessContainment,
+            timed_out = result.TimedOut,
+        };
+    }
+
+    private async Task<object> WriteStdinAsync(JsonElement args, CancellationToken cancellationToken)
+    {
+        var sessionId = PositiveSessionId(args);
+        var chars = args.GetProperty("chars").GetString() ?? "";
+        if (chars.Length > 32_000 || chars.IndexOf('\0') >= 0) throw new ArgumentException("命令输入过长或包含无效字符。");
+        var yieldTimeMs = args.GetProperty("yield_time_ms").GetInt32();
+        if (yieldTimeMs is < 100 or > 30_000) throw new ArgumentException("会话等待时间必须在 100 到 30000 毫秒之间。");
+        var terminate = args.GetProperty("terminate").GetBoolean();
+        if (terminate && chars.Length > 0) throw new ArgumentException("终止命令时不能同时写入字符。");
+        var result = await _commandSessions.WriteAsync(sessionId, chars, yieldTimeMs, terminate, cancellationToken);
+        return new
         {
-            TryKillProcessTree(process);
-            throw new TimeoutException($"命令运行超过 {timeoutSeconds} 秒，已停止。");
-        }
-        catch (OperationCanceledException)
-        {
-            TryKillProcessTree(process);
-            throw;
-        }
+            session_id = result.SessionId,
+            status = result.Status,
+            exit_code = result.ExitCode,
+            stdout = result.Stdout,
+            stderr = result.Stderr,
+            output_truncated = result.OutputTruncated,
+            process_containment = result.ProcessContainment,
+            timed_out = result.TimedOut,
+        };
     }
 
     private object LaunchApplication(JsonElement args)
@@ -611,19 +788,84 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
         return value;
     }
 
+    private static string PatchText(JsonElement args)
+    {
+        var value = args.GetProperty("patch").GetString() ?? "";
+        if (value.Length is < 1 or > 500_000 || value.IndexOf('\0') >= 0)
+            throw new ArgumentException("补丁内容长度无效。");
+        return value;
+    }
+
     private WorkspaceToolPlan CommandPlan(JsonElement args)
     {
         var command = Command(args);
         var workingDirectory = Relative(args, "working_directory");
         var shell = args.GetProperty("shell").GetString() ?? "cmd";
         var timeoutSeconds = args.GetProperty("timeout_seconds").GetInt32();
+        var yieldTimeMs = OptionalInt32(args, "yield_time_ms", 10_000);
         var scriptBinding = TryCreateScriptBinding(command, workingDirectory);
         var affectedPaths = new List<string> { workingDirectory.Length == 0 ? "项目根目录" : workingDirectory };
         if (scriptBinding?.RelativePath is { } scriptPath) affectedPaths.Add("脚本：" + scriptPath);
-        return new WorkspaceToolPlan("run_command", $"运行命令（{shell}，最长 {timeoutSeconds} 秒）：{command}", true,
+        return new WorkspaceToolPlan("run_command", $"运行命令（{shell}，最长 {timeoutSeconds} 秒，等待 {yieldTimeMs} 毫秒）：{command}", true,
             affectedPaths, ClassifyCommandRisk(command),
             AllowsPersistentApproval: !RequiresStrictInlineApproval(command),
             ApprovalBinding: scriptBinding?.Binding);
+    }
+
+    private WorkspaceToolPlan PatchPlan(JsonElement args)
+    {
+        var patch = PatchText(args);
+        var document = WorkspacePatchDocument.Parse(patch);
+        var affected = new List<string>();
+        var binding = new StringBuilder(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(patch))));
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var added = 0;
+        var updated = 0;
+        var deleted = 0;
+        foreach (var operation in document.Operations)
+        {
+            var source = ResolvePatchTextPath(operation.Path, operation is not WorkspacePatchAdd);
+            if (!seen.Add(source)) throw new InvalidOperationException($"同一补丁不能重复修改文件：{operation.Path}");
+            affected.Add(operation.Path);
+            binding.Append('|').Append(ToRelative(source)).Append('|');
+            if (operation is WorkspacePatchAdd)
+            {
+                if (File.Exists(source)) throw new IOException($"新增文件已经存在：{operation.Path}");
+                binding.Append("absent");
+                added++;
+            }
+            else
+            {
+                using var stream = File.OpenRead(source);
+                binding.Append(Convert.ToHexString(SHA256.HashData(stream)));
+                if (operation is WorkspacePatchDelete) deleted++; else updated++;
+            }
+            if (operation is WorkspacePatchUpdate { MovePath: { } movePath })
+            {
+                var destination = ResolvePatchTextPath(movePath, mustExist: false);
+                if (!seen.Add(destination) || File.Exists(destination))
+                    throw new IOException($"移动目标已经存在或在补丁中重复：{movePath}");
+                affected.Add(movePath);
+                binding.Append("|move|").Append(ToRelative(destination)).Append("|absent");
+            }
+        }
+        var summary = $"应用代码补丁：新增 {added}、更新 {updated}、删除 {deleted} 个文件";
+        return new WorkspaceToolPlan("apply_patch", summary, true, affected,
+            deleted > 0 ? WorkspaceOperationRisk.Destructive : WorkspaceOperationRisk.Write,
+            ApprovalBinding: Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(binding.ToString()))));
+    }
+
+    private static WorkspaceToolPlan CommandSessionPlan(JsonElement args)
+    {
+        var sessionId = PositiveSessionId(args);
+        var terminate = args.GetProperty("terminate").GetBoolean();
+        var chars = args.GetProperty("chars").GetString() ?? "";
+        var action = terminate ? "停止" : chars.Length == 0 ? "读取" : "继续输入";
+        return new WorkspaceToolPlan("write_stdin", $"{action}命令会话 {sessionId}", false,
+            // Continuing or stopping an already approved, manager-owned process is transport,
+            // not a new command. It must remain available even when destructive operations are denied.
+            [$"命令会话 {sessionId}"], WorkspaceOperationRisk.Read,
+            AllowsPersistentApproval: false);
     }
 
     private WorkspaceToolPlan LaunchApplicationPlan(JsonElement args)
@@ -713,6 +955,17 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
         if (processId <= 0) throw new ArgumentException("进程 ID 无效。");
         return processId;
     }
+
+    private static int PositiveSessionId(JsonElement args)
+    {
+        var sessionId = args.GetProperty("session_id").GetInt32();
+        if (sessionId <= 0) throw new ArgumentException("命令会话 ID 无效。");
+        return sessionId;
+    }
+
+    private static int OptionalInt32(JsonElement args, string property, int fallback) =>
+        args.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Number
+            ? value.GetInt32() : fallback;
 
     private static void ValidateCommand(string command)
     {
@@ -810,28 +1063,6 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
             || upper is "GITHUB_TOKEN" or "GH_TOKEN" or "NPM_TOKEN" or "OPENAI_API_KEY" or "ANTHROPIC_API_KEY";
     }
 
-    private static async Task<(string Text, bool Truncated)> ReadBoundedAsync(StreamReader reader, CancellationToken cancellationToken)
-    {
-        const int limit = 96_000;
-        var output = new StringBuilder();
-        var buffer = new char[4096];
-        var truncated = false;
-        int read;
-        while ((read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken)) > 0)
-        {
-            var remaining = limit - output.Length;
-            if (remaining > 0) output.Append(buffer, 0, Math.Min(remaining, read));
-            if (read > remaining) truncated = true;
-        }
-        return (output.ToString(), truncated);
-    }
-
-    private static void TryKillProcessTree(Process process)
-    {
-        try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-        catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception) { }
-    }
-
     private static WorkspaceToolPlan ReadPlan(string name, string action, JsonElement args, string property)
     {
         var path = Relative(args, property);
@@ -863,4 +1094,6 @@ public sealed class WorkspaceFileTools(string workspaceRoot)
         var index = text.IndexOf(oldText, StringComparison.Ordinal);
         return index < 0 ? text : string.Concat(text.AsSpan(0, index), newText, text.AsSpan(index + oldText.Length));
     }
+
+    public ValueTask DisposeAsync() => _commandSessions.DisposeAsync();
 }

@@ -15,7 +15,7 @@
 - Windows 对话界面采用紧凑侧栏和轻量工具栏，常用操作使用统一矢量图标，侧栏账号区显示用户头像
 - Windows 窗口支持最大化与高 DPI 缩放，长回答可完整滚动和选择
 - Windows 多会话历史仅保存在本机，可从侧栏切换并右键删除
-- Windows 支持项目空间：GPT 可读取、搜索和编辑项目文件，也可运行构建、测试、联网下载等命令；还能受控启动项目中的 EXE、查看运行状态并停止由泺栋 Chat 启动的程序。用户可选择“请求批准、替我审批、完全访问、自定义”四种权限模式，并按项目查看仅保存在本机的操作审计记录
+- Windows 支持项目空间：GPT 可读取、搜索和编辑项目文件，可通过 Codex 风格补丁一次精确修改多个文件，也可运行构建、测试、联网下载等命令；长时间命令会返回受控会话，可继续读取输出、写入交互输入或终止进程；还能受控启动项目中的 EXE、查看运行状态并停止由泺栋 Chat 启动的程序。用户可选择“请求批准、替我审批、完全访问、自定义”四种权限模式，并按项目查看仅保存在本机的操作审计记录
 - 账号在服务端绑定独立内部凭据，密钥不会展示或下发给用户
 - 个人资料支持网名、完整邮箱和头像
 - Windows 系统托盘与客户端自动更新
@@ -29,7 +29,7 @@
 - [GitHub Releases（含历史版本）](https://github.com/SunKeXu01/LuodongChat/releases)
 - [Android 最后一个稳定版](https://oss.520skx.com/latest/LuodongChat.apk)（暂停维护）
 
-GitHub Release 和 OSS 文件均包含版本号，例如 `LuodongChat-2.0.1-win-x64-setup.exe`、`LuodongChat-2.0.1-win-arm64-setup.exe` 及各自的便携 ZIP，并同时提供 SHA-256 校验文件。OSS 还保留不带版本号的固定地址用于自动更新，并且只存储最新版，不积累历史安装包。客户端会根据自身架构自动选择后续更新。Android 当前暂停维护，保留最后一个稳定版的固定下载地址。
+GitHub Release 和 OSS 文件均包含版本号，例如 `LuodongChat-2.0.2-win-x64-setup.exe`、`LuodongChat-2.0.2-win-arm64-setup.exe` 及各自的便携 ZIP，并同时提供 SHA-256 校验文件。OSS 还保留不带版本号的固定地址用于自动更新，并且只存储最新版，不积累历史安装包。客户端会根据自身架构自动选择后续更新。Android 当前暂停维护，保留最后一个稳定版的固定下载地址。
 
 当前 Windows 版尚未进行代码签名。如果系统显示“Windows 已保护你的电脑”，请确认安装包来自本仓库或上述下载地址，然后点击“更多信息”→“仍要运行”。Android 版使用固定发布证书签名，更新时会覆盖旧版本并保留账号数据。
 
@@ -64,4 +64,4 @@ Windows 客户端启动时会自动检查新版本，在后台限速下载并校
 
 ## 开源参考
 
-聊天交互设计参考了 [NextChat](https://github.com/ChatGPTNextWeb/NextChat)、[DeepChat](https://github.com/ThinkInAIXYZ/deepchat) 与 [Chatbox](https://github.com/chatboxai/chatbox) 的产品思路；皮肤状态管理参考了 MIT 许可的 [Codex Dream Skin](https://github.com/Fei-Away/Codex-Dream-Skin)；项目文件工具的工作区隔离、工具策略和审批设计参考了 [OpenClaw](https://github.com/openclaw/openclaw)，权限模式和审批交互参考了 [OpenAI Codex CLI](https://github.com/openai/codex)、[Qwen Code](https://github.com/QwenLM/qwen-code)、[Gemini CLI](https://github.com/google-gemini/gemini-cli) 与 [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)。泺栋 Chat 使用 WPF 与 C# 独立实现这些能力，不捆绑上述项目的运行时，也不复制外部项目的受限素材。参见 [OpenClaw 功能移植记录](docs/openclaw-porting.md)和[开源模型接入评估](docs/open-model-compatibility.md)。
+聊天交互设计参考了 [NextChat](https://github.com/ChatGPTNextWeb/NextChat)、[DeepChat](https://github.com/ThinkInAIXYZ/deepchat) 与 [Chatbox](https://github.com/chatboxai/chatbox) 的产品思路；皮肤状态管理参考了 MIT 许可的 [Codex Dream Skin](https://github.com/Fei-Away/Codex-Dream-Skin)；项目文件工具的工作区隔离、工具策略和审批设计参考了 [OpenClaw](https://github.com/openclaw/openclaw)，权限模式、审批交互和长命令会话参考了 [OpenAI Codex CLI](https://github.com/openai/codex)，并参考 [Qwen Code](https://github.com/QwenLM/qwen-code)、[Gemini CLI](https://github.com/google-gemini/gemini-cli) 与 [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)。泺栋 Chat 使用 WPF 与 C# 独立实现这些能力，不捆绑上述项目的运行时，也不复制外部项目的受限素材。参见 [OpenClaw 功能移植记录](docs/openclaw-porting.md)、[Codex CLI 本地执行能力移植记录](docs/codex-cli-porting.md)和[开源模型接入评估](docs/open-model-compatibility.md)。
