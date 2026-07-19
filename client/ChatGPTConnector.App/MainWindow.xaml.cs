@@ -2268,7 +2268,10 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
         var longest = lines.Max(line => line.Sum(character => character > 255 ? 15.5 : 8.2));
         var natural = longest + (isUser ? 38 : 42);
         if (content.Length > 160 && longest < 360) natural = Math.Max(natural, isUser ? 400 : 620);
-        return Math.Min(isUser ? 560 : 820, Math.Max(isUser ? 80 : 58, natural));
+        // The assistant column is capped at 768 device-independent pixels in XAML.
+        // Never calculate a wider bubble: a fixed child wider than its StackPanel parent
+        // is arranged outside the visible message area and then clipped by the chat view.
+        return Math.Min(isUser ? 560 : 768, Math.Max(isUser ? 80 : 58, natural));
     }
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
 }
