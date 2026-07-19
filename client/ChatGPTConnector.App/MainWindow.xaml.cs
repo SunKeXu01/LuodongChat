@@ -9,6 +9,7 @@ using System.Text;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using System.Windows.Automation;
 using System.Collections.ObjectModel;
@@ -22,6 +23,9 @@ namespace ChatGPTConnector.App;
 
 public partial class MainWindow : Window
 {
+    private const double SidebarWidth = 280;
+    private const double SidebarDrawerThreshold = 1120;
+    private static readonly Duration SidebarAnimationDuration = new(TimeSpan.FromMilliseconds(180));
     private static readonly Uri GatewayUri = new("https://520skx.com");
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(5) };
     private static readonly HttpClient UpdateHttp = new() { Timeout = Timeout.InfiniteTimeSpan };
@@ -70,6 +74,10 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _questionHighlightCancellation;
     private string _savedNickname = "";
     private bool _profileSaveBusy;
+    private bool _sidebarPreferenceExpanded = SidebarStateStore.Load();
+    private bool _sidebarExpanded;
+    private bool _sidebarDrawerMode;
+    private int _sidebarAnimationGeneration;
 
     private static string? CurrentVersion
     {
@@ -97,6 +105,7 @@ public partial class MainWindow : Window
         _workspaceCustomPermissions = accessSettings.Custom;
         _alwaysAllowedWorkspaceCommands.UnionWith(accessSettings.AlwaysAllowedCommandHashes ?? []);
         InitializeComponent();
+        ApplySidebarState(_sidebarPreferenceExpanded, animate: false, persist: false);
         _attachments = new AttachmentComposerController(_attachmentClient, GatewayUri, () => _session?.AccessToken);
         AttachmentPreviewItems.ItemsSource = _attachments.Items;
         _attachments.StateChanged += (_, _) => Dispatcher.Invoke(UpdateComposerState);
@@ -1851,12 +1860,111 @@ public partial class MainWindow : Window
     private void ProfileSidebarButton_OnClick(object sender, RoutedEventArgs e) => AccountPanel.SelectedIndex = 1;
     private void BackToChatButton_OnClick(object sender, RoutedEventArgs e) => AccountPanel.SelectedIndex = 0;
 
+    private void HideSidebarButton_OnClick(object sender, RoutedEventArgs e) =>
+        ApplySidebarState(expanded: false, animate: true, persist: true);
+
+    private void ShowSidebarButton_OnClick(object sender, RoutedEventArgs e) =>
+        ApplySidebarState(expanded: true, animate: true, persist: true);
+
+    private void SidebarScrim_OnMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (!_sidebarDrawerMode || !_sidebarExpanded) return;
+        ApplySidebarState(expanded: false, animate: true, persist: false);
+        e.Handled = true;
+    }
+
+    private void MainWindow_OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (AccountPanel.Visibility != Visibility.Visible || AccountPanel.SelectedIndex != 0) return;
+        if (e.Key == System.Windows.Input.Key.B
+            && (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) != 0)
+        {
+            ApplySidebarState(!_sidebarExpanded, animate: true, persist: true);
+            e.Handled = true;
+            return;
+        }
+        if (e.Key == System.Windows.Input.Key.Escape && _sidebarDrawerMode && _sidebarExpanded)
+        {
+            ApplySidebarState(expanded: false, animate: true, persist: false);
+            e.Handled = true;
+        }
+    }
+
+    private void MainWindow_OnSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (!IsInitialized || ChatSidebar is null) return;
+        UpdateSidebarForWindowSize();
+    }
+
+    private void UpdateSidebarForWindowSize(bool force = false)
+    {
+        var drawerMode = ActualWidth > 0 && ActualWidth < SidebarDrawerThreshold;
+        if (!force && drawerMode == _sidebarDrawerMode) return;
+        _sidebarDrawerMode = drawerMode;
+        ApplySidebarState(drawerMode ? false : _sidebarPreferenceExpanded, animate: false, persist: false);
+    }
+
+    private void ApplySidebarState(bool expanded, bool animate, bool persist)
+    {
+        if (persist)
+        {
+            _sidebarPreferenceExpanded = expanded;
+            SidebarStateStore.Save(expanded);
+        }
+
+        _sidebarExpanded = expanded;
+        _sidebarDrawerMode = ActualWidth > 0 && ActualWidth < SidebarDrawerThreshold;
+        SidebarColumn.Width = _sidebarDrawerMode ? new GridLength(0) : GridLength.Auto;
+        System.Windows.Controls.Grid.SetColumnSpan(ChatSidebar, _sidebarDrawerMode ? 2 : 1);
+        ChatSidebar.HorizontalAlignment = HorizontalAlignment.Left;
+        SidebarScrim.Visibility = _sidebarDrawerMode && expanded ? Visibility.Visible : Visibility.Collapsed;
+        ShowSidebarButton.Visibility = expanded ? Visibility.Collapsed : Visibility.Visible;
+
+        var generation = ++_sidebarAnimationGeneration;
+        ChatSidebar.BeginAnimation(WidthProperty, null);
+        var currentWidth = Math.Clamp(ChatSidebar.ActualWidth, 0, SidebarWidth);
+        if (!animate)
+        {
+            ChatSidebar.Width = expanded ? SidebarWidth : 0;
+            ChatSidebar.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+            return;
+        }
+
+        ChatSidebar.Visibility = Visibility.Visible;
+        var targetWidth = expanded ? SidebarWidth : 0;
+        var startWidth = expanded ? 0 : currentWidth > 0 ? currentWidth : SidebarWidth;
+        ChatSidebar.Width = targetWidth;
+        var animation = new DoubleAnimation(startWidth, targetWidth, SidebarAnimationDuration)
+        {
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseInOut },
+            FillBehavior = FillBehavior.Stop,
+        };
+        animation.Completed += (_, _) =>
+        {
+            if (generation != _sidebarAnimationGeneration) return;
+            ChatSidebar.BeginAnimation(WidthProperty, null);
+            ChatSidebar.Width = targetWidth;
+            if (!expanded) ChatSidebar.Visibility = Visibility.Collapsed;
+        };
+        ChatSidebar.BeginAnimation(WidthProperty, animation, HandoffBehavior.SnapshotAndReplace);
+    }
+
     private void SidebarMoreButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (SidebarMoreButton.ContextMenu is null) return;
         SidebarMoreButton.ContextMenu.PlacementTarget = SidebarMoreButton;
         SidebarMoreButton.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Top;
         SidebarMoreButton.ContextMenu.IsOpen = true;
+    }
+
+    private void ConversationMoreButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button { Tag: ConversationListItem item, ContextMenu: { } menu }) return;
+        foreach (var menuItem in menu.Items.OfType<System.Windows.Controls.MenuItem>()) menuItem.CommandParameter = item;
+        menu.PlacementTarget = (System.Windows.Controls.Button)sender;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.IsOpen = true;
+        e.Handled = true;
     }
 
     private void StopGenerationButton_OnClick(object sender, RoutedEventArgs e) => _chatCancellation?.Cancel();
@@ -1883,6 +1991,7 @@ public partial class MainWindow : Window
         AccountPanel.SelectedIndex = 0;
         UpdateProfile(profile);
         WindowState = WindowState.Maximized;
+        Dispatcher.BeginInvoke(() => UpdateSidebarForWindowSize(force: true), DispatcherPriority.Loaded);
     }
     private void UpdateProfile(AccountProfile profile)
     {

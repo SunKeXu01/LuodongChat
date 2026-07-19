@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using ChatGPTConnector.Core;
 using Xunit;
@@ -412,6 +413,20 @@ public sealed class WorkspaceFileToolsTests : IDisposable
 
         Assert.NotEqual(cmd.Summary, powershell.Summary);
         Assert.NotEqual(cmd.Summary, longer.Summary);
+    }
+
+    [Fact]
+    public void WindowsCmdPreservesStartCommandQuotesWithoutArgvEscaping()
+    {
+        var startInfo = new ProcessStartInfo();
+        const string command = "start \"\" \"http://localhost:8000/index.html\"";
+
+        WorkspaceFileTools.ConfigureWindowsCommandShell(startInfo, command);
+
+        Assert.EndsWith("cmd.exe", startInfo.FileName, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("/d /q /c " + command, startInfo.Arguments);
+        Assert.Empty(startInfo.ArgumentList);
+        Assert.DoesNotContain("\\\"", startInfo.Arguments, StringComparison.Ordinal);
     }
 
     [Fact]

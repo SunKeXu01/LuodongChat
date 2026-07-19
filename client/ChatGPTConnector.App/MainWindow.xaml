@@ -5,7 +5,8 @@
         Title="泺栋 Chat" Width="1200" Height="780" MinWidth="960" MinHeight="680"
         Icon="/LuodongChat;component/Assets/AppIcon.png"
         WindowStartupLocation="CenterScreen" ResizeMode="CanResizeWithGrip"
-        UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
+        UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display"
+        PreviewKeyDown="MainWindow_OnPreviewKeyDown" SizeChanged="MainWindow_OnSizeChanged">
   <Grid Background="{DynamicResource PageBackgroundBrush}">
     <Grid.RowDefinitions>
       <RowDefinition x:Name="GlobalTopBarRow" Height="64"/>
@@ -161,14 +162,15 @@
           </ControlTemplate>
         </TabControl.Template>
         <TabItem Header="聊天">
-          <Grid Background="{DynamicResource SurfaceBrush}">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="260"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <Grid x:Name="ChatPageGrid" Background="{DynamicResource SurfaceBrush}" ClipToBounds="True">
+            <Grid.ColumnDefinitions><ColumnDefinition x:Name="SidebarColumn" Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0" Background="{DynamicResource SidebarBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0">
-              <Grid Margin="12,12,12,10">
+            <Border x:Name="ChatSidebar" Grid.Column="0" Width="280" Panel.ZIndex="50"
+                    Background="{DynamicResource SidebarBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0">
+              <Grid Margin="10,10,10,8">
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                <Grid Margin="2,0,2,12">
-                  <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <Grid Margin="2,0,2,9">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                   <Border Width="32" Height="32" CornerRadius="9" Background="#111827" VerticalAlignment="Center">
                     <Image Source="/LuodongChat;component/Assets/AppIcon.png" Margin="4"/>
                   </Border>
@@ -184,13 +186,18 @@
                       </ContextMenu></Button.ContextMenu>
                     </Button>
                   </StackPanel>
-                  <Button x:Name="NewChatButton" Grid.Column="2" Width="36" Height="36" MinHeight="36" Padding="8" Style="{StaticResource IconToolbarButton}"
+                  <Button x:Name="HideSidebarButton" Grid.Column="2" Width="34" Height="34" MinHeight="34" Padding="8" Margin="0,0,2,0"
+                          Style="{StaticResource IconToolbarButton}" ToolTip="隐藏侧栏（Ctrl+B）"
+                          AutomationProperties.Name="隐藏侧栏" Click="HideSidebarButton_OnClick">
+                    <Viewbox Width="17" Height="17"><Path Data="M4,4 H20 V20 H4 Z M9,4 V20 M15,9 L12,12 L15,15" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Fill="Transparent"/></Viewbox>
+                  </Button>
+                  <Button x:Name="NewChatButton" Grid.Column="3" Width="34" Height="34" MinHeight="34" Padding="8" Style="{StaticResource IconToolbarButton}"
                           ToolTip="新建对话" AutomationProperties.Name="新建对话" Click="NewChatButton_OnClick">
                     <Viewbox Width="18" Height="18"><Path Data="M5,19 L7,14 L17.5,3.5 A2.1,2.1 0 0 1 20.5,6.5 L10,17 Z M13.5,5.5 L18.5,10.5" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeLineJoin="Round" Fill="Transparent"/></Viewbox>
                   </Button>
                 </Grid>
-                <Grid Grid.Row="1" Margin="0,0,0,10">
-                  <TextBox x:Name="ConversationSearchInput" Height="38" MinHeight="38" Tag="搜索对话" Padding="33,7,12,7"
+                <Grid Grid.Row="1" Margin="0,0,0,7">
+                  <TextBox x:Name="ConversationSearchInput" Height="36" MinHeight="36" Tag="搜索对话" Padding="33,6,12,6"
                            Style="{StaticResource WatermarkTextBox}" TextChanged="ConversationSearchInput_OnTextChanged"/>
                   <Viewbox Width="15" Height="15" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="12,0,0,0" IsHitTestVisible="False">
                     <Path Data="M10.5,18 A7.5,7.5 0 1 1 10.5,3 A7.5,7.5 0 0 1 10.5,18 M16,16 L21,21" Stroke="{DynamicResource MutedBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" Fill="Transparent"/>
@@ -209,7 +216,7 @@
                     <Style TargetType="ListBoxItem">
                       <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
                       <Setter Property="Padding" Value="0"/>
-                      <Setter Property="Margin" Value="0,2"/>
+                      <Setter Property="Margin" Value="0,1"/>
                       <Setter Property="Background" Value="Transparent"/>
                       <Setter Property="BorderThickness" Value="0"/>
                       <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
@@ -217,7 +224,7 @@
                   </ListBox.ItemContainerStyle>
                   <ListBox.ItemTemplate>
                     <DataTemplate>
-                      <Border x:Name="ConversationCard" Padding="10,8" CornerRadius="8" Background="Transparent" BorderThickness="0">
+                      <Border x:Name="ConversationCard" Height="40" Padding="10,0" CornerRadius="8" Background="Transparent" BorderThickness="0">
                         <Border.ContextMenu>
                           <ContextMenu>
                             <MenuItem Header="重命名" CommandParameter="{Binding}" Click="RenameConversationMenuItem_OnClick"/>
@@ -227,7 +234,19 @@
                         </Border.ContextMenu>
                         <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                           <TextBlock Text="{Binding Title}" FontWeight="Normal" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
-                          <TextBlock x:Name="ConversationUpdatedText" Grid.Column="1" Text="{Binding UpdatedText}" Visibility="Collapsed" Foreground="{DynamicResource WeakTextBrush}" FontSize="11" Margin="8,2,0,0"/>
+                          <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock x:Name="ConversationUpdatedText" Text="{Binding UpdatedText}" Visibility="Collapsed" Foreground="{DynamicResource WeakTextBrush}" FontSize="11" Margin="8,1,3,0"/>
+                            <Button x:Name="ConversationMoreButton" Tag="{Binding}" Visibility="Collapsed" Width="28" Height="28" MinHeight="28" Padding="6"
+                                    Style="{StaticResource IconToolbarButton}" ToolTip="更多操作" AutomationProperties.Name="会话更多操作"
+                                    Click="ConversationMoreButton_OnClick">
+                              <Viewbox Width="14" Height="14"><Path Data="M5,12 A1.4,1.4 0 1 1 5,11.9 M12,12 A1.4,1.4 0 1 1 12,11.9 M19,12 A1.4,1.4 0 1 1 19,11.9" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" StrokeStartLineCap="Round"/></Viewbox>
+                              <Button.ContextMenu><ContextMenu>
+                                <MenuItem Header="重命名" Click="RenameConversationMenuItem_OnClick"/>
+                                <Separator/>
+                                <MenuItem Header="删除对话" Click="DeleteConversationMenuItem_OnClick"/>
+                              </ContextMenu></Button.ContextMenu>
+                            </Button>
+                          </StackPanel>
                         </Grid>
                       </Border>
                       <DataTemplate.Triggers>
@@ -237,12 +256,13 @@
                         <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
                           <Setter TargetName="ConversationCard" Property="Background" Value="{DynamicResource SecondarySurfaceBrush}"/>
                           <Setter TargetName="ConversationUpdatedText" Property="Visibility" Value="Visible"/>
+                          <Setter TargetName="ConversationMoreButton" Property="Visibility" Value="Visible"/>
                         </DataTrigger>
                       </DataTemplate.Triggers>
                     </DataTemplate>
                   </ListBox.ItemTemplate>
                 </ListBox>
-                <Grid Grid.Row="3" Margin="0,10,0,0">
+                <Grid Grid.Row="3" Margin="0,7,0,0">
                   <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                   <Button x:Name="ProfileSidebarButton" Style="{StaticResource SidebarAccountButton}" Click="ProfileSidebarButton_OnClick">
                     <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="38"/><ColumnDefinition/></Grid.ColumnDefinitions>
@@ -280,6 +300,9 @@
               </Grid>
             </Border>
 
+            <Border x:Name="SidebarScrim" Grid.ColumnSpan="2" Panel.ZIndex="40" Visibility="Collapsed"
+                    Background="#52000000" MouseLeftButtonDown="SidebarScrim_OnMouseLeftButtonDown"/>
+
             <Grid x:Name="ChatDropSurface" Grid.Column="1" AllowDrop="True"
                   PreviewDragEnter="ChatComposer_OnDragEnter" PreviewDragOver="ChatComposer_OnDragOver"
                   PreviewDragLeave="ChatComposer_OnDragLeave" PreviewDrop="ChatComposer_OnDrop">
@@ -302,7 +325,7 @@
                             PanningMode="VerticalOnly" IsManipulationEnabled="True"
                             PreviewMouseWheel="ChatMessagesScroll_OnPreviewMouseWheel"
                             ScrollChanged="ChatMessagesScroll_OnScrollChanged">
-                <ItemsControl x:Name="ChatMessagesItems" MaxWidth="820" HorizontalAlignment="Stretch">
+                <ItemsControl x:Name="ChatMessagesItems" MaxWidth="960" HorizontalAlignment="Stretch">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
                       <Grid Margin="{Binding MessageMargin}">
@@ -419,7 +442,7 @@
               </ScrollViewer>
 
               <Grid x:Name="EmptyConversationPanel" Grid.Row="1" Panel.ZIndex="3" Background="{DynamicResource SurfaceBrush}" Visibility="Visible">
-                <StackPanel Width="820" MaxWidth="820" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="28,0,28,90">
+                <StackPanel Width="960" MaxWidth="960" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="28,0,28,90">
                   <TextBlock Text="泺栋 Chat" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Center"/>
                   <TextBlock Text="有什么可以帮忙的？" FontSize="30" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,15,0,28"/>
                   <UniformGrid Columns="2" Rows="2" HorizontalAlignment="Stretch">
@@ -495,7 +518,7 @@
                 <Viewbox Width="17" Height="17"><Path Data="M5,9 L12,16 L19,9 M12,3 V16" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.9" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Fill="Transparent"/></Viewbox>
               </Button>
 
-              <StackPanel Grid.Row="2" MaxWidth="820" HorizontalAlignment="Stretch" Margin="24,3,24,0">
+              <StackPanel Grid.Row="2" MaxWidth="960" HorizontalAlignment="Stretch" Margin="24,3,24,0">
                 <Border x:Name="ProjectRequirementNotice" Visibility="Collapsed" Padding="11,8" CornerRadius="10"
                         Background="#FFFFF4E5" BorderBrush="#FFF2C66D" BorderThickness="1" Margin="0,0,0,5">
                   <Grid>
@@ -506,7 +529,7 @@
                 </Border>
                 <TextBlock x:Name="ChatNotice" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap"/>
               </StackPanel>
-              <Border x:Name="ChatComposer" Grid.Row="3" MaxWidth="820" MinHeight="104" HorizontalAlignment="Stretch" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="24" Margin="24,10,24,8" Padding="12,10">
+              <Border x:Name="ChatComposer" Grid.Row="3" MaxWidth="960" MinHeight="104" HorizontalAlignment="Stretch" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="24" Margin="24,10,24,8" Padding="12,10">
                 <Grid>
                   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                   <Button x:Name="ProjectSpaceHint" Grid.Row="0" Margin="0,0,0,4" Padding="6,3" HorizontalAlignment="Left"
@@ -615,6 +638,13 @@
                   <TextBlock x:Name="ChatToastText" Text="已复制到剪贴板" Foreground="White" FontSize="13" FontWeight="Medium"/>
                 </StackPanel>
               </Border>
+
+              <Button x:Name="ShowSidebarButton" Grid.RowSpan="5" Panel.ZIndex="35" Visibility="Collapsed"
+                      Width="40" Height="40" MinHeight="40" Padding="10" HorizontalAlignment="Left" VerticalAlignment="Top"
+                      Margin="14" Style="{StaticResource IconToolbarButton}" ToolTip="展开侧栏（Ctrl+B）"
+                      AutomationProperties.Name="展开侧栏" Click="ShowSidebarButton_OnClick">
+                <Viewbox Width="18" Height="18"><Path Data="M4,6 H20 M4,12 H20 M4,18 H20" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" StrokeStartLineCap="Round" Fill="Transparent"/></Viewbox>
+              </Button>
             </Grid>
           </Grid>
         </TabItem>

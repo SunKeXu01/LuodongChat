@@ -1024,13 +1024,21 @@ public sealed class WorkspaceFileTools(string workspaceRoot) : IAsyncDisposable
         }
         else
         {
-            startInfo.FileName = Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe";
-            startInfo.ArgumentList.Add("/d");
-            startInfo.ArgumentList.Add("/s");
-            startInfo.ArgumentList.Add("/c");
-            startInfo.ArgumentList.Add(command);
+            ConfigureWindowsCommandShell(startInfo, command);
         }
         return startInfo;
+    }
+
+    internal static void ConfigureWindowsCommandShell(ProcessStartInfo startInfo, string command)
+    {
+        startInfo.FileName = Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe";
+
+        // cmd.exe parses quotes and metacharacters itself. Passing the complete command as one
+        // ArgumentList item makes .NET apply native argv escaping first, turning embedded quotes
+        // in commands such as `start "" "https://example.com"` into backslash-escaped text that
+        // cmd does not understand. Keep the shell text raw, exactly as it would be entered in a
+        // command prompt. /d still disables Command Processor AutoRun registry entries.
+        startInfo.Arguments = "/d /q /c " + command;
     }
 
     private static string ResolvePowerShell()
