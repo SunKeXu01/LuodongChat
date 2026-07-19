@@ -170,28 +170,36 @@
               <Grid Margin="10,10,10,8">
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <Grid Margin="2,0,2,9">
-                  <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                   <Border Width="32" Height="32" CornerRadius="9" Background="#111827" VerticalAlignment="Center">
                     <Image Source="/LuodongChat;component/Assets/AppIcon.png" Margin="4"/>
                   </Border>
-                  <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="9,0,6,0" VerticalAlignment="Center">
-                    <TextBlock Text="泺栋 Chat" FontSize="15.5" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                    <Border x:Name="SidebarCurrentVersionPill" Style="{StaticResource VersionPill}" Visibility="Collapsed" Margin="7,0,0,0" VerticalAlignment="Center">
-                      <TextBlock x:Name="SidebarCurrentVersionText" FontSize="10.5" VerticalAlignment="Center"/>
-                    </Border>
-                    <Button x:Name="SidebarVersionUpdateButton" Content="新版本" Style="{StaticResource VersionBadgeButton}" Visibility="Collapsed" Margin="5,0,0,0" Click="SidebarVersionUpdateButton_OnClick">
-                      <Button.ContextMenu><ContextMenu>
-                        <MenuItem Header="从 OSS 下载（推荐）" Click="DownloadUpdateFromOss_OnClick"/>
-                        <MenuItem Header="从 GitHub 下载" Click="DownloadUpdateFromGithub_OnClick"/>
-                      </ContextMenu></Button.ContextMenu>
-                    </Button>
-                  </StackPanel>
-                  <Button x:Name="HideSidebarButton" Grid.Column="2" Width="34" Height="34" MinHeight="34" Padding="8" Margin="0,0,2,0"
+                  <TextBlock Grid.Column="1" Text="泺栋 Chat" FontSize="15.5" FontWeight="SemiBold" VerticalAlignment="Center" Margin="9,0,0,0" TextWrapping="NoWrap"/>
+                  <Button x:Name="SidebarVersionStatusButton" Grid.Column="2" Height="24" MinHeight="24" MinWidth="0" MaxWidth="112"
+                          Padding="8,0" Margin="6,0,3,0" HorizontalAlignment="Left" VerticalAlignment="Center"
+                          Style="{StaticResource VersionBadgeButton}" Background="{DynamicResource CurrentVersionPillBrush}"
+                          Foreground="{DynamicResource VersionPillTextBrush}" Visibility="Collapsed"
+                          Click="SidebarVersionStatusButton_OnClick">
+                    <Grid>
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                      <TextBlock x:Name="SidebarVersionStatusText" Text="v2.0.3" FontSize="10.5" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
+                      <Ellipse x:Name="SidebarVersionUpdateDot" Grid.Column="1" Width="7" Height="7" Margin="5,0,0,0" Fill="#F79009" Visibility="Collapsed" VerticalAlignment="Center"/>
+                    </Grid>
+                    <Button.ContextMenu><ContextMenu>
+                      <MenuItem x:Name="SidebarCurrentVersionMenuItem" Header="当前版本" IsEnabled="False"/>
+                      <MenuItem x:Name="SidebarAvailableVersionMenuItem" Header="可用版本" IsEnabled="False" Visibility="Collapsed"/>
+                      <Separator x:Name="SidebarUpdateMenuSeparator" Visibility="Collapsed"/>
+                      <MenuItem x:Name="SidebarRestartUpdateMenuItem" Header="立即安装并重启" Visibility="Collapsed" Click="RestartPreparedUpdate_OnClick"/>
+                      <MenuItem x:Name="SidebarDownloadOssMenuItem" Header="从 OSS 下载（推荐）" Visibility="Collapsed" Click="DownloadUpdateFromOss_OnClick"/>
+                      <MenuItem x:Name="SidebarDownloadGithubMenuItem" Header="从 GitHub 下载" Visibility="Collapsed" Click="DownloadUpdateFromGithub_OnClick"/>
+                    </ContextMenu></Button.ContextMenu>
+                  </Button>
+                  <Button x:Name="HideSidebarButton" Grid.Column="3" Width="30" Height="30" MinHeight="30" Padding="7" Margin="0,0,2,0"
                           Style="{StaticResource IconToolbarButton}" ToolTip="隐藏侧栏（Ctrl+B）"
                           AutomationProperties.Name="隐藏侧栏" Click="HideSidebarButton_OnClick">
                     <Viewbox Width="17" Height="17"><Path Data="M4,4 H20 V20 H4 Z M9,4 V20 M15,9 L12,12 L15,15" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Fill="Transparent"/></Viewbox>
                   </Button>
-                  <Button x:Name="NewChatButton" Grid.Column="3" Width="34" Height="34" MinHeight="34" Padding="8" Style="{StaticResource IconToolbarButton}"
+                  <Button x:Name="NewChatButton" Grid.Column="4" Width="30" Height="30" MinHeight="30" Padding="7" Style="{StaticResource IconToolbarButton}"
                           ToolTip="新建对话" AutomationProperties.Name="新建对话" Click="NewChatButton_OnClick">
                     <Viewbox Width="18" Height="18"><Path Data="M5,19 L7,14 L17.5,3.5 A2.1,2.1 0 0 1 20.5,6.5 L10,17 Z M13.5,5.5 L18.5,10.5" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeLineJoin="Round" Fill="Transparent"/></Viewbox>
                   </Button>

@@ -59,6 +59,7 @@ public sealed class ClientUpdateService(HttpClient http, Architecture? processAr
     public async Task<PreparedClientUpdate> PrepareAsync(
         ClientUpdate update,
         int bytesPerSecond = 256 * 1024,
+        IProgress<double>? progress = null,
         CancellationToken cancellationToken = default)
     {
         if (bytesPerSecond < 32 * 1024) throw new ArgumentOutOfRangeException(nameof(bytesPerSecond));
@@ -73,13 +74,18 @@ public sealed class ClientUpdateService(HttpClient http, Architecture? processAr
         var expectedText = await http.GetStringAsync(checksumUri, cancellationToken);
         var expected = expectedText.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)[0].Trim();
         if (File.Exists(downloaded) && string.Equals(await HashFileAsync(downloaded, cancellationToken), expected, StringComparison.OrdinalIgnoreCase))
+        {
+            progress?.Report(100);
             return new(update.Version, downloaded, useInstaller);
+        }
 
         var partial = downloaded + ".part";
         if (File.Exists(partial)) File.Delete(partial);
         using var request = new HttpRequestMessage(HttpMethod.Get, sourceUri);
         using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
+        var contentLength = response.Content.Headers.ContentLength;
+        progress?.Report(0);
         await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
         await using var output = new FileStream(partial, FileMode.CreateNew, FileAccess.Write, FileShare.None, 32 * 1024, true);
         var buffer = new byte[32 * 1024];
@@ -91,6 +97,7 @@ public sealed class ClientUpdateService(HttpClient http, Architecture? processAr
             if (count == 0) break;
             await output.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
             transferred += count;
+            if (contentLength is > 0) progress?.Report(Math.Clamp((double)transferred / contentLength.Value * 100, 0, 99));
             var expectedElapsed = TimeSpan.FromSeconds((double)transferred / bytesPerSecond);
             var delay = expectedElapsed - startedAt.Elapsed;
             if (delay > TimeSpan.Zero) await Task.Delay(delay, cancellationToken);
@@ -104,6 +111,7 @@ public sealed class ClientUpdateService(HttpClient http, Architecture? processAr
             throw new InvalidDataException("更新文件完整性校验失败，已取消安装。");
         }
         File.Move(partial, downloaded, true);
+        progress?.Report(100);
         return new(update.Version, downloaded, useInstaller);
     }
 

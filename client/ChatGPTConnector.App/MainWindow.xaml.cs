@@ -63,6 +63,7 @@ public partial class MainWindow : Window
     private int _wheelBurstCount;
     private bool _syncingPasswordVisibility;
     private ClientUpdate? _availableUpdate;
+    private PreparedClientUpdate? _preparedUpdate;
     private AppTheme _theme;
     private string? _selectedProjectPath;
     private WorkspaceAccessMode _workspaceAccessMode;
@@ -116,9 +117,8 @@ public partial class MainWindow : Window
             CurrentVersionText.Text = $"v{currentVersion}";
             CurrentVersionPill.ToolTip = $"当前版本 v{currentVersion}";
             CurrentVersionPill.Visibility = Visibility.Visible;
-            SidebarCurrentVersionText.Text = $"v{currentVersion}";
-            SidebarCurrentVersionPill.ToolTip = $"当前版本 v{currentVersion}";
-            SidebarCurrentVersionPill.Visibility = Visibility.Visible;
+            SidebarCurrentVersionMenuItem.Header = $"当前版本 v{currentVersion}";
+            SetSidebarVersionStatus($"v{currentVersion}", hasUpdate: false, $"当前版本 v{currentVersion}");
         }
         UpdateThemeButton();
         _chatToastTimer.Tick += (_, _) => { _chatToastTimer.Stop(); ChatToast.Visibility = Visibility.Collapsed; };
@@ -2042,31 +2042,51 @@ public partial class MainWindow : Window
             {
                 UpdateBanner.Visibility = Visibility.Collapsed;
                 VersionUpdateButton.Visibility = Visibility.Collapsed;
-                SidebarVersionUpdateButton.Visibility = Visibility.Collapsed;
+                _availableUpdate = null;
+                _preparedUpdate = null;
+                if (CurrentVersion is { } version)
+                    SetSidebarVersionStatus($"v{version}", hasUpdate: false, $"当前版本 v{version}");
                 return;
             }
             _availableUpdate = update;
             VersionUpdateButton.Content = $"新版本 v{update.Version.TrimStart('v')}";
             VersionUpdateButton.Visibility = Visibility.Visible;
-            SidebarVersionUpdateButton.Content = "新";
-            SidebarVersionUpdateButton.ToolTip = $"发现新版本 v{update.Version.TrimStart('v')}";
-            SidebarVersionUpdateButton.Visibility = Visibility.Visible;
+            SidebarAvailableVersionMenuItem.Header = $"可用版本 v{update.Version.TrimStart('v')}";
+            SidebarAvailableVersionMenuItem.Visibility = Visibility.Visible;
+            SidebarUpdateMenuSeparator.Visibility = Visibility.Visible;
+            SidebarDownloadOssMenuItem.Visibility = Visibility.Visible;
+            SidebarDownloadGithubMenuItem.Visibility = Visibility.Visible;
+            var currentLabel = CurrentVersion is { } current ? $"v{current} · 可更新" : "可更新";
+            SetSidebarVersionStatus(currentLabel, hasUpdate: true, $"发现新版本 v{update.Version.TrimStart('v')}，点击查看详情");
             UpdateBanner.Visibility = Visibility.Visible;
             GlobalUpdateText.Text = $"正在低速下载版本 {update.Version}，不会阻塞登录和对话。";
-            var prepared = await _updates.PrepareAsync(update, cancellationToken: cancellationToken);
+            var progress = new Progress<double>(value =>
+            {
+                var percent = Math.Clamp((int)Math.Round(value), 0, 100);
+                SetSidebarVersionStatus($"更新中 {percent}%", hasUpdate: true, $"正在低速下载版本 {update.Version}：{percent}%");
+                GlobalUpdateText.Text = $"正在低速下载版本 {update.Version}：{percent}%，不会阻塞登录和对话。";
+            });
+            var prepared = await _updates.PrepareAsync(update, progress: progress, cancellationToken: cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
+            _preparedUpdate = prepared;
             UpdateBanner.Visibility = Visibility.Collapsed;
+            SidebarRestartUpdateMenuItem.Visibility = Visibility.Visible;
+            SetSidebarVersionStatus("重启更新", hasUpdate: true, $"版本 {prepared.Version} 已下载完成，点击安装并重启");
             var answer = MessageBox.Show(
                 $"版本 {prepared.Version} 已在后台下载并通过完整性校验。是否现在更新？\n\n选择“否”后，本次不再提醒；下次启动软件时会再次询问。",
                 "泺栋 Chat 更新已准备好",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Information);
             if (answer != MessageBoxResult.Yes) return;
-            _updates.SchedulePrepared(prepared, Environment.ProcessPath!, Environment.ProcessId);
-            ExitApplication();
+            InstallPreparedUpdate();
         }
         catch (OperationCanceledException) { }
-        catch { UpdateBanner.Visibility = Visibility.Collapsed; }
+        catch
+        {
+            UpdateBanner.Visibility = Visibility.Collapsed;
+            if (_availableUpdate is { } update)
+                SetSidebarVersionStatus("可更新", hasUpdate: true, $"版本 {update.Version} 下载失败，可点击选择其他下载方式");
+        }
     }
 
     private void VersionUpdateButton_OnClick(object sender, RoutedEventArgs e)
@@ -2077,12 +2097,31 @@ public partial class MainWindow : Window
         VersionUpdateButton.ContextMenu.IsOpen = true;
     }
 
-    private void SidebarVersionUpdateButton_OnClick(object sender, RoutedEventArgs e)
+    private void SidebarVersionStatusButton_OnClick(object sender, RoutedEventArgs e)
     {
-        if (SidebarVersionUpdateButton.ContextMenu is null) return;
-        SidebarVersionUpdateButton.ContextMenu.PlacementTarget = SidebarVersionUpdateButton;
-        SidebarVersionUpdateButton.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
-        SidebarVersionUpdateButton.ContextMenu.IsOpen = true;
+        if (SidebarVersionStatusButton.ContextMenu is null) return;
+        SidebarVersionStatusButton.ContextMenu.PlacementTarget = SidebarVersionStatusButton;
+        SidebarVersionStatusButton.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        SidebarVersionStatusButton.ContextMenu.IsOpen = true;
+    }
+
+    private void SetSidebarVersionStatus(string text, bool hasUpdate, string tooltip)
+    {
+        SidebarVersionStatusText.Text = text;
+        SidebarVersionStatusButton.ToolTip = tooltip;
+        SidebarVersionStatusButton.Visibility = Visibility.Visible;
+        SidebarVersionUpdateDot.Visibility = hasUpdate ? Visibility.Visible : Visibility.Collapsed;
+        SidebarVersionStatusButton.Background = (Brush)FindResource(hasUpdate ? "UpdateVersionPillBrush" : "CurrentVersionPillBrush");
+        SidebarVersionStatusButton.Foreground = (Brush)FindResource(hasUpdate ? "UpdateVersionPillTextBrush" : "VersionPillTextBrush");
+    }
+
+    private void RestartPreparedUpdate_OnClick(object sender, RoutedEventArgs e) => InstallPreparedUpdate();
+
+    private void InstallPreparedUpdate()
+    {
+        if (_preparedUpdate is null || string.IsNullOrWhiteSpace(Environment.ProcessPath)) return;
+        _updates.SchedulePrepared(_preparedUpdate, Environment.ProcessPath, Environment.ProcessId);
+        ExitApplication();
     }
 
     private void DownloadUpdateFromOss_OnClick(object sender, RoutedEventArgs e)
