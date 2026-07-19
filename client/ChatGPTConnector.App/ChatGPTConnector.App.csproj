@@ -21,6 +21,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../ChatGPTConnector.Core/ChatGPTConnector.Core.csproj" />
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
   </ItemGroup>
   <ItemGroup>
     <Resource Include="Assets/AppIcon.png" />

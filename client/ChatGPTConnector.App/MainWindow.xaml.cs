@@ -21,7 +21,7 @@ using MessageBox = System.Windows.MessageBox;
 
 namespace ChatGPTConnector.App;
 
-public partial class MainWindow : Window
+public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 {
     private const double SidebarWidth = 280;
     private const double SidebarDrawerThreshold = 1120;
@@ -49,8 +49,6 @@ public partial class MainWindow : Window
     private bool _allowExit;
     private readonly SemaphoreSlim _operationGate = new(1, 1);
     private readonly DispatcherTimer _sessionTimer = new() { Interval = TimeSpan.FromMinutes(5) };
-    private readonly DispatcherTimer _chatToastTimer = new() { Interval = TimeSpan.FromSeconds(1.8) };
-    private readonly DispatcherTimer _profileToastTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly DispatcherTimer _attachmentDropLeaveTimer = new() { Interval = TimeSpan.FromMilliseconds(280) };
     private readonly DispatcherTimer _touchpadScrollTimer = new() { Interval = TimeSpan.FromMilliseconds(16) };
     private readonly Dictionary<string, ConversationRun> _conversationRuns = new(StringComparer.Ordinal);
@@ -124,8 +122,6 @@ public partial class MainWindow : Window
             SetSidebarVersionStatus($"v{currentVersion}", hasUpdate: false, $"当前版本 v{currentVersion}");
         }
         UpdateThemeButton();
-        _chatToastTimer.Tick += (_, _) => { _chatToastTimer.Stop(); ChatToast.Visibility = Visibility.Collapsed; };
-        _profileToastTimer.Tick += (_, _) => { _profileToastTimer.Stop(); ProfileToast.Visibility = Visibility.Collapsed; };
         _attachmentDropLeaveTimer.Tick += (_, _) => HideAttachmentDropOverlay();
         _touchpadScrollTimer.Tick += (_, _) => ApplyPendingTouchpadScroll();
         ChatMessagesItems.ItemsSource = _chatMessages;
@@ -320,7 +316,9 @@ public partial class MainWindow : Window
         var reveal = LoginPasswordRevealInput.Visibility != Visibility.Visible;
         LoginPasswordRevealInput.Visibility = reveal ? Visibility.Visible : Visibility.Collapsed;
         LoginPasswordInput.Visibility = reveal ? Visibility.Collapsed : Visibility.Visible;
-        PasswordRevealButton.Content = reveal ? "◎" : "◉";
+        PasswordRevealIcon.Symbol = reveal
+            ? Wpf.Ui.Controls.SymbolRegular.EyeOff20
+            : Wpf.Ui.Controls.SymbolRegular.Eye48;
         PasswordRevealButton.ToolTip = reveal ? "隐藏密码" : "显示密码";
         if (reveal) { LoginPasswordRevealInput.CaretIndex = LoginPasswordRevealInput.Text.Length; LoginPasswordRevealInput.Focus(); }
         else LoginPasswordInput.Focus();
@@ -453,7 +451,6 @@ public partial class MainWindow : Window
         var label = $"选择界面皮肤，当前为{AppThemeManager.DisplayName(_theme)}";
         ThemeToggleButton.ToolTip = label;
         AutomationProperties.SetName(ThemeToggleButton, label);
-        ThemeIconPath.Data = Geometry.Parse("M 12,3 A 9,9 0 1 0 12,21 C 14,21 14.5,19.5 13.5,18.5 C 12.5,17.5 13.2,16 15,16 L 17,16 C 19.2,16 21,14.2 21,12 A 9,9 0 0 0 12,3 Z M 7.5,11 A 1,1 0 1 1 7.5,9 A 1,1 0 1 1 7.5,11 M 10,7.5 A 1,1 0 1 1 10,5.5 A 1,1 0 1 1 10,7.5 M 15,8 A 1,1 0 1 1 15,6 A 1,1 0 1 1 15,8 M 18,11.5 A 1,1 0 1 1 18,9.5 A 1,1 0 1 1 18,11.5");
         LightSkinMenuItem.IsChecked = _theme == AppTheme.Light;
         DarkSkinMenuItem.IsChecked = _theme == AppTheme.Dark;
         OceanSkinMenuItem.IsChecked = _theme == AppTheme.Ocean;
@@ -487,17 +484,11 @@ public partial class MainWindow : Window
             try
             {
                 UpdateProfile(await _accounts.UpdateProfileAsync(GatewayUri, _session.AccessToken, nickname));
-                ProfileStatusText.Text = "个人资料已更新";
-                ProfileStatusText.Foreground = (Brush)FindResource("LinkBrush");
-                ProfileToast.Visibility = Visibility.Visible;
-                _profileToastTimer.Stop(); _profileToastTimer.Start();
+                ShowGlobalSnackbar("个人资料已更新");
             }
             catch (Exception error)
             {
-                ProfileStatusText.Text = error.Message;
-                ProfileStatusText.Foreground = (Brush)FindResource("ErrorBrush");
-                ProfileToast.Visibility = Visibility.Visible;
-                _profileToastTimer.Stop(); _profileToastTimer.Start();
+                ShowGlobalSnackbar(error.Message, true);
             }
         });
         _profileSaveBusy = false;
@@ -522,7 +513,6 @@ public partial class MainWindow : Window
     private void CancelProfileButton_OnClick(object sender, RoutedEventArgs e)
     {
         NicknameInput.Text = _savedNickname;
-        ProfileToast.Visibility = Visibility.Collapsed;
         UpdateProfileFormState();
     }
 
@@ -788,11 +778,20 @@ public partial class MainWindow : Window
 
     private void ShowChatToast(string text, bool error = false)
     {
-        ChatToastText.Text = text;
-        ChatToast.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(error ? "#E6B42318" : "#E6111827"));
-        ChatToast.Visibility = Visibility.Visible;
-        _chatToastTimer.Stop();
-        _chatToastTimer.Start();
+        ShowGlobalSnackbar(text, error);
+    }
+
+    private void ShowGlobalSnackbar(string text, bool error = false)
+    {
+        var snackbar = new Wpf.Ui.Controls.Snackbar(GlobalSnackbarPresenter)
+        {
+            Title = error ? "操作未完成" : "已完成",
+            Content = text,
+            Appearance = error ? Wpf.Ui.Controls.ControlAppearance.Danger : Wpf.Ui.Controls.ControlAppearance.Success,
+            Timeout = TimeSpan.FromSeconds(error ? 4 : 2),
+            IsCloseButtonEnabled = error,
+        };
+        snackbar.Show();
     }
 
     private async void RegenerateMessageButton_OnClick(object sender, RoutedEventArgs e)
@@ -2254,7 +2253,7 @@ public partial class MainWindow : Window
             var update = await _updates.CheckAsync(currentVersion, cancellationToken);
             if (update is null)
             {
-                UpdateBanner.Visibility = Visibility.Collapsed;
+                UpdateBanner.IsOpen = false;
                 VersionUpdateButton.Visibility = Visibility.Collapsed;
                 _availableUpdate = null;
                 _preparedUpdate = null;
@@ -2272,18 +2271,18 @@ public partial class MainWindow : Window
             SidebarDownloadGithubMenuItem.Visibility = Visibility.Visible;
             var currentLabel = CurrentVersion is { } current ? $"v{current} · 可更新" : "可更新";
             SetSidebarVersionStatus(currentLabel, hasUpdate: true, $"发现新版本 v{update.Version.TrimStart('v')}，点击查看详情");
-            UpdateBanner.Visibility = Visibility.Visible;
-            GlobalUpdateText.Text = $"正在低速下载版本 {update.Version}，不会阻塞登录和对话。";
+            UpdateBanner.IsOpen = true;
+            UpdateBanner.Message = $"正在低速下载版本 {update.Version}，不会阻塞登录和对话。";
             var progress = new Progress<double>(value =>
             {
                 var percent = Math.Clamp((int)Math.Round(value), 0, 100);
                 SetSidebarVersionStatus($"更新中 {percent}%", hasUpdate: true, $"正在低速下载版本 {update.Version}：{percent}%");
-                GlobalUpdateText.Text = $"正在低速下载版本 {update.Version}：{percent}%，不会阻塞登录和对话。";
+                UpdateBanner.Message = $"正在低速下载版本 {update.Version}：{percent}%，不会阻塞登录和对话。";
             });
             var prepared = await _updates.PrepareAsync(update, progress: progress, cancellationToken: cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             _preparedUpdate = prepared;
-            UpdateBanner.Visibility = Visibility.Collapsed;
+            UpdateBanner.IsOpen = false;
             SidebarRestartUpdateMenuItem.Visibility = Visibility.Visible;
             SetSidebarVersionStatus("重启更新", hasUpdate: true, $"版本 {prepared.Version} 已下载完成，点击安装并重启");
             var answer = MessageBox.Show(
@@ -2297,7 +2296,7 @@ public partial class MainWindow : Window
         catch (OperationCanceledException) { }
         catch
         {
-            UpdateBanner.Visibility = Visibility.Collapsed;
+            UpdateBanner.IsOpen = false;
             if (_availableUpdate is { } update)
                 SetSidebarVersionStatus("可更新", hasUpdate: true, $"版本 {update.Version} 下载失败，可点击选择其他下载方式");
         }

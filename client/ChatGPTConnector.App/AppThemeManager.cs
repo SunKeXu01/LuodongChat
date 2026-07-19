@@ -47,6 +47,14 @@ public static class AppThemeManager
 
     public static void Apply(Application application, AppTheme theme)
     {
+        var fluentTheme = theme is AppTheme.Dark or AppTheme.Ocean
+            ? Wpf.Ui.Appearance.ApplicationTheme.Dark
+            : Wpf.Ui.Appearance.ApplicationTheme.Light;
+        Wpf.Ui.Appearance.ApplicationThemeManager.Apply(
+            fluentTheme,
+            Wpf.Ui.Controls.WindowBackdropType.Mica,
+            false);
+
         var colors = theme switch
         {
             AppTheme.Dark => DarkColors,
