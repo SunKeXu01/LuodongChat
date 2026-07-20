@@ -52,7 +52,9 @@ public static class AppThemeManager
             : Wpf.Ui.Appearance.ApplicationTheme.Light;
         Wpf.Ui.Appearance.ApplicationThemeManager.Apply(
             fluentTheme,
-            Wpf.Ui.Controls.WindowBackdropType.Mica,
+            // WPF UI 4.3 requires ExtendsContentIntoTitleBar for Mica. The app keeps
+            // the native title bar, so applying Mica would throw during startup.
+            Wpf.Ui.Controls.WindowBackdropType.None,
             false);
 
         var colors = theme switch

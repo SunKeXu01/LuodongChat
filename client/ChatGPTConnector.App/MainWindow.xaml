@@ -5,7 +5,7 @@
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="泺栋 Chat" Width="1200" Height="780" MinWidth="960" MinHeight="680"
         Icon="/LuodongChat;component/Assets/AppIcon.png"
-        WindowBackdropType="Mica" WindowCornerPreference="Round"
+        WindowBackdropType="None" WindowCornerPreference="Round"
         WindowStartupLocation="CenterScreen" ResizeMode="CanResizeWithGrip"
         UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display"
         PreviewKeyDown="MainWindow_OnPreviewKeyDown" SizeChanged="MainWindow_OnSizeChanged">
@@ -183,7 +183,7 @@
                           Click="SidebarVersionStatusButton_OnClick">
                     <Grid>
                       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                      <TextBlock x:Name="SidebarVersionStatusText" Text="v2.0.4" FontSize="10.5" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
+                      <TextBlock x:Name="SidebarVersionStatusText" Text="v2.0.5" FontSize="10.5" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
                       <Ellipse x:Name="SidebarVersionUpdateDot" Grid.Column="1" Width="7" Height="7" Margin="5,0,0,0" Fill="#F79009" Visibility="Collapsed" VerticalAlignment="Center"/>
                     </Grid>
                     <Button.ContextMenu><ContextMenu>

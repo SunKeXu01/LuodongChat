@@ -4,7 +4,7 @@
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="确认项目操作" Width="720" Height="430" MinWidth="640" MinHeight="380"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
-        WindowBackdropType="Mica" WindowCornerPreference="Round"
+        WindowBackdropType="None" WindowCornerPreference="Round"
         Background="{DynamicResource PageBackgroundBrush}" Foreground="{DynamicResource TextBrush}"
         ShowInTaskbar="False">
   <Grid Margin="28">

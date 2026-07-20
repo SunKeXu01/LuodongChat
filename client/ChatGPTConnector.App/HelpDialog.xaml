@@ -4,7 +4,7 @@
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="帮助与反馈" Width="840" Height="630" MinWidth="720" MinHeight="580"
         Icon="/LuodongChat;component/Assets/AppIcon.png"
-        WindowBackdropType="Mica" WindowCornerPreference="Round"
+        WindowBackdropType="None" WindowCornerPreference="Round"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
         ShowInTaskbar="False" UseLayoutRounding="True" SnapsToDevicePixels="True"
         Background="{DynamicResource PageBackgroundBrush}">

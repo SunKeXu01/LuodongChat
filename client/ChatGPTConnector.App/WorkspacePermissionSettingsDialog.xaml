@@ -4,7 +4,7 @@
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="自定义项目权限" Width="650" Height="560" MinWidth="580" MinHeight="500"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
-        WindowBackdropType="Mica" WindowCornerPreference="Round"
+        WindowBackdropType="None" WindowCornerPreference="Round"
         Background="{DynamicResource PageBackgroundBrush}" Foreground="{DynamicResource TextBrush}"
         ShowInTaskbar="False">
   <Grid Margin="30">
