@@ -39,6 +39,9 @@ public partial class MainWindow : Window
     private readonly RecentProjectStore _recentProjectStore = RecentProjectStore.ForApplicationDirectory();
     private readonly WorkspaceAccessSettingsStore _workspaceAccessStore = WorkspaceAccessSettingsStore.ForApplicationDirectory();
     private readonly WorkspaceAuditStore _workspaceAuditStore = WorkspaceAuditStore.ForApplicationDirectory();
+    private readonly McpConfigurationStore _mcpConfigurationStore = McpConfigurationStore.ForApplicationDirectory();
+    private readonly McpClientManager _mcpClients;
+    private readonly SkillService _skills = SkillService.ForApplicationDirectory();
     private readonly ObservableCollection<ChatDisplayMessage> _chatMessages = [];
     private readonly ObservableCollection<ChatQuestionAnchor> _questionAnchors = [];
     private readonly ObservableCollection<ConversationListItem> _conversations = [];
@@ -74,6 +77,7 @@ public partial class MainWindow : Window
     private WorkspaceCustomPermissions _workspaceCustomPermissions;
     private readonly HashSet<string> _sessionApprovedWorkspaceOperations = new(StringComparer.Ordinal);
     private readonly HashSet<string> _alwaysAllowedWorkspaceCommands = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _sessionApprovedMcpTools = new(StringComparer.Ordinal);
     private bool _webSearchEnabled = true;
     private readonly AttachmentComposerController _attachments;
     private CancellationTokenSource? _questionHighlightCancellation;
@@ -105,6 +109,7 @@ public partial class MainWindow : Window
     internal MainWindow(bool skipStartupChecks, AppTheme initialTheme = AppTheme.Light)
     {
         _theme = initialTheme;
+        _mcpClients = new McpClientManager(_mcpConfigurationStore);
         var accessSettings = _workspaceAccessStore.Load();
         _workspaceAccessMode = accessSettings.Mode;
         _workspaceCustomPermissions = accessSettings.Custom;
@@ -141,7 +146,14 @@ public partial class MainWindow : Window
         FitToWorkingArea();
         InitializeTrayIcon();
         Closing += MainWindow_OnClosing;
-        Closed += (_, _) => { _attachmentDropLeaveTimer.Stop(); _touchpadScrollTimer.Stop(); CancelQuestionHighlight(); _attachments.Dispose(); };
+        Closed += async (_, _) =>
+        {
+            _attachmentDropLeaveTimer.Stop();
+            _touchpadScrollTimer.Stop();
+            CancelQuestionHighlight();
+            _attachments.Dispose();
+            try { await _mcpClients.DisposeAsync(); } catch { }
+        };
         Application.Current.SessionEnding += (_, _) => _allowExit = true;
         _sessionTimer.Tick += async (_, _) => await RunExclusiveAsync(ValidateSessionAsync);
         if (skipStartupChecks) return;
@@ -432,6 +444,20 @@ public partial class MainWindow : Window
         new HelpDialog(CurrentVersion) { Owner = this }.ShowDialog();
     }
 
+    private async void ExtensionsButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        SidebarMenuPopup.IsOpen = false;
+        var dialog = new ExtensionSettingsDialog(_mcpConfigurationStore, _mcpClients, _skills) { Owner = this };
+        dialog.ShowDialog();
+        if (!dialog.ConfigurationChanged) return;
+        try
+        {
+            await _mcpClients.ReloadAsync();
+            ShowChatToast("MCP 与 Skills 配置已更新");
+        }
+        catch (Exception error) { ShowChatToast($"重新连接 MCP 失败：{error.Message}", true); }
+    }
+
     private void ThemeToggleButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (ThemeToggleButton.ContextMenu is null) return;
@@ -567,6 +593,7 @@ public partial class MainWindow : Window
             if (_session is not null) await _accounts.LogoutAsync(GatewayUri, _session.AccessToken).ContinueWith(_ => { });
             _sessionStore.Clear();
             _session = null;
+            _sessionApprovedMcpTools.Clear();
             _sessionTimer.Stop();
             ShowLogin();
         });
@@ -585,6 +612,7 @@ public partial class MainWindow : Window
         await CancelConversationRunsAsync();
         await _attachments.CompleteSendAsync();
         _session = null;
+        _sessionApprovedMcpTools.Clear();
         _sessionTimer.Stop();
         ShowLogin();
         MessageBox.Show("登录已过期，请重新登录。", "需要登录", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -1489,6 +1517,11 @@ public partial class MainWindow : Window
             if (IsConversationVisible(conversationId)) ShowConversation(workingConversation);
 
             IReadOnlyList<SyncedChatMessage> context = conversationWithUser.Messages.ToArray();
+            if (_skills.BuildPrompt(text) is { Length: > 0 } skillPrompt)
+            {
+                context = [new SyncedChatMessage(
+                    Guid.NewGuid().ToString(), conversationId, "developer", skillPrompt, DateTimeOffset.UtcNow), .. context];
+            }
             if (projectPath is not null)
             {
                 var automaticRead = WorkspaceAccessPolicy.Decide(
@@ -1540,13 +1573,21 @@ public partial class MainWindow : Window
                 var hasReferenceImages = attachmentSnapshot.Any(item => item.IsImage);
                 if (wantsImage) SetRunUiText(conversationId, notice: hasReferenceImages ? "正在参考上传图片生成，请稍候…" : "正在生成图片，请稍候…");
                 await using var workspaceTools = projectPath is null ? null : new WorkspaceFileTools(projectPath);
+                var mcpTools = await _mcpClients.GetToolDefinitionsAsync(cancellationToken);
+                IReadOnlyList<object> availableTools =
+                [
+                    .. SkillService.ToolDefinitions,
+                    .. McpClientManager.ProtocolToolDefinitions,
+                    .. mcpTools,
+                    .. (workspaceTools is null ? Array.Empty<object>() : WorkspaceFileTools.ToolDefinitions),
+                ];
                 var result = await _chat.StreamResponseAsync(
                     GatewayUri, session.AccessToken, context, progress, cancellationToken,
                     enableWebSearch: webSearchEnabled, enableImageGeneration: wantsImage,
                     attachmentIds: attachmentSnapshot.Select(item => item.ServerFileId!).ToArray(),
                     hasReferenceImages: hasReferenceImages,
-                    localTools: workspaceTools is null ? null : WorkspaceFileTools.ToolDefinitions,
-                    executeLocalTool: workspaceTools is null ? null : CreateWorkspaceToolExecutor(projectPath!, workspaceTools));
+                    localTools: availableTools,
+                    executeLocalTool: CreateCombinedToolExecutor(projectPath, workspaceTools));
                 var storedImages = new List<GeneratedChatImage>();
                 foreach (var image in result.Images)
                     storedImages.Add(await _conversationStore.SaveGeneratedImageAsync(
@@ -1633,6 +1674,65 @@ public partial class MainWindow : Window
             UpdateComposerState();
             ChatInput.Focus();
         }
+    }
+
+    private Func<LocalToolCall, CancellationToken, Task<string>> CreateCombinedToolExecutor(
+        string? projectPath, WorkspaceFileTools? workspaceTools)
+    {
+        var workspaceExecutor = projectPath is not null && workspaceTools is not null
+            ? CreateWorkspaceToolExecutor(projectPath, workspaceTools)
+            : null;
+        return async (call, cancellationToken) =>
+        {
+            if (_skills.IsSkillTool(call.Name)) return await _skills.ExecuteToolAsync(call, cancellationToken);
+            if (_mcpClients.IsProtocolTool(call.Name)) return await ExecuteMcpProtocolToolAsync(call, cancellationToken);
+            if (_mcpClients.IsMcpTool(call.Name)) return await ExecuteMcpToolAsync(call, cancellationToken);
+            if (workspaceExecutor is not null) return await workspaceExecutor(call, cancellationToken);
+            return System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = "当前对话没有可执行该工具的项目空间。" });
+        };
+    }
+
+    private async Task<string> ExecuteMcpProtocolToolAsync(LocalToolCall call, CancellationToken cancellationToken)
+    {
+        if (call.Name is "mcp_read_resource" or "mcp_get_prompt")
+        {
+            var approvalKey = $"protocol|{call.Name}|{call.Arguments}";
+            if (!_sessionApprovedMcpTools.Contains(approvalKey))
+            {
+                var approval = new WorkspaceToolApprovalDialog(
+                    call.Name == "mcp_read_resource" ? "读取 MCP 资源" : "获取 MCP 提示词",
+                    ["数据由用户配置的第三方 MCP 服务器提供", "返回内容会发送给 GPT 继续处理"],
+                    isCommand: false,
+                    allowPersistentApproval: false) { Owner = this };
+                if (approval.ShowDialog() != true || approval.Choice == WorkspaceApprovalChoice.Reject)
+                    return System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = "用户拒绝了本次 MCP 数据访问。" });
+                if (approval.Choice == WorkspaceApprovalChoice.AllowSession) _sessionApprovedMcpTools.Add(approvalKey);
+            }
+        }
+        return await _mcpClients.ExecuteProtocolToolAsync(call, cancellationToken);
+    }
+
+    private async Task<string> ExecuteMcpToolAsync(LocalToolCall call, CancellationToken cancellationToken)
+    {
+        var descriptor = _mcpClients.DescribeTool(call.Name);
+        if (descriptor is null)
+            return System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = "MCP 工具当前不可用。" });
+        var approvalKey = $"{descriptor.ServerId}|{descriptor.OriginalName}";
+        if (!_sessionApprovedMcpTools.Contains(approvalKey))
+        {
+            var approval = new WorkspaceToolApprovalDialog(
+                $"调用 MCP 工具：{descriptor.ServerName} / {descriptor.OriginalName}",
+                [$"第三方 MCP 服务器：{descriptor.ServerName}", "参数将在确认后发送给该服务器"],
+                isCommand: false,
+                allowPersistentApproval: false) { Owner = this };
+            if (approval.ShowDialog() != true || approval.Choice == WorkspaceApprovalChoice.Reject)
+                return System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = "用户拒绝了本次 MCP 工具调用。" });
+            if (approval.Choice == WorkspaceApprovalChoice.AllowSession) _sessionApprovedMcpTools.Add(approvalKey);
+        }
+        ChatNotice.Text = $"正在调用 MCP：{descriptor.ServerName} / {descriptor.OriginalName}…";
+        var result = await _mcpClients.CallToolAsync(call, cancellationToken);
+        ChatNotice.Text = $"MCP 工具 {descriptor.OriginalName} 已返回，GPT 正在继续回答…";
+        return result;
     }
 
     private Func<LocalToolCall, CancellationToken, Task<string>> CreateWorkspaceToolExecutor(

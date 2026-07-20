@@ -13,7 +13,7 @@ public sealed class SecureSessionStore(string path)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var plaintext = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(session));
-        var encrypted = Protect(plaintext);
+        var encrypted = ProtectForCurrentUser(plaintext);
         File.WriteAllBytes(path, encrypted);
         Array.Clear(plaintext);
     }
@@ -21,14 +21,14 @@ public sealed class SecureSessionStore(string path)
     public AccountSession? Load()
     {
         if (!File.Exists(path)) return null;
-        try { return JsonSerializer.Deserialize<AccountSession>(Encoding.UTF8.GetString(Unprotect(File.ReadAllBytes(path)))); }
+        try { return JsonSerializer.Deserialize<AccountSession>(Encoding.UTF8.GetString(UnprotectForCurrentUser(File.ReadAllBytes(path)))); }
         catch { Clear(); return null; }
     }
 
     public void Clear() { if (File.Exists(path)) File.Delete(path); }
 
-    private static byte[] Protect(byte[] value) => Crypt(value, true);
-    private static byte[] Unprotect(byte[] value) => Crypt(value, false);
+    internal static byte[] ProtectForCurrentUser(byte[] value) => Crypt(value, true);
+    internal static byte[] UnprotectForCurrentUser(byte[] value) => Crypt(value, false);
 
     private static byte[] Crypt(byte[] value, bool protect)
     {

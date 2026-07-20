@@ -1,0 +1,37 @@
+<Window x:Class="ChatGPTConnector.App.McpServerEditorDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="MCP 服务器" Width="650" Height="690" MinWidth="580" MinHeight="580"
+        Icon="/LuodongChat;component/Assets/AppIcon.png"
+        WindowStartupLocation="CenterOwner" WindowStyle="SingleBorderWindow" ResizeMode="CanResize"
+        ShowInTaskbar="False" Background="{DynamicResource PageBackgroundBrush}" Foreground="{DynamicResource TextBrush}">
+  <Grid Margin="30,26,30,24">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <StackPanel>
+      <TextBlock x:Name="DialogTitle" Text="添加 MCP 服务器" FontSize="27" FontWeight="SemiBold"/>
+      <TextBlock Text="配置由你信任的 MCP 服务。密钥使用当前 Windows 账户加密并保存在软件目录，不会上传到泺栋 Chat。"
+                 Margin="0,7,0,18" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
+    </StackPanel>
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+      <StackPanel Margin="0,0,8,0">
+        <TextBlock Text="名称" Style="{StaticResource FieldLabel}"/><TextBox x:Name="NameInput" Height="44" MaxLength="80"/>
+        <TextBlock Text="连接方式" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="TransportInput" Height="44" SelectionChanged="TransportInput_OnSelectionChanged"><ComboBoxItem Content="stdio（本地进程）" Tag="Stdio"/><ComboBoxItem Content="HTTP（Streamable HTTP / SSE）" Tag="Http"/></ComboBox>
+        <StackPanel x:Name="StdioPanel">
+          <TextBlock Text="启动程序" Style="{StaticResource FieldLabel}"/><TextBox x:Name="CommandInput" Height="44" Tag="例如：npx" Style="{StaticResource WatermarkTextBox}"/>
+          <TextBlock Text="参数（每行一项）" Style="{StaticResource FieldLabel}"/><TextBox x:Name="ArgumentsInput" Height="92" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap" Tag="-y&#x0a;@modelcontextprotocol/server-filesystem&#x0a;D:\Projects" Style="{StaticResource WatermarkTextBox}"/>
+          <TextBlock Text="环境变量（每行 KEY=VALUE）" Style="{StaticResource FieldLabel}"/><TextBox x:Name="EnvironmentInput" Height="82" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap"/>
+        </StackPanel>
+        <StackPanel x:Name="HttpPanel" Visibility="Collapsed">
+          <TextBlock Text="服务器地址" Style="{StaticResource FieldLabel}"/><TextBox x:Name="UrlInput" Height="44" Tag="https://example.com/mcp" Style="{StaticResource WatermarkTextBox}"/>
+          <TextBlock Text="请求头（每行 KEY=VALUE）" Style="{StaticResource FieldLabel}"/><TextBox x:Name="HeadersInput" Height="92" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap" Tag="Authorization=Bearer ..." Style="{StaticResource WatermarkTextBox}"/>
+        </StackPanel>
+        <CheckBox x:Name="EnabledInput" Content="保存后立即启用" IsChecked="True" Margin="0,18,0,0"/>
+        <TextBlock x:Name="ValidationError" Margin="0,12,0,0" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap"/>
+      </StackPanel>
+    </ScrollViewer>
+    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+      <Button Content="取消" MinWidth="82" Height="40" Style="{StaticResource SecondaryButton}" Click="CancelButton_OnClick"/>
+      <Button Content="保存" MinWidth="92" Height="40" Margin="10,0,0,0" Click="SaveButton_OnClick"/>
+    </StackPanel>
+  </Grid>
+</Window>

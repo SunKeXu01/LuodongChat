@@ -183,7 +183,7 @@
                           Click="SidebarVersionStatusButton_OnClick">
                     <Grid>
                       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                      <TextBlock x:Name="SidebarVersionStatusText" Text="v2.0.6" FontSize="10.5" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
+                      <TextBlock x:Name="SidebarVersionStatusText" Text="v2.0.7" FontSize="10.5" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
                       <Ellipse x:Name="SidebarVersionUpdateDot" Grid.Column="1" Width="7" Height="7" Margin="5,0,0,0" Fill="#F79009" Visibility="Collapsed" VerticalAlignment="Center"/>
                     </Grid>
                     <Button.ContextMenu><ContextMenu>
@@ -319,6 +319,9 @@
                           </Button>
                           <Button Style="{StaticResource SidebarMenuButton}" Click="OpenThemePanel_OnClick">
                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="28"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><ui:SymbolIcon Symbol="PaintBrush20" FontSize="18" Foreground="{DynamicResource MutedBrush}"/><TextBlock Grid.Column="1" Text="外观主题" VerticalAlignment="Center"/><ui:SymbolIcon Grid.Column="2" Symbol="ChevronRight20" FontSize="15" Foreground="{DynamicResource WeakTextBrush}"/></Grid>
+                          </Button>
+                          <Button Style="{StaticResource SidebarMenuButton}" Click="ExtensionsButton_OnClick">
+                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="28"/><ColumnDefinition/></Grid.ColumnDefinitions><ui:SymbolIcon Symbol="PuzzlePiece20" FontSize="18" Foreground="{DynamicResource MutedBrush}"/><TextBlock Grid.Column="1" Text="MCP 与 Skills" VerticalAlignment="Center"/></Grid>
                           </Button>
                           <Button Style="{StaticResource SidebarMenuButton}" Click="HelpButton_OnClick">
                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="28"/><ColumnDefinition/></Grid.ColumnDefinitions><ui:SymbolIcon Symbol="QuestionCircle20" FontSize="18" Foreground="{DynamicResource MutedBrush}"/><TextBlock Grid.Column="1" Text="帮助与反馈" VerticalAlignment="Center"/></Grid>
