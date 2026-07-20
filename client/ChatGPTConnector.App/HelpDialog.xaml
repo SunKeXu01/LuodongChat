@@ -123,6 +123,19 @@
       <Border Style="{StaticResource ResourceCard}">
         <Grid>
           <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <ui:SymbolIcon Symbol="DocumentBulletList20" FontSize="25" Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center"/>
+          <StackPanel Grid.Column="1" VerticalAlignment="Center">
+            <TextBlock Text="诊断日志" FontWeight="SemiBold" FontSize="17"/>
+            <TextBlock Text="上传脱敏日志、查看历史记录或提前删除" Foreground="{DynamicResource MutedBrush}" FontSize="13" Margin="0,2,0,0"/>
+            <TextBlock Text="默认保存 7 天，不包含对话和文件正文" Foreground="{DynamicResource LinkBrush}" FontSize="13" Margin="0,3,0,0"/>
+          </StackPanel>
+          <Button Grid.Column="2" Content="管理诊断日志" Style="{StaticResource ResourceActionButton}" VerticalAlignment="Center" Margin="20,0,0,0" Click="OpenDiagnostics_OnClick"/>
+        </Grid>
+      </Border>
+
+      <Border Style="{StaticResource ResourceCard}">
+        <Grid>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <Viewbox Width="25" Height="25" HorizontalAlignment="Left" VerticalAlignment="Center">
             <Path Style="{StaticResource ResourceIcon}" Data="M8,19 C4,20 4,17 3,16 M13,22 L13,18 C13,16 14,15 15,14 C11,14 7,13 7,8 C7,6 8,5 9,4 C9,3 8,1 10,2 C12,2 13,3 14,3 C15,3 17,2 19,2 C20,1 20,3 20,4 C21,5 22,6 22,8 C22,13 18,14 14,14"/>
           </Viewbox>

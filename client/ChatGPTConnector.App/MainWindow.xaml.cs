@@ -92,6 +92,7 @@ public partial class MainWindow : Window
     private bool _sidebarExpanded;
     private bool _sidebarDrawerMode;
     private int _sidebarAnimationGeneration;
+    private string _lastDiagnosticErrorCode = "MANUAL_DIAGNOSTIC";
 
     private static string? CurrentVersion
     {
@@ -450,7 +451,7 @@ public partial class MainWindow : Window
     private void HelpButton_OnClick(object sender, RoutedEventArgs e)
     {
         SidebarMenuPopup.IsOpen = false;
-        new HelpDialog(CurrentVersion) { Owner = this }.ShowDialog();
+        new HelpDialog(CurrentVersion, _session?.AccessToken) { Owner = this }.ShowDialog();
     }
 
     private async void ExtensionsButton_OnClick(object sender, RoutedEventArgs e)
@@ -787,8 +788,9 @@ public partial class MainWindow : Window
             if (_conversationActivities.GetValueOrDefault(_currentConversation.Id) == ConversationActivityStatus.NewReply)
                 SetConversationActivity(_currentConversation.Id, ConversationActivityStatus.None);
             ChatNotice.Text = _conversationRunErrors.GetValueOrDefault(_currentConversation.Id) ?? "";
+            ErrorActionPanel.Visibility = _conversationRunErrors.ContainsKey(_currentConversation.Id) ? Visibility.Visible : Visibility.Collapsed;
         }
-        else ChatNotice.Text = "";
+        else { ChatNotice.Text = ""; ErrorActionPanel.Visibility = Visibility.Collapsed; }
         RestoreConversationDraft();
         UpdateComposerState();
         ScrollChatToEnd();
@@ -1541,9 +1543,18 @@ public partial class MainWindow : Window
             display.IsThinking = true;
             run = new ConversationRun(session.Profile.Id, workingConversation, display, cancellation);
             _conversationRuns[conversationId] = run;
+            DiagnosticLog.Write("chat_request_started", "NONE", metadata: new Dictionary<string, object?>
+            {
+                ["conversationHash"] = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(conversationId)))[..12],
+                ["model"] = "gpt-5.6",
+                ["webSearchEnabled"] = webSearchEnabled,
+                ["hasAttachments"] = attachmentSnapshot.Count > 0,
+                ["hasProjectSpace"] = projectPath is not null,
+            });
             _attachments.DetachForSend(attachmentSnapshot);
             attachmentsDetached = true;
             _conversationRunErrors.Remove(conversationId);
+            if (IsConversationVisible(conversationId)) ErrorActionPanel.Visibility = Visibility.Collapsed;
             if (ReferenceEquals(_currentConversation, baseConversation)) _currentConversation = workingConversation;
             SetConversationActivity(conversationId, ConversationActivityStatus.Thinking, workingConversation);
             _sendStartInProgress = false;
@@ -1631,7 +1642,17 @@ public partial class MainWindow : Window
                     hasReferenceImages: hasReferenceImages,
                     localTools: availableTools,
                     executeLocalTool: CreateCombinedToolExecutor(projectPath, workspaceTools, mcpSettings.ToolMode, allowedMcpTools),
-                    toolProgress: new Progress<ChatToolExecutionEvent>(toolEvent => run.AssistantDisplay.UpdateToolActivity(toolEvent)));
+                    toolProgress: new Progress<ChatToolExecutionEvent>(toolEvent =>
+                    {
+                        run.AssistantDisplay.UpdateToolActivity(toolEvent);
+                        DiagnosticLog.Write("tool_call", toolEvent.Status == ChatToolExecutionStatus.Failed ? "TOOL_CALL_FAILED" : "NONE",
+                            metadata: new Dictionary<string, object?>
+                            {
+                                ["tool"] = toolEvent.ToolName,
+                                ["status"] = toolEvent.Status,
+                                ["elapsedMs"] = Math.Round(toolEvent.Elapsed.TotalMilliseconds),
+                            });
+                    }));
                 var storedImages = new List<GeneratedChatImage>();
                 foreach (var image in result.Images)
                     storedImages.Add(await _conversationStore.SaveGeneratedImageAsync(
@@ -1647,6 +1668,12 @@ public partial class MainWindow : Window
                 run.AssistantDisplay.Images = ResolveImages(assistant);
                 run.AssistantDisplay.IsThinking = false;
                 run.IsSettled = true;
+                DiagnosticLog.Write("chat_request_completed", "NONE", metadata: new Dictionary<string, object?>
+                {
+                    ["webSearchPerformed"] = result.WebSearchPerformed,
+                    ["webSearchUnavailable"] = result.WebSearchUnavailable,
+                    ["imageCount"] = storedImages.Count,
+                });
                 await PersistRunConversationAsync(run, cancellationToken);
                 var completedWhileHidden = !IsConversationVisible(conversationId);
                 SetConversationActivity(conversationId, completedWhileHidden ? ConversationActivityStatus.NewReply : ConversationActivityStatus.None, run.Conversation);
@@ -1679,6 +1706,7 @@ public partial class MainWindow : Window
                 run.RemoveAssistant();
                 await PersistRunConversationAsync(run, CancellationToken.None);
                 _conversationRunErrors[conversationId] = $"发送失败：{error.Message}";
+                RecordDiagnosticFailure(error, conversationId);
                 SetConversationActivity(conversationId, ConversationActivityStatus.Failed, run.Conversation);
                 UpsertConversationListItem(run.Conversation, moveToTop: false, select: IsConversationVisible(conversationId));
                 SetRunUiText(conversationId, notice: _conversationRunErrors[conversationId], networkText: "连接失败 · 请重试");
@@ -1691,6 +1719,7 @@ public partial class MainWindow : Window
                 if (ReferenceEquals(_currentConversation, baseConversation) && string.IsNullOrWhiteSpace(ChatInput.Text))
                     ChatInput.Text = text;
                 ShowChatToast($"发送失败：{error.Message}", true);
+                RecordDiagnosticFailure(error, baseConversation?.Id ?? "new-conversation");
             }
             else
             {
@@ -1699,6 +1728,7 @@ public partial class MainWindow : Window
                 try { await PersistRunConversationAsync(run, CancellationToken.None); }
                 catch { }
                 _conversationRunErrors[run.Conversation.Id] = $"发送失败：{error.Message}";
+                RecordDiagnosticFailure(error, run.Conversation.Id);
                 SetConversationActivity(run.Conversation.Id, ConversationActivityStatus.Failed, run.Conversation);
                 UpsertConversationListItem(run.Conversation, moveToTop: false, select: IsConversationVisible(run.Conversation.Id));
                 SetRunUiText(run.Conversation.Id, notice: _conversationRunErrors[run.Conversation.Id], networkText: "连接失败 · 请重试");
@@ -2280,6 +2310,36 @@ public partial class MainWindow : Window
         if (notice is not null) ChatNotice.Text = notice;
         if (networkText is not null) NetworkStatusText.Text = networkText;
     }
+
+    private void RecordDiagnosticFailure(Exception error, string conversationId)
+    {
+        _lastDiagnosticErrorCode = error.Message.Contains("upstream", StringComparison.OrdinalIgnoreCase)
+            ? "UPSTREAM_REQUEST_FAILED" : error is TaskCanceledException ? "REQUEST_TIMEOUT" : "CLIENT_REQUEST_FAILED";
+        DiagnosticLog.Write("chat_request_failed", _lastDiagnosticErrorCode, error,
+            new Dictionary<string, object?> { ["conversationHash"] = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(conversationId)))[..12], ["model"] = "GPT-5.6" });
+        if (IsConversationVisible(conversationId)) ErrorActionPanel.Visibility = Visibility.Visible;
+    }
+
+    private async void RetryFailedMessage_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_currentConversation is null || IsConversationRunning(_currentConversation.Id)) return;
+        var user = _currentConversation.Messages.LastOrDefault(item => item.Role == "user");
+        if (user is null) return;
+        _currentConversation = _currentConversation with { Messages = _currentConversation.Messages.Where(item => item.Id != user.Id).ToArray(), UpdatedAt = DateTimeOffset.UtcNow };
+        await SaveCurrentConversationAsync(CancellationToken.None);
+        ChatInput.Text = user.Content; ChatInput.CaretIndex = ChatInput.Text.Length;
+        ErrorActionPanel.Visibility = Visibility.Collapsed; ChatNotice.Text = "";
+        await SendChatAsync();
+    }
+
+    private void UploadDiagnosticLog_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_session is null) { ShowChatToast("请先登录后上传诊断日志", true); return; }
+        new DiagnosticDialog(_session.AccessToken, CurrentVersion, _lastDiagnosticErrorCode) { Owner = this }.ShowDialog();
+    }
+
+    private void ShowErrorDetails_OnClick(object sender, RoutedEventArgs e) =>
+        MessageBox.Show(this, $"错误码：{_lastDiagnosticErrorCode}\n时间：{DateTime.Now:yyyy-MM-dd HH:mm:ss}\n\n{ChatNotice.Text}", "错误详情", MessageBoxButton.OK, MessageBoxImage.Warning);
 
     private void SetConversationActivity(
         string conversationId,

@@ -11,10 +11,12 @@ public partial class HelpDialog : Window
     private const string Issues = "https://github.com/SunKeXu01/LuodongChat/issues";
     private int _noticeSequence;
     private readonly Dictionary<Button, int> _copySequences = [];
+    private readonly string? _accessToken;
 
-    public HelpDialog(string? version)
+    public HelpDialog(string? version, string? accessToken = null)
     {
         InitializeComponent();
+        _accessToken = accessToken;
         VersionText.Text = string.IsNullOrWhiteSpace(version) ? "" : $"v{version}";
     }
 
@@ -24,6 +26,11 @@ public partial class HelpDialog : Window
     private void OpenWebsite_OnClick(object sender, RoutedEventArgs e) => Open(Website);
     private void OpenGithub_OnClick(object sender, RoutedEventArgs e) => Open(Github);
     private void OpenIssues_OnClick(object sender, RoutedEventArgs e) => Open(Issues);
+    private void OpenDiagnostics_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_accessToken)) { CopyNotice.Text = "请先登录后上传诊断日志"; return; }
+        new DiagnosticDialog(_accessToken, VersionText.Text.TrimStart('v')) { Owner = this }.ShowDialog();
+    }
 
     private async void Copy(string value, Button button)
     {

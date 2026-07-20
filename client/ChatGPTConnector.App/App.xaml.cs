@@ -111,6 +111,7 @@ public partial class App : Application
 
     private static string WriteCrashLog(Exception error)
     {
+        DiagnosticLog.Write("fatal_error", "CLIENT_FATAL_ERROR", error);
         try
         {
             var directory = ApplicationDirectories.Logs;

@@ -610,7 +610,14 @@
                     <Button Grid.Column="1" Content="选择" MinHeight="30" Padding="12,4" Margin="12,0,0,0" Style="{StaticResource SecondaryButton}" Click="ProjectSpaceHintButton_OnClick"/>
                   </Grid>
                 </Border>
-                <TextBlock x:Name="ChatNotice" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap"/>
+                <StackPanel>
+                  <TextBlock x:Name="ChatNotice" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap"/>
+                  <StackPanel x:Name="ErrorActionPanel" Visibility="Collapsed" Orientation="Horizontal" Margin="0,7,0,0">
+                    <Button Content="重试" MinHeight="30" Padding="12,4" Style="{StaticResource SecondaryButton}" Click="RetryFailedMessage_OnClick"/>
+                    <Button Content="上传诊断日志" MinHeight="30" Padding="12,4" Margin="8,0,0,0" Style="{StaticResource SecondaryButton}" Click="UploadDiagnosticLog_OnClick"/>
+                    <Button Content="查看详情" MinHeight="30" Padding="12,4" Margin="8,0,0,0" Style="{StaticResource LinkButton}" Click="ShowErrorDetails_OnClick"/>
+                  </StackPanel>
+                </StackPanel>
               </StackPanel>
               <Border x:Name="ChatComposer" Grid.Row="3" MaxWidth="960" MinHeight="104" HorizontalAlignment="Stretch" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="24" Margin="24,10,24,8" Padding="12,10">
                 <Grid>

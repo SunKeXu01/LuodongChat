@@ -24,6 +24,7 @@ import type { AdminRepository } from "./admin.js";
 import { ADMIN_HTML, ADMIN_JS } from "./admin-assets.js";
 import { AdminLoginGuard, type AdminLoginProtector } from "./admin-security.js";
 import { EnrollmentService } from "./self-service.js";
+import { MAX_DIAGNOSTIC_BYTES, type DiagnosticRepository } from "./diagnostics.js";
 import {
   LANDING_CSS as PRODUCT_LANDING_CSS,
   LANDING_JS as PRODUCT_LANDING_JS,
@@ -67,6 +68,27 @@ async function readMultipartFile(req: IncomingMessage): Promise<{ name: string; 
   const value = form.get("file");
   if (!value || typeof value === "string" || typeof value.arrayBuffer !== "function") throw new Error("attachment_file_required");
   return { name: value.name, mimeType: value.type, data: Buffer.from(await value.arrayBuffer()) };
+}
+
+async function readDiagnosticUpload(req: IncomingMessage): Promise<{
+  appVersion: string; platform: string; errorCode: string; manifest: Record<string, unknown>; data: Buffer;
+}> {
+  const contentType = req.headers["content-type"]?.toString() ?? "";
+  if (!contentType.toLowerCase().startsWith("multipart/form-data;")) throw new Error("diagnostic_multipart_required");
+  const body = await readBodyLimited(req, MAX_DIAGNOSTIC_BYTES + 256 * 1024);
+  const form = await new Response(new Uint8Array(body), { headers: { "content-type": contentType } }).formData();
+  const file = form.get("file");
+  if (!file || typeof file === "string" || typeof file.arrayBuffer !== "function") throw new Error("diagnostic_file_required");
+  const data = Buffer.from(await file.arrayBuffer());
+  if (data.length < 4 || data.length > MAX_DIAGNOSTIC_BYTES || data[0] !== 0x50 || data[1] !== 0x4b) throw new Error("diagnostic_invalid_package");
+  const value = (name: string, maximum: number) => {
+    const item = form.get(name); return typeof item === "string" ? item.trim().slice(0, maximum) : "";
+  };
+  let manifest: Record<string, unknown> = {};
+  try { const parsed: unknown = JSON.parse(value("manifest", 64_000)); if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) manifest = parsed as Record<string, unknown>; }
+  catch { throw new Error("diagnostic_invalid_manifest"); }
+  return { appVersion: value("appVersion", 40) || "unknown", platform: value("platform", 40) || "windows",
+    errorCode: value("errorCode", 80) || "MANUAL_DIAGNOSTIC", manifest, data };
 }
 
 function withResolvedAttachments(body: Buffer, attachments: ResolvedAttachment[]): Buffer {
@@ -198,6 +220,7 @@ export interface GatewayServerOptions {
   adminLoginProtector?: AdminLoginProtector;
   enrollmentService?: EnrollmentService;
   attachmentStore?: AttachmentStore;
+  diagnosticRepository?: DiagnosticRepository;
 }
 
 function withUpstreamModel(body: Buffer, model: string | undefined): Uint8Array<ArrayBuffer> {
@@ -274,6 +297,32 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
           attachment_empty: "不能上传空文件", attachment_multipart_required: "上传格式不正确", attachment_file_required: "没有找到上传文件",
         };
         return json(res, status, { error: { code, message: messages[code] ?? "附件上传失败" } });
+      }
+    }
+    if (req.url === "/v1/diagnostics" || req.url?.startsWith("/v1/diagnostics/")) {
+      res.setHeader("cache-control", "no-store");
+      const accessToken = extractBearerKey(req.headers.authorization);
+      const account = accessToken?.startsWith("usr_") && options.enrollmentService
+        ? await options.enrollmentService.authenticate(accessToken) : null;
+      if (!account) return json(res, 401, { error: { code: "login_required", message: "请先登录" } });
+      if (!options.diagnosticRepository) return json(res, 503, { error: { code: "diagnostics_unavailable", message: "诊断服务暂不可用" } });
+      try {
+        if (req.method === "POST" && req.url === "/v1/diagnostics") {
+          const upload = await readDiagnosticUpload(req);
+          return json(res, 201, await options.diagnosticRepository.create(account.id, upload));
+        }
+        if (req.method === "GET" && req.url === "/v1/diagnostics")
+          return json(res, 200, await options.diagnosticRepository.list(account.id));
+        const match = /^\/v1\/diagnostics\/(DG-[0-9]{8}-[A-Z0-9]{5})$/.exec(req.url ?? "");
+        if (req.method === "DELETE" && match) {
+          const deleted = await options.diagnosticRepository.delete(account.id, match[1]!);
+          return deleted ? json(res, 200, { status: "deleted" }) : json(res, 404, { error: { code: "diagnostic_not_found" } });
+        }
+        return json(res, 404, { error: { code: "not_found", message: "Route not found" } });
+      } catch (error) {
+        const code = error instanceof Error ? error.message : "diagnostic_upload_failed";
+        const status = code === "request_too_large" || code === "diagnostic_too_large" ? 413 : 400;
+        return json(res, status, { error: { code, message: status === 413 ? "诊断包不能超过 20 MB" : "诊断包无效，请重新生成" } });
       }
     }
     if (req.method === "GET" && req.url === "/assets/landing.js") {
@@ -558,6 +607,11 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
       }
       if (req.method === "GET" && req.url === "/admin/api/deployments") {
         return json(res, 200, await options.adminRepository!.listDeployments());
+      }
+      const diagnosticMatch = /^\/admin\/api\/diagnostics\/(DG-[0-9]{8}-[A-Z0-9]{5})$/.exec(req.url ?? "");
+      if (req.method === "GET" && diagnosticMatch && options.diagnosticRepository) {
+        const item = await options.diagnosticRepository.find(diagnosticMatch[1]!);
+        return item ? json(res, 200, item) : json(res, 404, { error: { code: "diagnostic_not_found" } });
       }
       const actorFingerprint = hashGatewayKey(adminKey).slice(0, 16);
       try {
@@ -857,8 +911,13 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
     attachmentStore.cleanup().catch((error) => console.warn(JSON.stringify({ event: "attachment_cleanup_failed", error: error instanceof Error ? error.name : "unknown" })));
   }, 5 * 60 * 1000);
   attachmentCleanupTimer.unref();
+  const diagnosticCleanupTimer = setInterval(() => {
+    options.diagnosticRepository?.purgeExpired().catch((error) => console.warn(JSON.stringify({ event: "diagnostic_cleanup_failed", error: error instanceof Error ? error.name : "unknown" })));
+  }, 60 * 60 * 1000);
+  diagnosticCleanupTimer.unref();
   server.once("close", () => {
     clearInterval(attachmentCleanupTimer);
+    clearInterval(diagnosticCleanupTimer);
     attachmentStore.close().catch(() => undefined);
   });
   return server;

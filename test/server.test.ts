@@ -10,6 +10,7 @@ import { createGatewayServer } from "../src/server.js";
 import { InMemoryRequestLedger } from "../src/ledger.js";
 import type { EnrollmentService } from "../src/self-service.js";
 import { AttachmentStore } from "../src/attachments.js";
+import type { DiagnosticRecord, DiagnosticRepository, DiagnosticUploadInput } from "../src/diagnostics.js";
 
 async function listen(server: ReturnType<typeof createServer>): Promise<number> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -17,6 +18,32 @@ async function listen(server: ReturnType<typeof createServer>): Promise<number> 
   if (!address || typeof address === "string") throw new Error("missing server address");
   return address.port;
 }
+
+test("uploads, lists and deletes user-approved diagnostic packages", async (t) => {
+  const records: DiagnosticRecord[] = [];
+  const repository: DiagnosticRepository = {
+    create: async (_userId: string, input: DiagnosticUploadInput) => {
+      const item = { id: "DG-20260720-A8K3Q", appVersion: input.appVersion, platform: input.platform,
+        errorCode: input.errorCode, packageSize: input.data.length, status: "available",
+        createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 7 * 86400_000).toISOString() };
+      records.push(item); return item;
+    },
+    list: async () => records,
+    delete: async (_userId, id) => records.splice(records.findIndex(item => item.id === id), 1).length > 0,
+    find: async () => null,
+    purgeExpired: async () => 0,
+  };
+  const enrollmentService = { authenticate: async () => ({ id: "user-1" }) } as unknown as EnrollmentService;
+  const config: GatewayConfig = { port:0, upstreamBaseUrl:"https://upstream.invalid", upstreamApiKey:"unused", upstreamApiKeys:["unused"],
+    upstreamResponsesPath:"/responses", gatewayKeyHashes:new Set(), requestsPerMinute:10, maxConcurrentRequests:2, upstreamTimeoutMs:5000 };
+  const gateway=createGatewayServer(config,{enrollmentService,diagnosticRepository:repository}); const port=await listen(gateway); t.after(()=>gateway.close());
+  const form=new FormData(); form.set("file",new Blob([new Uint8Array([0x50,0x4b,3,4,1])],{type:"application/zip"}),"diagnostic.zip");
+  form.set("appVersion","2.1.0");form.set("platform","windows");form.set("errorCode","UPSTREAM_REQUEST_FAILED");form.set("manifest",JSON.stringify({conversationContent:false}));
+  const uploaded=await fetch(`http://127.0.0.1:${port}/v1/diagnostics`,{method:"POST",headers:{authorization:"Bearer usr_test"},body:form});
+  assert.equal(uploaded.status,201);assert.equal((await uploaded.json() as {id:string}).id,"DG-20260720-A8K3Q");
+  const listed=await fetch(`http://127.0.0.1:${port}/v1/diagnostics`,{headers:{authorization:"Bearer usr_test"}}); assert.equal((await listed.json() as unknown[]).length,1);
+  const deleted=await fetch(`http://127.0.0.1:${port}/v1/diagnostics/DG-20260720-A8K3Q`,{method:"DELETE",headers:{authorization:"Bearer usr_test"}});assert.equal(deleted.status,200);
+});
 
 test("serves the public client update manifest and fixed release assets", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "connector-release-"));

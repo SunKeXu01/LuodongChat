@@ -1,0 +1,41 @@
+<Window x:Class="ChatGPTConnector.App.DiagnosticDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="诊断日志" Width="720" Height="650" MinWidth="640" MinHeight="560"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Background="{DynamicResource PageBackgroundBrush}">
+  <Grid Margin="28"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <TextBlock Text="上传诊断日志" FontSize="28" FontWeight="SemiBold"/>
+    <TextBlock Grid.Row="1" Margin="0,7,0,18" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"
+               Text="诊断日志用于排查客户端错误。上传前会自动脱敏，服务器保存 7 天后删除。"/>
+    <Border Grid.Row="2" Padding="16" CornerRadius="12" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Background="{DynamicResource SurfaceBrush}">
+      <StackPanel>
+        <TextBlock Text="将包含" FontWeight="SemiBold"/><TextBlock Margin="0,6,0,10" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"
+          Text="✓ 应用版本、Windows 环境、错误码和运行日志&#x0a;✓ 请求与工具调用的状态元数据"/>
+        <TextBlock Text="不会包含" FontWeight="SemiBold"/><TextBlock Margin="0,6,0,12" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"
+          Text="✓ 对话或文件正文　✓ API Key、Token、密码　✓ 邮箱、IP 和绝对路径"/>
+        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="220"/><ColumnDefinition/></Grid.ColumnDefinitions>
+          <TextBlock Text="诊断范围" VerticalAlignment="Center" Margin="0,0,12,0"/>
+          <ComboBox x:Name="RangeInput" Grid.Column="1" SelectedIndex="0"><ComboBoxItem Content="本次错误相关日志（推荐）"/><ComboBoxItem Content="最近 30 分钟"/><ComboBoxItem Content="最近 24 小时"/></ComboBox>
+          <Button Grid.Column="2" Content="查看将要上传的内容" HorizontalAlignment="Right" Style="{StaticResource SecondaryButton}" Click="Preview_OnClick"/>
+        </Grid>
+      </StackPanel>
+    </Border>
+    <Grid Grid.Row="3" Margin="0,16,0,12"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+      <TextBlock Text="历史上传记录" FontSize="17" FontWeight="SemiBold"/>
+      <ListBox Grid.Row="1" x:Name="HistoryList" Margin="0,10,0,0" BorderThickness="0" Background="Transparent" HorizontalContentAlignment="Stretch">
+        <ListBox.ItemTemplate><DataTemplate><Border Padding="12" Margin="0,0,0,8" CornerRadius="10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Background="{DynamicResource SurfaceBrush}">
+          <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <StackPanel><TextBlock Text="{Binding Id}" FontWeight="SemiBold"/><TextBlock Text="{Binding Detail}" Margin="0,4,0,0" Foreground="{DynamicResource MutedBrush}" FontSize="12"/></StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal"><Button Content="复制编号" Tag="{Binding Id}" Style="{StaticResource SecondaryButton}" Click="CopyId_OnClick"/><Button Content="立即删除" Tag="{Binding Id}" Margin="8,0,0,0" Style="{StaticResource SecondaryButton}" Click="Delete_OnClick"/></StackPanel>
+          </Grid>
+        </Border></DataTemplate></ListBox.ItemTemplate>
+      </ListBox>
+    </Grid>
+    <Grid Grid.Row="4"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <StackPanel><TextBlock x:Name="StatusText" Foreground="{DynamicResource MutedBrush}"/><ProgressBar x:Name="UploadProgress" Height="4" Margin="0,6,20,0" Minimum="0" Maximum="100" Visibility="Collapsed"/></StackPanel>
+      <Button Grid.Column="1" Content="打开本地日志目录" Style="{StaticResource SecondaryButton}" Margin="0,0,10,0" Click="OpenLogs_OnClick"/>
+      <Button Grid.Column="2" Content="清理本地日志" Style="{StaticResource SecondaryButton}" Margin="0,0,10,0" Click="ClearLogs_OnClick"/>
+      <Button Grid.Column="3" x:Name="UploadButton" Content="同意并上传" Click="Upload_OnClick"/>
+    </Grid>
+  </Grid>
+</Window>
