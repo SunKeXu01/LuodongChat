@@ -67,6 +67,9 @@ public partial class ExtensionSettingsDialog : Window
         McpNotice.Text = "服务器已保存。点击“重新连接”测试连接与工具发现。";
     }
 
+    private void DiscoverMcpButton_OnClick(object sender, RoutedEventArgs e) =>
+        new McpDiscoveryDialog { Owner = this }.ShowDialog();
+
     private void EditMcpButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: McpRow row }) return;

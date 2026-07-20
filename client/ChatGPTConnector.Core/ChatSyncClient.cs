@@ -1,4 +1,5 @@
 using System.Net;
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
@@ -14,6 +15,9 @@ public sealed record LocalChatAttachment(string RelativePath, string Name, strin
 public sealed record ChatCitation(string Title, string Url);
 public sealed record GeneratedChatImage(string RelativePath, string MediaType);
 public sealed record GeneratedImageData(string Base64, string MediaType);
+public enum ChatToolExecutionStatus { Running, Completed, Failed }
+public sealed record ChatToolExecutionEvent(string CallId, string ToolName, ChatToolExecutionStatus Status, TimeSpan Elapsed, string? Detail = null);
+public sealed record ChatToolExecutionLimits(int MaxRounds = 12, int MaxCalls = 24, int MaxOutputCharacters = 80000, int ToolTimeoutSeconds = 120);
 public sealed record ChatStreamResult(
     string Text, IReadOnlyList<ChatCitation> Citations, IReadOnlyList<GeneratedImageData> Images,
     bool WebSearchUnavailable = false, bool WebSearchPerformed = false);
@@ -29,19 +33,20 @@ public sealed class ChatSyncClient(HttpClient http)
         IProgress<string>? progress = null, CancellationToken cancellationToken = default,
         bool enableWebSearch = false, bool enableImageGeneration = false, IReadOnlyList<string>? attachmentIds = null,
         bool hasReferenceImages = false, IReadOnlyList<object>? localTools = null,
-        Func<LocalToolCall, CancellationToken, Task<string>>? executeLocalTool = null)
+        Func<LocalToolCall, CancellationToken, Task<string>>? executeLocalTool = null,
+        IProgress<ChatToolExecutionEvent>? toolProgress = null, ChatToolExecutionLimits? toolLimits = null)
     {
         try
         {
             return await StreamWithToolsAsync(gateway, token, messages, progress, cancellationToken, enableWebSearch,
-                enableImageGeneration, attachmentIds, hasReferenceImages, localTools, executeLocalTool);
+                enableImageGeneration, attachmentIds, hasReferenceImages, localTools, executeLocalTool, toolProgress, toolLimits);
         }
         catch (ResponseRequestException error) when (enableWebSearch && error.StatusCode is
             HttpStatusCode.BadRequest or HttpStatusCode.NotFound or HttpStatusCode.UnprocessableEntity or
             HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout)
         {
             var fallback = await StreamWithToolsAsync(gateway, token, messages, progress, cancellationToken, false,
-                enableImageGeneration, attachmentIds, hasReferenceImages, localTools, executeLocalTool);
+                enableImageGeneration, attachmentIds, hasReferenceImages, localTools, executeLocalTool, toolProgress, toolLimits);
             return fallback with { WebSearchUnavailable = true };
         }
     }
@@ -50,8 +55,11 @@ public sealed class ChatSyncClient(HttpClient http)
         Uri gateway, string token, IReadOnlyList<SyncedChatMessage> messages,
         IProgress<string>? progress, CancellationToken cancellationToken, bool enableWebSearch, bool enableImageGeneration,
         IReadOnlyList<string>? attachmentIds, bool hasReferenceImages, IReadOnlyList<object>? localTools,
-        Func<LocalToolCall, CancellationToken, Task<string>>? executeLocalTool)
+        Func<LocalToolCall, CancellationToken, Task<string>>? executeLocalTool,
+        IProgress<ChatToolExecutionEvent>? toolProgress, ChatToolExecutionLimits? toolLimits)
     {
+        var limits = toolLimits ?? new ChatToolExecutionLimits();
+        var callCount = 0;
         var input = new List<object>(messages.Select(message => (object)new { role = message.Role, content = message.Content }));
         var text = new StringBuilder();
         var citations = new Dictionary<string, ChatCitation>(StringComparer.OrdinalIgnoreCase);
@@ -59,7 +67,7 @@ public sealed class ChatSyncClient(HttpClient http)
         var webSearchPerformed = false;
         // Command sessions may need an initial exec plus several output polls. Keep the loop
         // bounded, but allow enough turns for a normal build/test workflow to finish.
-        for (var round = 0; round < 12; round++)
+        for (var round = 0; round < limits.MaxRounds; round++)
         {
             var pass = await StreamOnceAsync(gateway, token, input, progress, cancellationToken, enableWebSearch,
                 enableImageGeneration, round == 0 ? attachmentIds : null, hasReferenceImages, localTools);
@@ -74,7 +82,28 @@ public sealed class ChatSyncClient(HttpClient http)
             foreach (var call in pass.ToolCalls)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var output = await executeLocalTool(call, cancellationToken);
+                if (++callCount > limits.MaxCalls)
+                    throw new InvalidOperationException($"本轮工具调用已达到安全上限（{limits.MaxCalls} 次）。请缩小任务范围后重试。");
+                var startedAt = Stopwatch.GetTimestamp();
+                toolProgress?.Report(new(call.CallId, call.Name, ChatToolExecutionStatus.Running, TimeSpan.Zero));
+                string output;
+                try
+                {
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    timeout.CancelAfter(TimeSpan.FromSeconds(limits.ToolTimeoutSeconds));
+                    output = await executeLocalTool(call, timeout.Token);
+                    if (output.Length > limits.MaxOutputCharacters)
+                        output = output[..limits.MaxOutputCharacters] + $"\n\n[工具输出已截断：单次最多 {limits.MaxOutputCharacters} 个字符]";
+                    toolProgress?.Report(new(call.CallId, call.Name, ChatToolExecutionStatus.Completed,
+                        Stopwatch.GetElapsedTime(startedAt), "调用成功"));
+                }
+                catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                {
+                    var detail = error is OperationCanceledException ? $"调用超时（{limits.ToolTimeoutSeconds} 秒）" : error.Message;
+                    toolProgress?.Report(new(call.CallId, call.Name, ChatToolExecutionStatus.Failed,
+                        Stopwatch.GetElapsedTime(startedAt), detail));
+                    output = JsonSerializer.Serialize(new { ok = false, error = detail });
+                }
                 input.Add(new { type = "function_call_output", call_id = call.CallId, output });
             }
         }

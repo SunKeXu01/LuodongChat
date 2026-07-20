@@ -8,6 +8,147 @@ using ModelContextProtocol.Protocol;
 namespace ChatGPTConnector.Core;
 
 public enum McpTransportKind { Stdio, Http }
+public enum McpToolMode { Off, Auto }
+public enum McpToolRisk { PublicRead, SensitiveRead, Write, ExternalAction, Dangerous }
+
+public sealed record McpRuntimeSettings(McpToolMode ToolMode = McpToolMode.Auto);
+
+public sealed class McpRuntimeSettingsStore(string path)
+{
+    public static McpRuntimeSettingsStore ForApplicationDirectory() =>
+        new(Path.Combine(ApplicationDirectories.Data, "mcp-runtime.json"));
+
+    public McpRuntimeSettings Load()
+    {
+        try
+        {
+            return File.Exists(path)
+                ? JsonSerializer.Deserialize<McpRuntimeSettings>(File.ReadAllBytes(path), JsonOptions) ?? new()
+                : new();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return new();
+        }
+    }
+
+    public void Save(McpRuntimeSettings settings)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temp = path + ".tmp";
+        File.WriteAllBytes(temp, JsonSerializer.SerializeToUtf8Bytes(settings, JsonOptions));
+        File.Move(temp, path, true);
+    }
+
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+}
+
+public static class McpToolRiskClassifier
+{
+    private static readonly string[] DangerousWords = ["delete", "remove", "drop", "destroy", "erase", "format", "payment", "purchase", "transfer", "删除", "销毁", "付款", "转账"];
+    private static readonly string[] ExternalActionWords = ["send", "publish", "post", "submit", "create_issue", "merge", "deploy", "message", "email", "发送", "发布", "提交", "部署"];
+    private static readonly string[] WriteWords = ["write", "update", "edit", "modify", "create", "insert", "upload", "save", "set_", "写入", "修改", "创建", "上传", "保存"];
+    private static readonly string[] SensitiveWords = ["private", "secret", "credential", "token", "account", "profile", "contact", "mail", "个人", "私有", "凭据", "密钥", "账户", "联系人"];
+    private static readonly string[] PublicReadWords = ["get", "list", "search", "fetch", "query", "lookup", "read", "weather", "time", "status", "搜索", "查询", "获取", "天气", "时间", "状态"];
+
+    public static McpToolRisk Classify(McpToolDescriptor descriptor)
+    {
+        var text = $"{descriptor.OriginalName} {descriptor.Description}".ToLowerInvariant();
+        if (ContainsAny(text, DangerousWords)) return McpToolRisk.Dangerous;
+        if (ContainsAny(text, ExternalActionWords)) return McpToolRisk.ExternalAction;
+        if (ContainsAny(text, WriteWords)) return McpToolRisk.Write;
+        if (ContainsAny(text, SensitiveWords)) return McpToolRisk.SensitiveRead;
+        return ContainsAny(text, PublicReadWords) ? McpToolRisk.PublicRead : McpToolRisk.SensitiveRead;
+    }
+
+    public static string Label(McpToolRisk risk) => risk switch
+    {
+        McpToolRisk.PublicRead => "公开只读查询",
+        McpToolRisk.SensitiveRead => "可能读取敏感数据",
+        McpToolRisk.Write => "可能修改数据",
+        McpToolRisk.ExternalAction => "可能执行外部操作",
+        _ => "高风险操作",
+    };
+
+    private static bool ContainsAny(string text, IEnumerable<string> values) =>
+        values.Any(value => text.Contains(value, StringComparison.OrdinalIgnoreCase));
+}
+
+public sealed record McpDiscoverySource(string Name, string Url, string Kind, string Description);
+
+public static class McpDiscoveryCatalog
+{
+    public static IReadOnlyList<McpDiscoverySource> Sources { get; } =
+    [
+        new("MCP Registry", "https://registry.modelcontextprotocol.io/", "官方 Registry", "优先查找已发布的 MCP 服务器与版本元数据。"),
+        new("MCP Reference Servers", "https://github.com/modelcontextprotocol/servers", "官方参考实现", "用于学习协议和常见能力，不等同于生产级安全审计。"),
+        new("MCPMarket", "https://mcpmarket.com/zh/search", "第三方目录", "按分类和关键词发现社区 MCP。安装前需要核对发布者、源码和权限。"),
+        new("MCP Server Hub", "https://mcpserverhub.com/servers", "第三方目录", "发现社区 MCP Servers 与工具。收录不代表泺栋 Chat 或 MCP 官方审核。"),
+    ];
+}
+
+public static class McpConfigurationProposalParser
+{
+    private static readonly Regex AddIntent = new(@"(?:添加|安装|连接|配置)\s*(?:这个|以下)?\s*MCP", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex HttpUrl = new("https?://[^\\s\\\"'<>]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    public static bool TryParse(string text, out McpServerConfiguration? configuration)
+    {
+        configuration = null;
+        if (string.IsNullOrWhiteSpace(text) || !AddIntent.IsMatch(text)) return false;
+        var jsonStart = text.IndexOf('{');
+        var jsonEnd = text.LastIndexOf('}');
+        if (jsonStart >= 0 && jsonEnd > jsonStart)
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(text[jsonStart..(jsonEnd + 1)]);
+                var root = document.RootElement;
+                var name = "MCP 服务";
+                if (root.TryGetProperty("mcpServers", out var servers) && servers.ValueKind == JsonValueKind.Object)
+                {
+                    var first = servers.EnumerateObject().FirstOrDefault();
+                    if (first.Value.ValueKind == JsonValueKind.Undefined) return false;
+                    name = first.Name;
+                    root = first.Value;
+                }
+                configuration = ParseObject(root, name);
+                if (configuration is not null) return true;
+            }
+            catch (JsonException) { }
+        }
+        var match = HttpUrl.Match(text);
+        if (!match.Success || !Uri.TryCreate(match.Value.TrimEnd('.', '。', ',', '，'), UriKind.Absolute, out var uri)) return false;
+        configuration = new(Guid.NewGuid().ToString("N")[..12], uri.Host, McpTransportKind.Http, Url: uri.AbsoluteUri);
+        return true;
+    }
+
+    private static McpServerConfiguration? ParseObject(JsonElement root, string name)
+    {
+        if (root.ValueKind != JsonValueKind.Object) return null;
+        if (root.TryGetProperty("url", out var url) && url.GetString() is { Length: > 0 } address
+            && Uri.TryCreate(address, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
+            return new(Guid.NewGuid().ToString("N")[..12], name, McpTransportKind.Http, Url: uri.AbsoluteUri,
+                Headers: ReadStringMap(root, "headers"));
+        if (!root.TryGetProperty("command", out var commandElement) || commandElement.GetString() is not { Length: > 0 } command) return null;
+        var arguments = root.TryGetProperty("args", out var args) && args.ValueKind == JsonValueKind.Array
+            ? args.EnumerateArray().Select(item => item.GetString()).Where(item => item is not null).Cast<string>().ToArray() : [];
+        if (OperatingSystem.IsWindows() && command.Equals("npx", StringComparison.OrdinalIgnoreCase))
+        {
+            arguments = ["/c", "npx", .. arguments];
+            command = "cmd.exe";
+        }
+        return new(Guid.NewGuid().ToString("N")[..12], name, McpTransportKind.Stdio, Command: command,
+            Arguments: arguments, Environment: ReadStringMap(root, "env"));
+    }
+
+    private static IReadOnlyDictionary<string, string>? ReadStringMap(JsonElement root, string property)
+    {
+        if (!root.TryGetProperty(property, out var map) || map.ValueKind != JsonValueKind.Object) return null;
+        return map.EnumerateObject().Where(item => item.Value.ValueKind == JsonValueKind.String)
+            .ToDictionary(item => item.Name, item => item.Value.GetString() ?? "", StringComparer.OrdinalIgnoreCase);
+    }
+}
 
 public sealed record McpServerConfiguration(
     string Id,

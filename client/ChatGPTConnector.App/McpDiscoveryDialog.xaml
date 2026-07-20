@@ -1,0 +1,44 @@
+<Window x:Class="ChatGPTConnector.App.McpDiscoveryDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="发现 MCP" Width="760" Height="610" MinWidth="680" MinHeight="540"
+        Icon="/LuodongChat;component/Assets/AppIcon.png" WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False" Background="{DynamicResource PageBackgroundBrush}" Foreground="{DynamicResource TextBrush}">
+  <Grid Margin="30,26,30,24">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <StackPanel>
+      <TextBlock Text="发现 MCP" FontSize="29" FontWeight="SemiBold"/>
+      <TextBlock Text="从官方 Registry、参考实现和社区目录查找能力。第三方目录收录不代表安全审核，添加前请核对发布者、源码、命令和权限。"
+                 Margin="0,7,0,18" FontSize="14" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
+    </StackPanel>
+    <Border Grid.Row="1" Padding="14,11" CornerRadius="10" Background="{DynamicResource SecondarySurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+      <TextBlock Text="推荐顺序：官方 Registry → 官方参考实现 → MCPMarket / MCP Server Hub。安装和启用始终需要用户确认。"
+                 Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
+    </Border>
+    <ScrollViewer Grid.Row="2" Margin="0,16,0,0" VerticalScrollBarVisibility="Auto">
+      <ItemsControl x:Name="SourceList">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate>
+            <Border Margin="0,0,0,12" Padding="18,15" CornerRadius="12" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <StackPanel Margin="0,0,18,0">
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold"/>
+                    <Border Margin="9,0,0,0" Padding="8,3" CornerRadius="10" Background="{DynamicResource SecondarySurfaceBrush}">
+                      <TextBlock Text="{Binding Kind}" FontSize="11.5" Foreground="{DynamicResource LinkBrush}"/>
+                    </Border>
+                  </StackPanel>
+                  <TextBlock Text="{Binding Description}" Margin="0,6,0,0" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
+                  <TextBlock Text="{Binding Url}" Margin="0,6,0,0" Foreground="{DynamicResource LinkBrush}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Url}"/>
+                </StackPanel>
+                <Button Grid.Column="1" Content="打开" MinWidth="74" Height="38" Padding="14,0" VerticalAlignment="Center" Tag="{Binding Url}" Click="OpenSourceButton_OnClick"/>
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </ScrollViewer>
+    <Button Grid.Row="3" Content="关闭" MinWidth="88" Height="40" Margin="0,14,0,0" HorizontalAlignment="Right" Click="CloseButton_OnClick"/>
+  </Grid>
+</Window>

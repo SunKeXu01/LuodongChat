@@ -40,6 +40,7 @@ public partial class MainWindow : Window
     private readonly WorkspaceAccessSettingsStore _workspaceAccessStore = WorkspaceAccessSettingsStore.ForApplicationDirectory();
     private readonly WorkspaceAuditStore _workspaceAuditStore = WorkspaceAuditStore.ForApplicationDirectory();
     private readonly McpConfigurationStore _mcpConfigurationStore = McpConfigurationStore.ForApplicationDirectory();
+    private readonly McpRuntimeSettingsStore _mcpRuntimeSettingsStore = McpRuntimeSettingsStore.ForApplicationDirectory();
     private readonly McpClientManager _mcpClients;
     private readonly SkillService _skills = SkillService.ForApplicationDirectory();
     private readonly ObservableCollection<ChatDisplayMessage> _chatMessages = [];
@@ -79,6 +80,7 @@ public partial class MainWindow : Window
     private readonly HashSet<string> _alwaysAllowedWorkspaceCommands = new(StringComparer.Ordinal);
     private readonly HashSet<string> _sessionApprovedMcpTools = new(StringComparer.Ordinal);
     private bool _webSearchEnabled = true;
+    private McpToolMode _mcpToolMode;
     private readonly AttachmentComposerController _attachments;
     private CancellationTokenSource? _questionHighlightCancellation;
     private string _savedNickname = "";
@@ -109,12 +111,14 @@ public partial class MainWindow : Window
     internal MainWindow(bool skipStartupChecks, AppTheme initialTheme = AppTheme.Light)
     {
         _theme = initialTheme;
+        _mcpToolMode = _mcpRuntimeSettingsStore.Load().ToolMode;
         _mcpClients = new McpClientManager(_mcpConfigurationStore);
         var accessSettings = _workspaceAccessStore.Load();
         _workspaceAccessMode = accessSettings.Mode;
         _workspaceCustomPermissions = accessSettings.Custom;
         _alwaysAllowedWorkspaceCommands.UnionWith(accessSettings.AlwaysAllowedCommandHashes ?? []);
         InitializeComponent();
+        UpdateMcpToolModeUi();
         ApplySidebarState(_sidebarPreferenceExpanded, animate: false, persist: false);
         _attachments = new AttachmentComposerController(_attachmentClient, GatewayUri, () => _session?.AccessToken);
         AttachmentPreviewItems.ItemsSource = _attachments.Items;
@@ -1458,6 +1462,29 @@ public partial class MainWindow : Window
         var text = ChatInput.Text.Trim();
         var attachmentSnapshot = _attachments.Snapshot();
         if (text.Length == 0 && attachmentSnapshot.Count == 0) return;
+        if (attachmentSnapshot.Count == 0 && McpConfigurationProposalParser.TryParse(text, out var mcpProposal)
+            && mcpProposal is not null)
+        {
+            var endpoint = mcpProposal.Transport == McpTransportKind.Http ? mcpProposal.Url
+                : string.Join(" ", new[] { mcpProposal.Command }.Concat(mcpProposal.Arguments ?? []).Where(value => !string.IsNullOrWhiteSpace(value)));
+            var confirm = MessageBox.Show(this,
+                $"发现一个 MCP 服务\n\n名称：{mcpProposal.Name}\n连接类型：{(mcpProposal.Transport == McpTransportKind.Http ? "Streamable HTTP" : "本地 stdio")}\n地址或命令：{endpoint}\n\n该服务由第三方提供，可能访问你授权的数据。本步骤只保存配置；风险操作仍会单独确认。\n\n是否检查配置并继续添加？",
+                "添加 MCP", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (confirm != MessageBoxResult.Yes) return;
+            var editor = new McpServerEditorDialog(mcpProposal) { Owner = this };
+            if (editor.ShowDialog() != true || editor.Result is null) return;
+            var current = _mcpConfigurationStore.Load();
+            _mcpConfigurationStore.Save(new([.. current.Servers.Where(server => server.Id != editor.Result.Id), editor.Result]));
+            ChatInput.Clear();
+            ShowChatToast($"{editor.Result.Name} 已添加，正在连接并发现工具…");
+            await _mcpClients.ReloadAsync();
+            UpdateMcpToolModeUi();
+            var status = _mcpClients.Statuses.FirstOrDefault(item => item.Id == editor.Result.Id);
+            ShowChatToast(status?.Connected == true
+                ? $"{editor.Result.Name} 已连接 · {status.ToolCount} 个工具，以后由 AI 自动按需调用。"
+                : $"{editor.Result.Name} 已保存，但连接失败：{status?.Error ?? "请在 MCP 管理中测试连接"}", status?.Connected != true);
+            return;
+        }
         if (_selectedProjectPath is null && attachmentSnapshot.Count == 0 && RequiresProjectSpace(text))
         {
             ProjectRequirementNotice.Visibility = Visibility.Visible;
@@ -1573,11 +1600,13 @@ public partial class MainWindow : Window
                 var hasReferenceImages = attachmentSnapshot.Any(item => item.IsImage);
                 if (wantsImage) SetRunUiText(conversationId, notice: hasReferenceImages ? "正在参考上传图片生成，请稍候…" : "正在生成图片，请稍候…");
                 await using var workspaceTools = projectPath is null ? null : new WorkspaceFileTools(projectPath);
-                var mcpTools = await _mcpClients.GetToolDefinitionsAsync(cancellationToken);
+                var mcpTools = _mcpToolMode == McpToolMode.Auto
+                    ? await _mcpClients.GetToolDefinitionsAsync(cancellationToken)
+                    : [];
                 IReadOnlyList<object> availableTools =
                 [
                     .. SkillService.ToolDefinitions,
-                    .. McpClientManager.ProtocolToolDefinitions,
+                    .. (_mcpToolMode == McpToolMode.Auto ? McpClientManager.ProtocolToolDefinitions : []),
                     .. mcpTools,
                     .. (workspaceTools is null ? Array.Empty<object>() : WorkspaceFileTools.ToolDefinitions),
                 ];
@@ -1587,7 +1616,8 @@ public partial class MainWindow : Window
                     attachmentIds: attachmentSnapshot.Select(item => item.ServerFileId!).ToArray(),
                     hasReferenceImages: hasReferenceImages,
                     localTools: availableTools,
-                    executeLocalTool: CreateCombinedToolExecutor(projectPath, workspaceTools));
+                    executeLocalTool: CreateCombinedToolExecutor(projectPath, workspaceTools),
+                    toolProgress: new Progress<ChatToolExecutionEvent>(toolEvent => run.AssistantDisplay.UpdateToolActivity(toolEvent)));
                 var storedImages = new List<GeneratedChatImage>();
                 foreach (var image in result.Images)
                     storedImages.Add(await _conversationStore.SaveGeneratedImageAsync(
@@ -1717,12 +1747,15 @@ public partial class MainWindow : Window
         var descriptor = _mcpClients.DescribeTool(call.Name);
         if (descriptor is null)
             return System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = "MCP 工具当前不可用。" });
+        var risk = McpToolRiskClassifier.Classify(descriptor);
         var approvalKey = $"{descriptor.ServerId}|{descriptor.OriginalName}";
-        if (!_sessionApprovedMcpTools.Contains(approvalKey))
+        // Clearly public, read-only queries may run automatically. Anything ambiguous,
+        // private, mutating or externally visible remains controlled by the permission engine.
+        if (risk != McpToolRisk.PublicRead && !_sessionApprovedMcpTools.Contains(approvalKey))
         {
             var approval = new WorkspaceToolApprovalDialog(
                 $"调用 MCP 工具：{descriptor.ServerName} / {descriptor.OriginalName}",
-                [$"第三方 MCP 服务器：{descriptor.ServerName}", "参数将在确认后发送给该服务器"],
+                [$"风险级别：{McpToolRiskClassifier.Label(risk)}", $"第三方 MCP 服务器：{descriptor.ServerName}", "参数将在确认后发送给该服务器"],
                 isCommand: false,
                 allowPersistentApproval: false) { Owner = this };
             if (approval.ShowDialog() != true || approval.Choice == WorkspaceApprovalChoice.Reject)
@@ -1733,6 +1766,27 @@ public partial class MainWindow : Window
         var result = await _mcpClients.CallToolAsync(call, cancellationToken);
         ChatNotice.Text = $"MCP 工具 {descriptor.OriginalName} 已返回，GPT 正在继续回答…";
         return result;
+    }
+
+    private void McpToolModeButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        _mcpToolMode = _mcpToolMode == McpToolMode.Auto ? McpToolMode.Off : McpToolMode.Auto;
+        _mcpRuntimeSettingsStore.Save(new(_mcpToolMode));
+        UpdateMcpToolModeUi();
+        ShowChatToast(_mcpToolMode == McpToolMode.Auto
+            ? "工具已设为自动：AI 会选择已启用的 MCP，风险操作仍需确认。"
+            : "MCP 工具已关闭。Skills 与项目空间工具不受影响。");
+    }
+
+    private void UpdateMcpToolModeUi()
+    {
+        if (McpToolModeLabel is null || McpToolModeButton is null) return;
+        McpToolModeLabel.Text = _mcpToolMode == McpToolMode.Auto ? "工具自动" : "工具关闭";
+        var connected = _mcpClients?.Statuses.Count(status => status.Connected) ?? 0;
+        var tools = _mcpClients?.Statuses.Sum(status => status.ToolCount) ?? 0;
+        McpToolModeButton.ToolTip = _mcpToolMode == McpToolMode.Auto
+            ? $"AI 自动选择工具；高风险操作仍需确认。已连接 {connected} 个 MCP，共 {tools} 个工具。点击关闭。"
+            : "当前不向 AI 提供 MCP 工具。点击开启自动模式。";
     }
 
     private Func<LocalToolCall, CancellationToken, Task<string>> CreateWorkspaceToolExecutor(
@@ -2636,6 +2690,7 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
     private IReadOnlyList<ChatDisplayImage> _images = [];
     public IReadOnlyList<ChatDisplayImage> Images { get => _images; set { _images = value; PropertyChanged?.Invoke(this, new(nameof(Images))); PropertyChanged?.Invoke(this, new(nameof(BubbleWidth))); } }
     private IReadOnlyList<ChatDisplayAttachment> _attachments = [];
+    public ObservableCollection<ChatToolActivity> ToolActivities { get; } = [];
     public IReadOnlyList<ChatDisplayAttachment> Attachments { get => _attachments; set { _attachments = value; PropertyChanged?.Invoke(this, new(nameof(Attachments))); PropertyChanged?.Invoke(this, new(nameof(BubbleWidth))); } }
     public SyncedChatMessage Source
     {
@@ -2653,6 +2708,26 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
         }
     }
     public string Content { get => _content; set { if (_content == value) return; _content = value; PropertyChanged?.Invoke(this, new(nameof(Content))); PropertyChanged?.Invoke(this, new(nameof(BubbleWidth))); } }
+    public void UpdateToolActivity(ChatToolExecutionEvent toolEvent)
+    {
+        var activity = ToolActivities.FirstOrDefault(item => item.CallId == toolEvent.CallId);
+        if (activity is null)
+        {
+            activity = new ChatToolActivity(toolEvent.CallId, FriendlyToolName(toolEvent.ToolName));
+            ToolActivities.Add(activity);
+        }
+        activity.Apply(toolEvent);
+    }
+
+    private static string FriendlyToolName(string value)
+    {
+        if (value.StartsWith("mcp__", StringComparison.Ordinal))
+        {
+            var parts = value.Split("__", 3, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 3) return $"{parts[1]} · {parts[2].Replace('_', ' ')}";
+        }
+        return value.Replace('_', ' ');
+    }
     private ChatDisplayMessage(SyncedChatMessage source) { _source = source; _content = source.Content; }
     public static ChatDisplayMessage From(SyncedChatMessage source, IReadOnlyList<ChatDisplayImage>? images = null, IReadOnlyList<ChatDisplayAttachment>? attachments = null) =>
         new(source) { Sender = source.Role == "user" ? "我" : "GPT-5.6", Images = images ?? [], Attachments = attachments ?? [] };
@@ -2668,6 +2743,34 @@ public sealed class ChatDisplayMessage : System.ComponentModel.INotifyPropertyCh
         // is arranged outside the visible message area and then clipped by the chat view.
         return Math.Min(isUser ? 560 : 768, Math.Max(isUser ? 80 : 58, natural));
     }
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+}
+
+public sealed class ChatToolActivity(string callId, string name) : System.ComponentModel.INotifyPropertyChanged
+{
+    private string _statusText = "正在调用…";
+    private bool _isRunning = true;
+    private bool _failed;
+    public string CallId { get; } = callId;
+    public string Name { get; } = name;
+    public string StatusText { get => _statusText; private set { _statusText = value; Changed(nameof(StatusText)); } }
+    public bool IsRunning { get => _isRunning; private set { _isRunning = value; Changed(nameof(IsRunning)); Changed(nameof(RunningVisibility)); } }
+    public bool Failed { get => _failed; private set { _failed = value; Changed(nameof(Failed)); } }
+    public Visibility RunningVisibility => IsRunning ? Visibility.Visible : Visibility.Collapsed;
+
+    public void Apply(ChatToolExecutionEvent value)
+    {
+        IsRunning = value.Status == ChatToolExecutionStatus.Running;
+        Failed = value.Status == ChatToolExecutionStatus.Failed;
+        StatusText = value.Status switch
+        {
+            ChatToolExecutionStatus.Running => "正在调用…",
+            ChatToolExecutionStatus.Completed => $"调用成功 · {Math.Max(0.1, value.Elapsed.TotalSeconds):0.0} 秒",
+            _ => $"调用失败 · {value.Detail}",
+        };
+    }
+
+    private void Changed(string property) => PropertyChanged?.Invoke(this, new(property));
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
 }
 

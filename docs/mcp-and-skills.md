@@ -16,14 +16,27 @@
 - Prompts：模型可列出参数，并在用户确认后获取生成的消息。
 - 取消：用户停止回答时，取消令牌会传递到 MCP 请求。
 
+对话输入区只提供两种工具状态：`工具自动`（默认）和 `工具关闭`。自动模式会把已启用且健康的 MCP 工具交给模型自主选择；关闭后不向模型提供 MCP Tools、Resources 或 Prompts，项目空间工具与 Skills 不受影响。单轮调用设置了轮次、总次数、单次超时和返回长度上限，避免工具无限循环或返回内容失控。
+
 服务器配置保存在安装目录的 `data/mcp-servers.dat`。Windows 下配置整体使用当前 Windows 用户的 DPAPI 加密，其他 Windows 账户无法直接解密。配置不会上传到泺栋 Chat 服务器。
 
 安全规则：
 
 - 只添加可信 MCP 服务器。stdio 服务器是本机程序，HTTP 服务器是第三方网络服务。
-- 每个第三方 MCP Tool 首次调用都会显示服务器和工具名称，可选择仅本次允许或本次会话允许。
+- 明确属于天气、公开搜索、状态查询等公开只读工具时可自动执行；敏感读取、数据修改、外部发送以及删除/付款等高风险操作仍须确认。未知工具默认按敏感读取处理，不由模型自行放宽权限。
 - Resources 与 Prompts 的具体内容在发送给 GPT 前同样需要确认。
 - 退出账号会清除本次会话的 MCP 批准记录。
+
+### 发现来源
+
+客户端“发现 MCP”窗口按可信层级展示以下来源：
+
+1. [MCP Registry](https://registry.modelcontextprotocol.io/)：官方 Registry，优先用于查询已发布的服务器与版本元数据。
+2. [MCP Reference Servers](https://github.com/modelcontextprotocol/servers)：官方参考实现，适合学习协议和常见能力，但仓库明确说明它不是完整 Registry，也不应直接等同于生产级安全审计。
+3. [MCPMarket](https://mcpmarket.com/zh/search)：第三方社区目录。
+4. [MCP Server Hub](https://mcpserverhub.com/servers)：第三方社区目录。
+
+第三方目录中的“已收录”不代表 MCP 官方或泺栋 Chat 审核。用户仍需核对发布者、源码仓库、启动命令、环境变量、网络地址和数据权限；添加、启用及风险操作都不会因市场收录而跳过确认。
 
 ## Skills
 

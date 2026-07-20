@@ -26,6 +26,7 @@
                          Margin="0,4,20,0" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal">
+              <Button Content="发现 MCP" Height="40" Padding="15,0" Margin="0,0,10,0" Style="{StaticResource SecondaryButton}" Click="DiscoverMcpButton_OnClick"/>
               <Button Content="＋ 添加服务器" Height="40" Padding="15,0" Click="AddMcpButton_OnClick"/>
               <Button Content="重新连接" Height="40" Padding="15,0" Margin="10,0,0,0" Style="{StaticResource SecondaryButton}" Click="ReconnectMcpButton_OnClick"/>
             </StackPanel>
