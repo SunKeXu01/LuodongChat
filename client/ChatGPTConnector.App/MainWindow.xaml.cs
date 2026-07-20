@@ -80,7 +80,10 @@ public partial class MainWindow : Window
     private readonly HashSet<string> _alwaysAllowedWorkspaceCommands = new(StringComparer.Ordinal);
     private readonly HashSet<string> _sessionApprovedMcpTools = new(StringComparer.Ordinal);
     private bool _webSearchEnabled = true;
+    private McpRuntimeSettings _mcpDefaultSettings;
     private McpToolMode _mcpToolMode;
+    private HashSet<string> _selectedMcpToolNames = new(StringComparer.Ordinal);
+    private McpRuntimeSettings? _nextTurnMcpSettings;
     private readonly AttachmentComposerController _attachments;
     private CancellationTokenSource? _questionHighlightCancellation;
     private string _savedNickname = "";
@@ -111,7 +114,9 @@ public partial class MainWindow : Window
     internal MainWindow(bool skipStartupChecks, AppTheme initialTheme = AppTheme.Light)
     {
         _theme = initialTheme;
-        _mcpToolMode = _mcpRuntimeSettingsStore.Load().ToolMode;
+        _mcpDefaultSettings = _mcpRuntimeSettingsStore.Load();
+        _mcpToolMode = _mcpDefaultSettings.ToolMode;
+        _selectedMcpToolNames = new(_mcpDefaultSettings.SelectedToolNames ?? [], StringComparer.Ordinal);
         _mcpClients = new McpClientManager(_mcpConfigurationStore);
         var accessSettings = _workspaceAccessStore.Load();
         _workspaceAccessMode = accessSettings.Mode;
@@ -762,6 +767,8 @@ public partial class MainWindow : Window
         if (resetDraft) _conversationDrafts.Remove(DraftKey(conversation));
         var run = conversation is null ? null : GetConversationRun(conversation.Id);
         _currentConversation = run?.Conversation ?? conversation;
+        _nextTurnMcpSettings = null;
+        ApplyMcpSettingsForConversation(_currentConversation);
         ApplyProjectSelection(_currentConversation?.ProjectPath);
         _chatMessages.Clear();
         if (_currentConversation is not null)
@@ -1504,6 +1511,9 @@ public partial class MainWindow : Window
         var session = _session;
         var projectPath = _selectedProjectPath;
         var webSearchEnabled = _webSearchEnabled;
+        var mcpSettings = _nextTurnMcpSettings ?? new McpRuntimeSettings(_mcpToolMode, _selectedMcpToolNames.ToArray());
+        _nextTurnMcpSettings = null;
+        UpdateMcpToolModeUi();
         ConversationRun? run = null;
         var attachmentsDetached = false;
         ChatInput.Clear();
@@ -1523,7 +1533,8 @@ public partial class MainWindow : Window
             var assistant = new SyncedChatMessage(Guid.NewGuid().ToString(), conversationId, "assistant", "", DateTimeOffset.UtcNow);
             var titleSource = text.Length > 0 ? text : attachmentSnapshot[0].Name;
             var conversationWithUser = baseConversation is null
-                ? new LocalConversation(conversationId, titleSource[..Math.Min(titleSource.Length, 40)], now, now, [user], projectPath)
+                ? new LocalConversation(conversationId, titleSource[..Math.Min(titleSource.Length, 40)], now, now, [user], projectPath,
+                    mcpSettings.ToolMode, mcpSettings.SelectedToolNames)
                 : baseConversation with { UpdatedAt = now, Messages = baseConversation.Messages.Append(user).ToArray() };
             var workingConversation = conversationWithUser with { Messages = conversationWithUser.Messages.Append(assistant).ToArray() };
             var display = CreateDisplayMessage(assistant);
@@ -1600,13 +1611,16 @@ public partial class MainWindow : Window
                 var hasReferenceImages = attachmentSnapshot.Any(item => item.IsImage);
                 if (wantsImage) SetRunUiText(conversationId, notice: hasReferenceImages ? "正在参考上传图片生成，请稍候…" : "正在生成图片，请稍候…");
                 await using var workspaceTools = projectPath is null ? null : new WorkspaceFileTools(projectPath);
-                var mcpTools = _mcpToolMode == McpToolMode.Auto
-                    ? await _mcpClients.GetToolDefinitionsAsync(cancellationToken)
-                    : [];
+                var allowedMcpTools = mcpSettings.ToolMode == McpToolMode.Specified
+                    ? (mcpSettings.SelectedToolNames ?? []).ToHashSet(StringComparer.Ordinal)
+                    : null;
+                var mcpTools = mcpSettings.ToolMode == McpToolMode.Off
+                    ? []
+                    : await _mcpClients.GetToolDefinitionsAsync(allowedMcpTools, cancellationToken);
                 IReadOnlyList<object> availableTools =
                 [
                     .. SkillService.ToolDefinitions,
-                    .. (_mcpToolMode == McpToolMode.Auto ? McpClientManager.ProtocolToolDefinitions : []),
+                    .. (mcpSettings.ToolMode == McpToolMode.Smart ? McpClientManager.ProtocolToolDefinitions : []),
                     .. mcpTools,
                     .. (workspaceTools is null ? Array.Empty<object>() : WorkspaceFileTools.ToolDefinitions),
                 ];
@@ -1616,7 +1630,7 @@ public partial class MainWindow : Window
                     attachmentIds: attachmentSnapshot.Select(item => item.ServerFileId!).ToArray(),
                     hasReferenceImages: hasReferenceImages,
                     localTools: availableTools,
-                    executeLocalTool: CreateCombinedToolExecutor(projectPath, workspaceTools),
+                    executeLocalTool: CreateCombinedToolExecutor(projectPath, workspaceTools, mcpSettings.ToolMode, allowedMcpTools),
                     toolProgress: new Progress<ChatToolExecutionEvent>(toolEvent => run.AssistantDisplay.UpdateToolActivity(toolEvent)));
                 var storedImages = new List<GeneratedChatImage>();
                 foreach (var image in result.Images)
@@ -1707,7 +1721,8 @@ public partial class MainWindow : Window
     }
 
     private Func<LocalToolCall, CancellationToken, Task<string>> CreateCombinedToolExecutor(
-        string? projectPath, WorkspaceFileTools? workspaceTools)
+        string? projectPath, WorkspaceFileTools? workspaceTools, McpToolMode mcpMode,
+        IReadOnlySet<string>? allowedMcpTools)
     {
         var workspaceExecutor = projectPath is not null && workspaceTools is not null
             ? CreateWorkspaceToolExecutor(projectPath, workspaceTools)
@@ -1715,8 +1730,14 @@ public partial class MainWindow : Window
         return async (call, cancellationToken) =>
         {
             if (_skills.IsSkillTool(call.Name)) return await _skills.ExecuteToolAsync(call, cancellationToken);
-            if (_mcpClients.IsProtocolTool(call.Name)) return await ExecuteMcpProtocolToolAsync(call, cancellationToken);
-            if (_mcpClients.IsMcpTool(call.Name)) return await ExecuteMcpToolAsync(call, cancellationToken);
+            if (_mcpClients.IsProtocolTool(call.Name))
+                return mcpMode == McpToolMode.Smart
+                    ? await ExecuteMcpProtocolToolAsync(call, cancellationToken)
+                    : System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = "当前工具模式不允许使用 MCP 协议工具。" });
+            if (_mcpClients.IsMcpTool(call.Name))
+                return mcpMode != McpToolMode.Off && (allowedMcpTools is null || allowedMcpTools.Contains(call.Name))
+                    ? await ExecuteMcpToolAsync(call, cancellationToken)
+                    : System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = "该 MCP 工具未被本轮授权。" });
             if (workspaceExecutor is not null) return await workspaceExecutor(call, cancellationToken);
             return System.Text.Json.JsonSerializer.Serialize(new { ok = false, error = "当前对话没有可执行该工具的项目空间。" });
         };
@@ -1768,25 +1789,80 @@ public partial class MainWindow : Window
         return result;
     }
 
-    private void McpToolModeButton_OnClick(object sender, RoutedEventArgs e)
+    private async void McpToolModeButton_OnClick(object sender, RoutedEventArgs e)
     {
-        _mcpToolMode = _mcpToolMode == McpToolMode.Auto ? McpToolMode.Off : McpToolMode.Auto;
-        _mcpRuntimeSettingsStore.Save(new(_mcpToolMode));
+        IReadOnlyList<McpToolDescriptor> tools;
+        try { tools = await _mcpClients.GetToolDescriptorsAsync(); }
+        catch (Exception error)
+        {
+            ShowChatToast($"无法读取 MCP 工具：{error.Message}", true);
+            tools = [];
+        }
+        var active = _nextTurnMcpSettings ?? new McpRuntimeSettings(_mcpToolMode, _selectedMcpToolNames.ToArray());
+        var dialog = new ToolModeDialog(active.ToolMode, active.SelectedToolNames ?? [], tools) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        var settings = new McpRuntimeSettings(dialog.SelectedMode, dialog.SelectedToolNames);
+        switch (dialog.SelectedScope)
+        {
+            case ToolModeScope.Round:
+                _nextTurnMcpSettings = settings;
+                break;
+            case ToolModeScope.Default:
+                _mcpDefaultSettings = settings;
+                _mcpRuntimeSettingsStore.Save(settings);
+                break;
+            default:
+                _nextTurnMcpSettings = null;
+                _mcpToolMode = settings.ToolMode;
+                _selectedMcpToolNames = new(settings.SelectedToolNames ?? [], StringComparer.Ordinal);
+                if (_currentConversation is not null)
+                {
+                    _currentConversation = _currentConversation with
+                    {
+                        ToolMode = settings.ToolMode,
+                        SelectedMcpToolNames = settings.SelectedToolNames,
+                    };
+                    await SaveCurrentConversationAsync(CancellationToken.None);
+                }
+                break;
+        }
         UpdateMcpToolModeUi();
-        ShowChatToast(_mcpToolMode == McpToolMode.Auto
-            ? "工具已设为自动：AI 会选择已启用的 MCP，风险操作仍需确认。"
-            : "MCP 工具已关闭。Skills 与项目空间工具不受影响。");
+        ShowChatToast(dialog.SelectedScope switch
+        {
+            ToolModeScope.Round => "工具模式已应用到下一轮消息。",
+            ToolModeScope.Default => "新对话的默认工具模式已保存。",
+            _ => "当前对话的工具模式已保存。",
+        });
     }
 
     private void UpdateMcpToolModeUi()
     {
         if (McpToolModeLabel is null || McpToolModeButton is null) return;
-        McpToolModeLabel.Text = _mcpToolMode == McpToolMode.Auto ? "工具自动" : "工具关闭";
+        var active = _nextTurnMcpSettings ?? new McpRuntimeSettings(_mcpToolMode, _selectedMcpToolNames.ToArray());
+        McpToolModeLabel.Text = active.ToolMode switch
+        {
+            McpToolMode.Off => "工具 · 关闭",
+            McpToolMode.Specified => $"工具 · 已选 {active.SelectedToolNames?.Count ?? 0} 项",
+            _ => "工具 · 智能",
+        };
         var connected = _mcpClients?.Statuses.Count(status => status.Connected) ?? 0;
         var tools = _mcpClients?.Statuses.Sum(status => status.ToolCount) ?? 0;
-        McpToolModeButton.ToolTip = _mcpToolMode == McpToolMode.Auto
-            ? $"AI 自动选择工具；高风险操作仍需确认。已连接 {connected} 个 MCP，共 {tools} 个工具。点击关闭。"
-            : "当前不向 AI 提供 MCP 工具。点击开启自动模式。";
+        McpToolModeButton.ToolTip = active.ToolMode switch
+        {
+            McpToolMode.Off => "本轮不向 AI 提供 MCP 工具。点击更改模式。",
+            McpToolMode.Specified => $"仅允许使用已选的 {active.SelectedToolNames?.Count ?? 0} 个工具。点击管理。",
+            _ => $"AI 按需选择工具；风险操作仍需确认。已连接 {connected} 个 MCP，共 {tools} 个工具。",
+        };
+    }
+
+    private void ApplyMcpSettingsForConversation(LocalConversation? conversation)
+    {
+        var settings = conversation?.ToolMode is { } mode
+            ? new McpRuntimeSettings(mode, conversation.SelectedMcpToolNames)
+            : _mcpDefaultSettings;
+        _mcpToolMode = settings.ToolMode;
+        _selectedMcpToolNames = new(settings.SelectedToolNames ?? [], StringComparer.Ordinal);
+        UpdateMcpToolModeUi();
     }
 
     private Func<LocalToolCall, CancellationToken, Task<string>> CreateWorkspaceToolExecutor(
@@ -2764,7 +2840,9 @@ public sealed class ChatToolActivity(string callId, string name) : System.Compon
         Failed = value.Status == ChatToolExecutionStatus.Failed;
         StatusText = value.Status switch
         {
-            ChatToolExecutionStatus.Running => "正在调用…",
+            ChatToolExecutionStatus.Running => string.IsNullOrWhiteSpace(value.Detail)
+                ? "AI 已按当前问题选择此工具，正在调用…"
+                : $"AI 已按当前问题选择此工具 · {value.Detail}",
             ChatToolExecutionStatus.Completed => $"调用成功 · {Math.Max(0.1, value.Elapsed.TotalSeconds):0.0} 秒",
             _ => $"调用失败 · {value.Detail}",
         };

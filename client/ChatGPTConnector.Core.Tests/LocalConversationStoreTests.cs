@@ -13,13 +13,16 @@ public sealed class LocalConversationStoreTests : IDisposable
         var store = new LocalConversationStore(_root);
         var message = new SyncedChatMessage(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), "user", "你好", DateTimeOffset.UtcNow);
         var projectPath = Path.Combine(_root, "project");
-        var conversation = new LocalConversation(message.ConversationId, "第一段对话", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, [message], projectPath);
+        var conversation = new LocalConversation(message.ConversationId, "第一段对话", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            [message], projectPath, McpToolMode.Specified, ["mcp__files__read_file"]);
         await store.SaveAsync("account-a", conversation);
 
         var loaded = await store.LoadAsync("account-a");
         Assert.Single(loaded);
         Assert.Equal("你好", loaded[0].Messages[0].Content);
         Assert.Equal(projectPath, loaded[0].ProjectPath);
+        Assert.Equal(McpToolMode.Specified, loaded[0].ToolMode);
+        Assert.Equal(["mcp__files__read_file"], loaded[0].SelectedMcpToolNames);
         Assert.Empty(await store.LoadAsync("account-b"));
 
         await store.DeleteAsync("account-a", conversation.Id);

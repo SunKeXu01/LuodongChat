@@ -10,7 +10,9 @@ public sealed record LocalConversation(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     IReadOnlyList<SyncedChatMessage> Messages,
-    string? ProjectPath = null);
+    string? ProjectPath = null,
+    McpToolMode? ToolMode = null,
+    IReadOnlyList<string>? SelectedMcpToolNames = null);
 
 public sealed class LocalConversationStore(string root)
 {

@@ -8,10 +8,12 @@ using ModelContextProtocol.Protocol;
 namespace ChatGPTConnector.Core;
 
 public enum McpTransportKind { Stdio, Http }
-public enum McpToolMode { Off, Auto }
+public enum McpToolMode { Off, Smart, Specified }
 public enum McpToolRisk { PublicRead, SensitiveRead, Write, ExternalAction, Dangerous }
 
-public sealed record McpRuntimeSettings(McpToolMode ToolMode = McpToolMode.Auto);
+public sealed record McpRuntimeSettings(
+    McpToolMode ToolMode = McpToolMode.Smart,
+    IReadOnlyList<string>? SelectedToolNames = null);
 
 public sealed class McpRuntimeSettingsStore(string path)
 {
@@ -271,12 +273,19 @@ public sealed class McpClientManager : IAsyncDisposable
     ];
 
     public async Task<IReadOnlyList<object>> GetToolDefinitionsAsync(CancellationToken cancellationToken = default)
+        => await GetToolDefinitionsAsync(null, cancellationToken).ConfigureAwait(false);
+
+    public async Task<IReadOnlyList<object>> GetToolDefinitionsAsync(
+        IReadOnlySet<string>? allowedToolNames,
+        CancellationToken cancellationToken = default)
     {
         await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            lock (_tools) return _tools.Values.Select(tool => (object)new
+            lock (_tools) return _tools.Values
+                .Where(tool => allowedToolNames is null || allowedToolNames.Contains(tool.ModelName))
+                .Select(tool => (object)new
             {
                 type = "function",
                 name = tool.ModelName,
@@ -286,6 +295,16 @@ public sealed class McpClientManager : IAsyncDisposable
             }).ToArray();
         }
         finally { _gate.Release(); }
+    }
+
+    public async Task<IReadOnlyList<McpToolDescriptor>> GetToolDescriptorsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+        lock (_tools) return _tools.Values
+            .OrderBy(tool => tool.ServerName, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(tool => tool.OriginalName, StringComparer.CurrentCultureIgnoreCase)
+            .ToArray();
     }
 
     public bool IsMcpTool(string modelName)

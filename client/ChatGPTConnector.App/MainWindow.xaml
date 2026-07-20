@@ -183,7 +183,7 @@
                           Click="SidebarVersionStatusButton_OnClick">
                     <Grid>
                       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                      <TextBlock x:Name="SidebarVersionStatusText" Text="v2.0.8" FontSize="10.5" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
+                      <TextBlock x:Name="SidebarVersionStatusText" Text="v2.0.9" FontSize="10.5" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
                       <Ellipse x:Name="SidebarVersionUpdateDot" Grid.Column="1" Width="7" Height="7" Margin="5,0,0,0" Fill="#F79009" Visibility="Collapsed" VerticalAlignment="Center"/>
                     </Grid>
                     <Button.ContextMenu><ContextMenu>
@@ -705,7 +705,7 @@
                                   Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"
                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Fill="Transparent"/>
                           </Viewbox>
-                          <TextBlock x:Name="McpToolModeLabel" Text="工具自动" VerticalAlignment="Center"/>
+                          <TextBlock x:Name="McpToolModeLabel" Text="工具 · 智能" VerticalAlignment="Center"/>
                         </StackPanel>
                       </Button>
                     </StackPanel>

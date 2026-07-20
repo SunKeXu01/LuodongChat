@@ -1,0 +1,67 @@
+<Window x:Class="ChatGPTConnector.App.ToolModeDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="工具模式" Width="560" Height="650" MinWidth="500" MinHeight="560"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
+        Background="{DynamicResource PageBackgroundBrush}">
+  <Grid Margin="28">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
+    <TextBlock Text="工具模式" FontSize="27" FontWeight="SemiBold"/>
+    <TextBlock Grid.Row="1" Margin="0,7,0,20" Text="决定 AI 本轮可以使用哪些 MCP 工具；联网搜索仍由独立的“联网”开关控制。"
+               Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
+
+    <StackPanel Grid.Row="2">
+      <RadioButton x:Name="OffMode" GroupName="Mode" Margin="0,0,0,12" Checked="Mode_OnChanged">
+        <StackPanel Margin="7,0,0,0"><TextBlock Text="关闭" FontWeight="SemiBold"/><TextBlock Text="不使用任何 MCP 外部工具，适合纯聊天。" Foreground="{DynamicResource MutedBrush}" FontSize="12"/></StackPanel>
+      </RadioButton>
+      <RadioButton x:Name="SmartMode" GroupName="Mode" Margin="0,0,0,12" Checked="Mode_OnChanged">
+        <StackPanel Margin="7,0,0,0"><TextBlock Text="智能（推荐）" FontWeight="SemiBold"/><TextBlock Text="AI 按需选择已启用工具；敏感、写入和外部操作仍需确认。" Foreground="{DynamicResource MutedBrush}" FontSize="12"/></StackPanel>
+      </RadioButton>
+      <RadioButton x:Name="SpecifiedMode" GroupName="Mode" Checked="Mode_OnChanged">
+        <StackPanel Margin="7,0,0,0"><TextBlock Text="指定" FontWeight="SemiBold"/><TextBlock Text="仅允许 AI 使用下方勾选的具体工具。" Foreground="{DynamicResource MutedBrush}" FontSize="12"/></StackPanel>
+      </RadioButton>
+    </StackPanel>
+
+    <Border Grid.Row="3" x:Name="ToolSelectionPanel" Margin="0,18,0,14" Padding="12" CornerRadius="12"
+            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Background="{DynamicResource SurfaceBrush}">
+      <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <Grid Margin="2,0,2,10"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <TextBlock Text="允许使用的具体工具" FontWeight="SemiBold"/>
+          <TextBlock Grid.Column="1" x:Name="ToolCountText" Foreground="{DynamicResource MutedBrush}" FontSize="12"/>
+        </Grid>
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+          <ItemsControl x:Name="ToolItems">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <CheckBox IsChecked="{Binding Selected}" Margin="2,5" IsEnabled="{Binding IsEnabled}">
+                  <StackPanel Margin="7,0,0,0">
+                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource MutedBrush}" FontSize="11.5" TextTrimming="CharacterEllipsis" ToolTip="{Binding Description}"/>
+                  </StackPanel>
+                </CheckBox>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="4" Margin="0,0,0,16"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/></Grid.ColumnDefinitions>
+      <TextBlock Text="应用范围" VerticalAlignment="Center" FontWeight="SemiBold"/>
+      <ComboBox Grid.Column="1" x:Name="ScopeInput" Width="190" HorizontalAlignment="Right" SelectedIndex="1">
+        <ComboBoxItem Content="仅下一轮" Tag="Round"/>
+        <ComboBoxItem Content="当前对话" Tag="Conversation"/>
+        <ComboBoxItem Content="设为新对话默认" Tag="Default"/>
+      </ComboBox>
+    </Grid>
+
+    <Grid Grid.Row="5"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <TextBlock x:Name="ValidationText" Foreground="{DynamicResource ErrorBrush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+      <Button Grid.Column="1" Content="取消" MinWidth="86" Margin="0,0,10,0" Style="{StaticResource SecondaryButton}" Click="Cancel_OnClick"/>
+      <Button Grid.Column="2" Content="应用" MinWidth="92" Click="Apply_OnClick"/>
+    </Grid>
+  </Grid>
+</Window>

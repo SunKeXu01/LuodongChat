@@ -85,7 +85,8 @@ public sealed class ChatSyncClient(HttpClient http)
                 if (++callCount > limits.MaxCalls)
                     throw new InvalidOperationException($"本轮工具调用已达到安全上限（{limits.MaxCalls} 次）。请缩小任务范围后重试。");
                 var startedAt = Stopwatch.GetTimestamp();
-                toolProgress?.Report(new(call.CallId, call.Name, ChatToolExecutionStatus.Running, TimeSpan.Zero));
+                toolProgress?.Report(new(call.CallId, call.Name, ChatToolExecutionStatus.Running, TimeSpan.Zero,
+                    SummarizeToolArguments(call.Arguments)));
                 string output;
                 try
                 {
@@ -108,6 +109,19 @@ public sealed class ChatSyncClient(HttpClient http)
             }
         }
         throw new InvalidOperationException("本次文件操作步骤过多，已为安全起见停止。请缩小任务范围后重试。");
+    }
+
+    private static string? SummarizeToolArguments(string arguments)
+    {
+        if (string.IsNullOrWhiteSpace(arguments) || arguments == "{}") return null;
+        try
+        {
+            using var document = JsonDocument.Parse(arguments);
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return "已提供调用参数";
+            var names = document.RootElement.EnumerateObject().Select(item => item.Name).Take(4).ToArray();
+            return names.Length == 0 ? null : $"参数：{string.Join("、", names)}";
+        }
+        catch (JsonException) { return "已提供调用参数"; }
     }
 
     private async Task<ChatStreamPassResult> StreamOnceAsync(

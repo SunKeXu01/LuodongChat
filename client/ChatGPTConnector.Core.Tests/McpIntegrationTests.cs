@@ -39,12 +39,14 @@ public sealed class McpIntegrationTests : IDisposable
     }
 
     [Fact]
-    public void RuntimeModeDefaultsToAutoAndRoundTrips()
+    public void RuntimeModeDefaultsToSmartAndRoundTripsSpecifiedTools()
     {
         var store = new McpRuntimeSettingsStore(Path.Combine(_root, "runtime.json"));
-        Assert.Equal(McpToolMode.Auto, store.Load().ToolMode);
-        store.Save(new(McpToolMode.Off));
-        Assert.Equal(McpToolMode.Off, store.Load().ToolMode);
+        Assert.Equal(McpToolMode.Smart, store.Load().ToolMode);
+        store.Save(new(McpToolMode.Specified, ["mcp__files__read_file"]));
+        var loaded = store.Load();
+        Assert.Equal(McpToolMode.Specified, loaded.ToolMode);
+        Assert.Equal(["mcp__files__read_file"], loaded.SelectedToolNames);
     }
 
     [Theory]
