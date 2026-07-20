@@ -1,10 +1,9 @@
-<ui:FluentWindow x:Class="ChatGPTConnector.App.WorkspacePermissionSettingsDialog"
+<Window x:Class="ChatGPTConnector.App.WorkspacePermissionSettingsDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="自定义项目权限" Width="650" Height="560" MinWidth="580" MinHeight="500"
-        WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
-        WindowBackdropType="None" WindowCornerPreference="Round"
+        WindowStartupLocation="CenterOwner" WindowStyle="SingleBorderWindow" ResizeMode="CanResize"
         Background="{DynamicResource PageBackgroundBrush}" Foreground="{DynamicResource TextBrush}"
         ShowInTaskbar="False">
   <Grid Margin="30">
@@ -42,4 +41,4 @@
       <Button Content="保存设置" MinWidth="104" Height="40" Click="SaveButton_OnClick"/>
     </StackPanel>
   </Grid>
-</ui:FluentWindow>
+</Window>

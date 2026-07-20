@@ -21,7 +21,7 @@ using MessageBox = System.Windows.MessageBox;
 
 namespace ChatGPTConnector.App;
 
-public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
+public partial class MainWindow : Window
 {
     private const double SidebarWidth = 280;
     private const double SidebarDrawerThreshold = 1120;
@@ -54,6 +54,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private readonly Dictionary<string, ConversationRun> _conversationRuns = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ConversationActivityStatus> _conversationActivities = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _conversationRunErrors = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _conversationDrafts = new(StringComparer.Ordinal);
+    private const string NewConversationDraftKey = "__new_conversation__";
+    private bool _restoringConversationDraft;
     private bool _sendStartInProgress;
     private readonly CancellationTokenSource _updateCancellation = new();
     private bool _chatScrollPending;
@@ -425,6 +428,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void HelpButton_OnClick(object sender, RoutedEventArgs e)
     {
+        SidebarMenuPopup.IsOpen = false;
         new HelpDialog(CurrentVersion) { Owner = this }.ShowDialog();
     }
 
@@ -438,12 +442,13 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void SkinMenuItem_OnClick(object sender, RoutedEventArgs e)
     {
-        if (sender is not System.Windows.Controls.MenuItem { Tag: string value }
+        if (sender is not FrameworkElement { Tag: string value }
             || !Enum.TryParse<AppTheme>(value, true, out var theme)) return;
         _theme = theme;
         AppThemeManager.Apply(Application.Current, _theme);
         AppThemeManager.Save(_theme);
         UpdateThemeButton();
+        SidebarMenuPopup.IsOpen = false;
     }
 
     private void UpdateThemeButton()
@@ -457,6 +462,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         VioletSkinMenuItem.IsChecked = _theme == AppTheme.Violet;
         RoseSkinMenuItem.IsChecked = _theme == AppTheme.Rose;
         EyeCareSkinMenuItem.IsChecked = _theme == AppTheme.EyeCare;
+        LightThemeCheck.Visibility = _theme == AppTheme.Light ? Visibility.Visible : Visibility.Collapsed;
+        DarkThemeCheck.Visibility = _theme == AppTheme.Dark ? Visibility.Visible : Visibility.Collapsed;
+        OceanThemeCheck.Visibility = _theme == AppTheme.Ocean ? Visibility.Visible : Visibility.Collapsed;
+        VioletThemeCheck.Visibility = _theme == AppTheme.Violet ? Visibility.Visible : Visibility.Collapsed;
+        RoseThemeCheck.Visibility = _theme == AppTheme.Rose ? Visibility.Visible : Visibility.Collapsed;
+        EyeCareThemeCheck.Visibility = _theme == AppTheme.EyeCare ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private async Task CompleteLoginAsync(AccountSession session)
@@ -484,7 +495,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             try
             {
                 UpdateProfile(await _accounts.UpdateProfileAsync(GatewayUri, _session.AccessToken, nickname));
-                ShowGlobalSnackbar("个人资料已更新");
+                ShowGlobalSnackbar("个人资料已保存");
             }
             catch (Exception error)
             {
@@ -506,8 +517,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         var valid = value.Length is >= 2 and <= 20;
         NicknameValidationText.Text = valid || NicknameInput.Text.Length == 0 ? "" : "昵称应为 2 至 20 个字符";
         NicknameValidationText.Visibility = string.IsNullOrEmpty(NicknameValidationText.Text) ? Visibility.Collapsed : Visibility.Visible;
-        SaveProfileButton.IsEnabled = !_profileSaveBusy && valid && !string.Equals(value, _savedNickname, StringComparison.Ordinal);
-        CancelProfileButton.IsEnabled = !_profileSaveBusy && !string.Equals(value, _savedNickname, StringComparison.Ordinal);
+        var changed = !string.Equals(value, _savedNickname, StringComparison.Ordinal);
+        SaveProfileButton.IsEnabled = !_profileSaveBusy && valid && changed;
+        CancelProfileButton.IsEnabled = !_profileSaveBusy && changed;
+        CancelProfileButton.Visibility = changed ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void CancelProfileButton_OnClick(object sender, RoutedEventArgs e)
@@ -521,20 +534,34 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (_session is null) return;
         var picker = new OpenFileDialog { Filter = "图片|*.jpg;*.jpeg;*.png;*.webp", CheckFileExists = true };
         if (picker.ShowDialog() != true) return;
+        byte[] data;
+        try
+        {
+            var cropDialog = new AvatarCropDialog(picker.FileName) { Owner = this };
+            if (cropDialog.ShowDialog() != true || cropDialog.CroppedPngBytes is not { Length: > 0 } cropped) return;
+            data = cropped;
+        }
+        catch (Exception error) when (error is IOException or NotSupportedException or FileFormatException)
+        {
+            ShowGlobalSnackbar($"无法读取这张图片：{error.Message}", true);
+            return;
+        }
         await RunExclusiveAsync(async () => {
-            var data = await File.ReadAllBytesAsync(picker.FileName);
             if (data.Length > 5 * 1024 * 1024) { MessageBox.Show("头像不能超过 5 MB。"); return; }
-            var extension = Path.GetExtension(picker.FileName).ToLowerInvariant();
-            var mediaType = extension is ".jpg" or ".jpeg" ? "image/jpeg" : extension == ".png" ? "image/png" : "image/webp";
-            try { UpdateProfile(await _accounts.UpdateAvatarAsync(GatewayUri, _session.AccessToken, mediaType, Convert.ToBase64String(data))); }
-            catch (Exception error) { MessageBox.Show(error.Message, "上传失败", MessageBoxButton.OK, MessageBoxImage.Warning); }
+            try
+            {
+                UpdateProfile(await _accounts.UpdateAvatarAsync(GatewayUri, _session.AccessToken, "image/png", Convert.ToBase64String(data)));
+                ShowGlobalSnackbar("头像已更新");
+            }
+            catch (Exception error) { ShowGlobalSnackbar(error.Message, true); }
         });
     }
 
     private async void LogoutButton_OnClick(object sender, RoutedEventArgs e)
     {
+        SidebarMenuPopup.IsOpen = false;
+        if (new LogoutConfirmationDialog { Owner = this }.ShowDialog() != true) return;
         await RunExclusiveAsync(async () => {
-            if (MessageBox.Show("确定要退出登录吗？\n\n退出后需要重新登录才能继续使用。", "退出当前账号", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
             await CancelConversationRunsAsync();
             await _attachments.CompleteSendAsync();
             if (_session is not null) await _accounts.LogoutAsync(GatewayUri, _session.AccessToken).ContinueWith(_ => { });
@@ -567,6 +594,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         if (_session is null) return;
         var loaded = await _conversationStore.LoadAsync(_session.Profile.Id);
+        _conversationDrafts.Clear();
         _conversations.Clear();
         foreach (var conversation in loaded) _conversations.Add(ConversationListItem.From(conversation));
         ConversationsList.SelectedIndex = _conversations.Count > 0 ? 0 : -1;
@@ -583,34 +611,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _conversationView?.Refresh();
 
     private void NewChatButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        var menu = new System.Windows.Controls.ContextMenu();
-        var plain = new System.Windows.Controls.MenuItem { Header = "＋  新建普通对话" };
-        plain.Click += (_, _) => StartNewConversation(null);
-        menu.Items.Add(plain);
-        foreach (var path in _recentProjectStore.Load())
-        {
-            var project = new System.Windows.Controls.MenuItem { Header = $"▱  在 {Path.GetFileName(path)} 中新建", Tag = path, ToolTip = path };
-            project.Click += (_, _) => StartNewConversation(path);
-            menu.Items.Add(project);
-        }
-        menu.Items.Add(new System.Windows.Controls.Separator());
-        var choose = new System.Windows.Controls.MenuItem { Header = "▱  选择项目目录并新建…" };
-        choose.Click += (_, _) =>
-        {
-            if (ChooseProjectFolder() is { } path) StartNewConversation(path);
-        };
-        menu.Items.Add(choose);
-        NewChatButton.ContextMenu = menu;
-        menu.PlacementTarget = NewChatButton;
-        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
-        menu.IsOpen = true;
-    }
+        => StartNewConversation(null);
 
     private void StartNewConversation(string? projectPath)
     {
         ConversationsList.SelectedIndex = -1;
-        ShowConversation(null);
+        ShowConversation(null, resetDraft: true);
         ApplyProjectSelection(projectPath);
         if (_selectedProjectPath is not null) _recentProjectStore.Remember(_selectedProjectPath);
         ChatNotice.Text = _selectedProjectPath is null
@@ -648,6 +654,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             if (_conversations.Count == 0) ShowConversation(null);
             else ConversationsList.SelectedIndex = Math.Min(index, _conversations.Count - 1);
         }
+        _conversationDrafts.Remove(item.Conversation.Id);
         ChatNotice.Text = "本地对话已删除";
     }
 
@@ -717,8 +724,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (dialog.ShowDialog() == true) ShowChatToast("会话名称已保存");
     }
 
-    private void ShowConversation(LocalConversation? conversation)
+    private void ShowConversation(LocalConversation? conversation, bool resetDraft = false)
     {
+        SaveCurrentConversationDraft();
+        if (resetDraft) _conversationDrafts.Remove(DraftKey(conversation));
         var run = conversation is null ? null : GetConversationRun(conversation.Id);
         _currentConversation = run?.Conversation ?? conversation;
         ApplyProjectSelection(_currentConversation?.ProjectPath);
@@ -741,9 +750,35 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             ChatNotice.Text = _conversationRunErrors.GetValueOrDefault(_currentConversation.Id) ?? "";
         }
         else ChatNotice.Text = "";
+        RestoreConversationDraft();
         UpdateComposerState();
         ScrollChatToEnd();
         UpdateEmptyConversationState();
+    }
+
+    private static string DraftKey(LocalConversation? conversation) => conversation?.Id ?? NewConversationDraftKey;
+
+    private void SaveCurrentConversationDraft()
+    {
+        if (_restoringConversationDraft || ChatInput is null) return;
+        var key = DraftKey(_currentConversation);
+        if (string.IsNullOrEmpty(ChatInput.Text)) _conversationDrafts.Remove(key);
+        else _conversationDrafts[key] = ChatInput.Text;
+    }
+
+    private void RestoreConversationDraft()
+    {
+        var draft = _conversationDrafts.GetValueOrDefault(DraftKey(_currentConversation)) ?? "";
+        _restoringConversationDraft = true;
+        try
+        {
+            ChatInput.Text = draft;
+            ChatInput.CaretIndex = draft.Length;
+        }
+        finally
+        {
+            _restoringConversationDraft = false;
+        }
     }
 
     private void UpdateEmptyConversationState()
@@ -1224,6 +1259,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void ChatInput_OnTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
     {
+        SaveCurrentConversationDraft();
         UpdateComposerState();
         if (_selectedProjectPath is null && !RequiresProjectSpace(ChatInput.Text))
             ProjectRequirementNotice.Visibility = Visibility.Collapsed;
@@ -2069,7 +2105,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         catch { /* The final save reports any durable storage failure to the user. */ }
     }
 
-    private void ProfileSidebarButton_OnClick(object sender, RoutedEventArgs e) => AccountPanel.SelectedIndex = 1;
+    private void ProfileSidebarButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        SidebarMenuPopup.IsOpen = false;
+        AccountPanel.SelectedIndex = 1;
+    }
     private void BackToChatButton_OnClick(object sender, RoutedEventArgs e) => AccountPanel.SelectedIndex = 0;
 
     private void HideSidebarButton_OnClick(object sender, RoutedEventArgs e) =>
@@ -2088,6 +2128,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void MainWindow_OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (AccountPanel.Visibility != Visibility.Visible || AccountPanel.SelectedIndex != 0) return;
+        if (e.Key == System.Windows.Input.Key.O
+            && (System.Windows.Input.Keyboard.Modifiers & (System.Windows.Input.ModifierKeys.Control | System.Windows.Input.ModifierKeys.Shift))
+                == (System.Windows.Input.ModifierKeys.Control | System.Windows.Input.ModifierKeys.Shift))
+        {
+            StartNewConversation(null);
+            e.Handled = true;
+            return;
+        }
         if (e.Key == System.Windows.Input.Key.B
             && (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) != 0)
         {
@@ -2131,6 +2179,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         ChatSidebar.HorizontalAlignment = HorizontalAlignment.Left;
         SidebarScrim.Visibility = _sidebarDrawerMode && expanded ? Visibility.Visible : Visibility.Collapsed;
         ShowSidebarButton.Visibility = expanded ? Visibility.Collapsed : Visibility.Visible;
+        NewChatCollapsedButton.Visibility = expanded ? Visibility.Collapsed : Visibility.Visible;
 
         var generation = ++_sidebarAnimationGeneration;
         ChatSidebar.BeginAnimation(WidthProperty, null);
@@ -2163,10 +2212,21 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void SidebarMoreButton_OnClick(object sender, RoutedEventArgs e)
     {
-        if (SidebarMoreButton.ContextMenu is null) return;
-        SidebarMoreButton.ContextMenu.PlacementTarget = SidebarMoreButton;
-        SidebarMoreButton.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Top;
-        SidebarMoreButton.ContextMenu.IsOpen = true;
+        SidebarMenuRoot.Visibility = Visibility.Visible;
+        SidebarThemePanel.Visibility = Visibility.Collapsed;
+        SidebarMenuPopup.IsOpen = !SidebarMenuPopup.IsOpen;
+    }
+
+    private void OpenThemePanel_OnClick(object sender, RoutedEventArgs e)
+    {
+        SidebarMenuRoot.Visibility = Visibility.Collapsed;
+        SidebarThemePanel.Visibility = Visibility.Visible;
+    }
+
+    private void BackToSidebarMenu_OnClick(object sender, RoutedEventArgs e)
+    {
+        SidebarThemePanel.Visibility = Visibility.Collapsed;
+        SidebarMenuRoot.Visibility = Visibility.Visible;
     }
 
     private void ConversationMoreButton_OnClick(object sender, RoutedEventArgs e)
@@ -2594,7 +2654,7 @@ public sealed record ConversationListItem(
 {
     public string Title => Conversation.Title;
     public string GroupName => !string.IsNullOrWhiteSpace(Conversation.ProjectPath)
-        ? $"▱  {Path.GetFileName(Conversation.ProjectPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))}"
+        ? $"▱  {Path.GetFileName(Conversation.ProjectPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))}（项目空间）"
         : DateGroup;
     public string UpdatedText
     {
@@ -2613,7 +2673,8 @@ public sealed record ConversationListItem(
         {
             var date = Conversation.UpdatedAt.ToLocalTime().Date;
             var today = DateTimeOffset.Now.Date;
-            return date == today ? "今天" : date == today.AddDays(-1) ? "昨天" : "更早";
+            if (date == today) return "今天";
+            return date >= today.AddDays(-6) ? "过去 7 天" : "更早";
         }
     }
     public string ActivityText => ActivityStatus switch

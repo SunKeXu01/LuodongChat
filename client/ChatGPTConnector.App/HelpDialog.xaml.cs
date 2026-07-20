@@ -4,7 +4,7 @@ using System.Windows.Controls;
 
 namespace ChatGPTConnector.App;
 
-public partial class HelpDialog : Wpf.Ui.Controls.FluentWindow
+public partial class HelpDialog : Window
 {
     private const string Website = "https://520skx.com";
     private const string Github = "https://github.com/SunKeXu01/LuodongChat";

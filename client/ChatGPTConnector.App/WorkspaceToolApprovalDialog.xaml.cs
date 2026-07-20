@@ -4,7 +4,7 @@ namespace ChatGPTConnector.App;
 
 public enum WorkspaceApprovalChoice { Reject, AllowOnce, AllowSession, AllowAlways }
 
-public partial class WorkspaceToolApprovalDialog : Wpf.Ui.Controls.FluentWindow
+public partial class WorkspaceToolApprovalDialog : Window
 {
     public WorkspaceApprovalChoice Choice { get; private set; } = WorkspaceApprovalChoice.Reject;
 

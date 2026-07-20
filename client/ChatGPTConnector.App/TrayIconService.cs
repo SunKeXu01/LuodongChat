@@ -1,7 +1,5 @@
 using System.Runtime.InteropServices;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
 
 namespace ChatGPTConnector.App;
@@ -16,10 +14,19 @@ internal sealed class TrayIconService : IDisposable
     private const uint MessageFlag = 0x01;
     private const uint IconFlag = 0x02;
     private const uint TipFlag = 0x04;
+    private const uint MenuString = 0x0000;
+    private const uint MenuSeparator = 0x0800;
+    private const uint TrackRightButton = 0x0002;
+    private const uint TrackReturnCommand = 0x0100;
+    private const uint NullMessage = 0x0000;
+    private const uint ShowCommand = 1;
+    private const uint RestartCommand = 2;
+    private const uint ExitCommand = 3;
 
     private readonly HwndSource _source;
-    private readonly ContextMenu _menu;
     private readonly Action _showWindow;
+    private readonly Action _restartApplication;
+    private readonly Action _exitApplication;
     private NotifyIconData _data;
     private IntPtr _iconHandle;
     private bool _disposed;
@@ -27,6 +34,8 @@ internal sealed class TrayIconService : IDisposable
     public TrayIconService(string tooltip, Action showWindow, Action restartApplication, Action exitApplication)
     {
         _showWindow = showWindow;
+        _restartApplication = restartApplication;
+        _exitApplication = exitApplication;
         _source = new HwndSource(new HwndSourceParameters("ChatGPTConnector.TrayIcon")
         {
             Width = 0,
@@ -34,18 +43,6 @@ internal sealed class TrayIconService : IDisposable
             WindowStyle = unchecked((int)0x80000000)
         });
         _source.AddHook(WindowMessageHook);
-
-        _menu = new ContextMenu { Placement = PlacementMode.MousePoint };
-        var showItem = new MenuItem { Header = "显示主界面" };
-        showItem.Click += (_, _) => showWindow();
-        var restartItem = new MenuItem { Header = "重新启动" };
-        restartItem.Click += (_, _) => restartApplication();
-        var exitItem = new MenuItem { Header = "退出" };
-        exitItem.Click += (_, _) => exitApplication();
-        _menu.Items.Add(showItem);
-        _menu.Items.Add(restartItem);
-        _menu.Items.Add(new Separator());
-        _menu.Items.Add(exitItem);
 
         _iconHandle = ExtractApplicationIcon();
         _data = new NotifyIconData
@@ -77,12 +74,53 @@ internal sealed class TrayIconService : IDisposable
                 handled = true;
                 break;
             case RightButtonUp:
-                SetForegroundWindow(_source.Handle);
-                _menu.IsOpen = true;
+                ShowContextMenu();
                 handled = true;
                 break;
         }
         return IntPtr.Zero;
+    }
+
+    private void ShowContextMenu()
+    {
+        var menu = CreatePopupMenu();
+        if (menu == IntPtr.Zero) return;
+
+        try
+        {
+            AppendMenu(menu, MenuString, new UIntPtr(ShowCommand), "显示主界面");
+            AppendMenu(menu, MenuString, new UIntPtr(RestartCommand), "重新启动");
+            AppendMenu(menu, MenuSeparator, UIntPtr.Zero, null);
+            AppendMenu(menu, MenuString, new UIntPtr(ExitCommand), "退出");
+
+            if (!GetCursorPos(out var cursor)) return;
+            SetForegroundWindow(_source.Handle);
+            var command = TrackPopupMenuEx(
+                menu,
+                TrackRightButton | TrackReturnCommand,
+                cursor.X,
+                cursor.Y,
+                _source.Handle,
+                IntPtr.Zero);
+            PostMessage(_source.Handle, NullMessage, IntPtr.Zero, IntPtr.Zero);
+
+            switch (command)
+            {
+                case ShowCommand:
+                    _showWindow();
+                    break;
+                case RestartCommand:
+                    _restartApplication();
+                    break;
+                case ExitCommand:
+                    _exitApplication();
+                    break;
+            }
+        }
+        finally
+        {
+            DestroyMenu(menu);
+        }
     }
 
     private static IntPtr ExtractApplicationIcon()
@@ -147,6 +185,35 @@ internal sealed class TrayIconService : IDisposable
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetForegroundWindow(IntPtr window);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Point
+    {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr CreatePopupMenu();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AppendMenu(IntPtr menu, uint flags, UIntPtr itemId, string? text);
+
+    [DllImport("user32.dll")]
+    private static extern uint TrackPopupMenuEx(IntPtr menu, uint flags, int x, int y, IntPtr window, IntPtr parameters);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DestroyMenu(IntPtr menu);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out Point point);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

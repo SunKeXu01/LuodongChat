@@ -4,7 +4,7 @@ using ChatGPTConnector.Core;
 
 namespace ChatGPTConnector.App;
 
-public partial class WorkspacePermissionSettingsDialog : Wpf.Ui.Controls.FluentWindow
+public partial class WorkspacePermissionSettingsDialog : Window
 {
     public WorkspaceCustomPermissions Settings { get; private set; }
 
