@@ -471,6 +471,48 @@ test("isolates a rejected credential and fails over before streaming", async (t)
   assert.deepEqual(seenCredentials, ["Bearer rejected-key", "Bearer healthy-key"]);
 });
 
+test("fails over once when a relay reports a provider-specific 400", async (t) => {
+  const seenCredentials: string[] = [];
+  const upstream = createServer(async (req, res) => {
+    const authorization = req.headers.authorization ?? "";
+    seenCredentials.push(authorization);
+    for await (const _chunk of req) { /* consume request */ }
+    if (authorization === "Bearer incompatible-relay-key") {
+      res.writeHead(400, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ error: { message: "Upstream request failed" } }));
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ id: "resp_after_400", status: "completed" }));
+  });
+  const upstreamPort = await listen(upstream);
+  t.after(() => upstream.close());
+
+  const config: GatewayConfig = {
+    port: 0,
+    upstreamBaseUrl: `http://127.0.0.1:${upstreamPort}`,
+    upstreamApiKey: "incompatible-relay-key",
+    upstreamApiKeys: ["incompatible-relay-key", "compatible-relay-key"],
+    upstreamResponsesPath: "/responses",
+    gatewayKeyHashes: new Set([hashGatewayKey("gw_400_failover")]),
+    requestsPerMinute: 10,
+    maxConcurrentRequests: 2,
+    upstreamTimeoutMs: 5_000,
+  };
+  const gateway = createGatewayServer(config);
+  const gatewayPort = await listen(gateway);
+  t.after(() => gateway.close());
+
+  const response = await fetch(`http://127.0.0.1:${gatewayPort}/responses`, {
+    method: "POST",
+    headers: { authorization: "Bearer gw_400_failover", "content-type": "application/json" },
+    body: JSON.stringify({ model: "test-model", input: "hello" }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { id: "resp_after_400", status: "completed" });
+  assert.deepEqual(seenCredentials, ["Bearer incompatible-relay-key", "Bearer compatible-relay-key"]);
+});
+
 test("fails over between credentials hosted on different upstream endpoints", async (t) => {
   const rejected = createServer(async (req, res) => {
     assert.equal(req.url, "/responses");

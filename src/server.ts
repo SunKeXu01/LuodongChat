@@ -32,6 +32,12 @@ import {
 
 const MAX_REQUEST_BYTES = 10 * 1024 * 1024;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+// Some OpenAI-compatible relay providers use HTTP 400 for provider-specific
+// routing/model/tool failures even though the same request is accepted by a
+// second configured provider. Retry it once across credentials, but do not
+// degrade the credential: a genuine malformed client request will simply
+// receive the second provider's 400 response.
+const FAILOVER_ONLY_STATUS = new Set([400]);
 function json(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(body));
@@ -725,11 +731,12 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
             body: withUpstreamModel(body, credential.model),
             signal: AbortSignal.timeout(config.upstreamTimeoutMs),
           });
-          const retryable = RETRYABLE_STATUS.has(upstream.status);
+          const transientFailure = RETRYABLE_STATUS.has(upstream.status);
+          const failoverOnly = FAILOVER_ONLY_STATUS.has(upstream.status);
           const credentialRejected = upstream.status === 401 || upstream.status === 403;
           if (credentialRejected) {
             upstreamPool.recordFatalFailure(credential.id);
-          } else if (retryable) {
+          } else if (transientFailure) {
             upstreamPool.recordFailure(credential.id, true);
           } else {
             upstreamPool.recordSuccess(credential.id);
@@ -740,7 +747,7 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
             attempt,
             credentialId: credential.id.slice(0, 12),
             status: upstream.status,
-            retryable: retryable || credentialRejected,
+            retryable: transientFailure || failoverOnly || credentialRejected,
             durationMs: Date.now() - attemptStartedAt,
           }));
           await ledger.recordAttempt({
@@ -750,9 +757,9 @@ export function createGatewayServer(config: GatewayConfig, options: GatewayServe
             startedAt: new Date(attemptStartedAt),
             endedAt: new Date(),
             statusCode: upstream.status,
-            retryable: retryable || credentialRejected,
+            retryable: transientFailure || failoverOnly || credentialRejected,
           });
-          if ((!retryable && !credentialRejected) || attempt === 2) break;
+          if ((!transientFailure && !failoverOnly && !credentialRejected) || attempt === 2) break;
           await upstream.body?.cancel();
         } catch (error) {
           upstreamPool.recordFailure(credential.id, true);

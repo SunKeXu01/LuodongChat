@@ -232,6 +232,12 @@ public sealed class ChatSyncClient(HttpClient http)
         var message = "服务器返回错误 " + (int)response.StatusCode;
         try { message = JsonDocument.Parse(body).RootElement.GetProperty("error").GetProperty("message").GetString() ?? message; }
         catch (Exception) when (body.Length < 1_000_000) { }
+        if (message.Contains("Upstream request failed", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("temporarily unavailable", StringComparison.OrdinalIgnoreCase))
+            message = "上游服务暂时不可用，请稍后重试。";
+        else if (message.Contains("not allowed by this api key", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("not supported by any configured account", StringComparison.OrdinalIgnoreCase))
+            message = "当前上游线路暂不支持所需模型，请稍后重试。";
         throw new ResponseRequestException(response.StatusCode, message);
     }
 
