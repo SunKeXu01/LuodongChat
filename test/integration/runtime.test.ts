@@ -14,7 +14,7 @@ const integrationAvailable = Boolean(databaseUrl && redisUrl);
 test("applies migrations idempotently and verifies database-backed keys", { skip: !integrationAvailable }, async () => {
   assert.ok(databaseUrl);
   const first = await runMigrations(databaseUrl);
-  assert.deepEqual(first, ["001_initial.sql", "002_gateway_key_limits.sql", "003_admin_audit.sql", "004_deployment_history.sql", "005_self_service_enrollment.sql", "006_unlimited_key_policy.sql", "007_user_accounts.sql", "008_cross_device_chat_sync.sql", "009_one_gateway_key_per_account.sql", "010_password_authentication.sql", "011_local_conversations_only.sql"]);
+  assert.deepEqual(first, ["001_initial.sql", "002_gateway_key_limits.sql", "003_admin_audit.sql", "004_deployment_history.sql", "005_self_service_enrollment.sql", "006_unlimited_key_policy.sql", "007_user_accounts.sql", "008_cross_device_chat_sync.sql", "009_one_gateway_key_per_account.sql", "010_password_authentication.sql", "011_local_conversations_only.sql", "012_diagnostic_uploads.sql"]);
   assert.deepEqual(await runMigrations(databaseUrl), []);
 
   const pool = new pg.Pool({ connectionString: databaseUrl });
